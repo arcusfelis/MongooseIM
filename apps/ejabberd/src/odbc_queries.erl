@@ -83,6 +83,7 @@
 	 set_vcard/26,
 	 get_vcard/2,
 	 escape/1,
+	 escape_string/1,
 	 count_records_where/3,
 	 get_roster_version/2,
 	 set_roster_version/2]).
@@ -910,6 +911,10 @@ escape($\r) -> "\\r";
 escape($')  -> "\''";
 escape($")  -> "\\\"";
 escape(C)   -> C.
+
+-spec escape_string(string()) -> iolist().
+escape_string(S) ->
+    [escape(C) || C <- S].
 
 %% Count number of records in a table given a where clause
 count_records_where(LServer, Table, WhereClause) ->

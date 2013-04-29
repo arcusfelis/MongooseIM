@@ -151,9 +151,7 @@ sql_query_t(Query) ->
 escape(S) when is_binary(S) ->
     list_to_binary(escape(binary_to_list(S)));
 escape(S) when is_list(S) ->
-    S1 = lists:foldl(fun(C, Acc) -> [odbc_queries:escape(C) | Acc] end,
-                     [], S),
-    lists:reverse(S1).
+    odbc_queries:escape_string(S).
 
 %% Escape character that will confuse an SQL engine
 %% Percent and underscore only need to be escaped for

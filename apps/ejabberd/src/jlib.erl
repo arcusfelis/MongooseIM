@@ -63,6 +63,10 @@
 
 -include("jlib.hrl").
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 make_result_iq_reply({xmlelement, Name, Attrs, SubTags}) ->
     NewAttrs = make_result_iq_reply_attrs(Attrs),
     {xmlelement, Name, NewAttrs, SubTags}.
@@ -214,49 +218,71 @@ make_jid(User, Server, Resource) ->
 make_jid({User, Server, Resource}) ->
     make_jid(User, Server, Resource).
 
-%% binary_to_jid(J) when erlang:is_binary(J) ->
-%%     binary_to_jid(binary_to_list(J));
+
 binary_to_jid(J) ->
-    binary_to_jid1(J, <<>>).
+    make_jid(binary_to_nsr(J)).
 
-binary_to_jid1(<<$@, _J/binary>>, <<>>) ->
-    error;
-binary_to_jid1(<<$@, J/binary>>, N) ->
-    binary_to_jid2(J, binary_reverse(N), <<>>);
-binary_to_jid1(<<$/, _J/binary>>, <<>>) ->
-    error;
-binary_to_jid1(<<$/, J/binary>>, N) ->
-    binary_to_jid3(J, <<>>, binary_reverse(N), <<>>);
-binary_to_jid1(<<C, J/binary>>, N) ->
-    binary_to_jid1(J, <<C, N/binary>>);
-binary_to_jid1(<<>>, <<>>) ->
-    error;
-binary_to_jid1(<<>>, N) ->
-    make_jid(<<>>, binary_reverse(N), <<>>).
+binary_to_nsr(J) ->
+    case split_binary_jid(J, 0) of
+        {_, _, 0} ->
+            error;
+        {_, <<>>, _} ->
+            error;
+        {$@, J2,  N} ->
+            Name = binary:part(J, 0, N),
+            case split_binary_jid(J2, 0) of
+                {_, _, 0} ->
+                    error;
+                {_, <<>>, _} ->
+                    error;
+                {$/, Resource, N2} ->
+                    {Name, binary:part(J2, 0, N2), Resource};
+                {$@, _,  _} ->
+                    error;
+                nomatch ->
+                    {Name, J2, <<>>}
+            end;
+        {$/, Resource, N} ->
+            Server = binary:part(J, 0, N),
+            {<<>>, Server, Resource};
+        nomatch ->
+            {<<>>, J, <<>>}
+    end.
 
-%% Only one "@" is admitted per JID
-binary_to_jid2(<<$@, _J/binary>>, _N, _S) ->
-    error;
-binary_to_jid2(<<$/, _J/binary>>, _N, <<>>) ->
-    error;
-binary_to_jid2(<<$/, J/binary>>, N, S) ->
-    binary_to_jid3(J, N, binary_reverse(S), <<>>);
-binary_to_jid2(<<C, J/binary>>, N, S) ->
-    binary_to_jid2(J, N, <<C, S/binary>>);
-binary_to_jid2(<<>>, _N, <<>>) ->
-    error;
-binary_to_jid2(<<>>, N, S) ->
-    make_jid(N, binary_reverse(S), <<>>).
+split_binary_jid(<<$@, J/binary>>, N) ->
+    {$@, J, N};
+split_binary_jid(<<$/, J/binary>>, N) ->
+    {$/, J, N};
+split_binary_jid(<<_, J/binary>>, N) ->
+    split_binary_jid(J, N+1);
+split_binary_jid(<<>>, _) ->
+    nomatch.
 
-binary_to_jid3(<<C, J/binary>>, N, S, R) ->
-    binary_to_jid3(J, N, S, <<C, R/binary>>);
-binary_to_jid3(<<>>, N, S, R) ->
-    make_jid(N, S, binary_reverse(R)).
 
-binary_reverse(<<>>) ->
-    <<>>;
-binary_reverse(<<H,T/binary>>) ->
-    <<(binary_reverse(T))/binary,H>>.
+
+-ifdef(TEST).
+binary_to_nsr_test_() ->
+    [{"name@server",
+      ?_assertEqual({<<"romeo">>, <<"montague.net">>, <<>>},
+                    binary_to_nsr(<<"romeo@montague.net">>))},
+     {"server@resource",
+      ?_assertEqual({<<>>, <<"montague.net">>, <<"home">>},
+                    binary_to_nsr(<<"montague.net/home">>))},
+     {"name@server/resource",
+      ?_assertEqual({<<"romeo">>, <<"montague.net">>, <<"home">>},
+                    binary_to_nsr(<<"romeo@montague.net/home">>))},
+     {"server",
+      ?_assertEqual({<<>>, <<"montague.net">>, <<>>},
+                    binary_to_nsr(<<"montague.net">>))},
+     {"errors", [
+       ?_assertEqual(error, binary_to_nsr(<<"romeo@">>)),
+       ?_assertEqual(error, binary_to_nsr(<<"romeo@montague@net">>)),
+       ?_assertEqual(error, binary_to_nsr(<<"romeo@montague.net/">>))
+      ]}
+    ].
+-endif.
+
+
 
 jid_to_binary(#jid{user = User, server = Server, resource = Resource}) ->
     jid_to_binary({User, Server, Resource});
