@@ -600,6 +600,10 @@ escape($")  -> "\\\"";
 escape($\\) -> "\\\\";
 escape(C)   -> C.
 
+-spec escape_string(string()) -> iolist().
+escape_string(S) ->
+    [escape(C) || C <- S].
+
 %% Count number of records in a table given a where clause
 count_records_where(LServer, Table, WhereClause) ->
     ejabberd_odbc:sql_query(
