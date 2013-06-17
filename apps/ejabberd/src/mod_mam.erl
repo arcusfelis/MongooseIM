@@ -74,10 +74,11 @@ start(Host, Opts) ->
 
 stop(Host) ->
     ?INFO_MSG("mod_mam stopping", []),
-    gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, mam_ns_string()),
     ejabberd_hooks:delete(user_send_packet, Host, ?MODULE, on_send_packet, 90),
     ejabberd_hooks:delete(user_receive_packet, Host, ?MODULE, on_receive_packet, 90),
     ejabberd_hooks:delete(remove_user, Host, ?MODULE, on_remove_user, 50),
+    gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, mam_ns_string()),
+    mod_disco:unregister_feature(Host, mam_ns_binary()),
     ok.
 
 %% ----------------------------------------------------------------------
