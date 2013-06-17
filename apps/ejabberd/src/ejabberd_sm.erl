@@ -97,13 +97,16 @@ open_session(SID, User, Server, Resource, Info) ->
                        [SID, JID, Info]).
 
 close_session(SID, User, Server, Resource) ->
-    Info = case ?SM_BACKEND:get_sessions(User, Server, Resource) of
+    LUser = jlib:nodeprep(User),
+    LServer = jlib:nameprep(Server),
+    LResource = jlib:resourceprep(Resource),
+    Info = case ?SM_BACKEND:get_sessions(LUser, LServer, LResource) of
                [Session] ->
                    Session#session.info;
                _ ->
                    []
            end,
-    ?SM_BACKEND:delete_session(SID, User, Server, Resource),
+    ?SM_BACKEND:delete_session(SID, LUser, LServer, LResource),
     JID = jlib:make_jid(User, Server, Resource),
     ejabberd_hooks:run(sm_remove_connection_hook, JID#jid.lserver,
                        [SID, JID, Info]).
@@ -116,10 +119,10 @@ check_in_subscription(Acc, User, Server, _JID, _Type, _Reason) ->
             {stop, false}
     end.
 
-bounce_offline_message(From, To, Packet) ->
+bounce_offline_message(#jid{server = Server} = From, To, Packet) ->
     ejabberd_hooks:run(xmpp_bounce_message,
-                       From#jid.lserver,
-                       [Packet]),
+                       Server,
+                       [Server, Packet]),
     Err = jlib:make_error_reply(Packet, ?ERR_SERVICE_UNAVAILABLE),
     ejabberd_router:route(To, From, Err),
     stop.
@@ -127,8 +130,8 @@ bounce_offline_message(From, To, Packet) ->
 disconnect_removed_user(User, Server) ->
     ejabberd_sm:route(jlib:make_jid(<<>>, <<>>, <<>>),
                       jlib:make_jid(User, Server, <<>>),
-                      {xmlel,<<"broadcast">>, [],
-                       [{exit, <<"User removed">>}]}).
+                      #xmlel{name = <<"broadcast">>,
+                             children = [{exit, <<"User removed">>}]}).
 
 get_user_resources(User, Server) ->
     LUser = jlib:nodeprep(User),
@@ -351,7 +354,7 @@ do_route(From, To, Packet) ->
     ?DEBUG("session manager~n\tfrom ~p~n\tto ~p~n\tpacket ~P~n",
            [From, To, Packet, 8]),
     #jid{ luser = LUser, lserver = LServer, lresource = LResource} = To,
-    {xmlel, Name, Attrs, _Els} = Packet,
+    #xmlel{name = Name, attrs = Attrs} = Packet,
     case LResource of
         <<>> ->
             do_route_no_resource(Name, xml:get_attr_s(<<"type">>, Attrs),

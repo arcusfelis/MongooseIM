@@ -39,6 +39,7 @@
 %%%
 
 start(normal, _Args) ->
+    ejabberd_loglevel:init(),
     ejabberd_loglevel:set(4),
     write_pid_file(),
     db_init(),
@@ -53,8 +54,10 @@ start(normal, _Args) ->
     gen_mod:start(),
     ejabberd_config:start(),
     ejabberd_check:config(),
+    maybe_start_alarms(),
     connect_nodes(),
     {ok, _} = Sup = ejabberd_sup:start_link(),
+    ejabberd_system_monitor:add_handler(),
     ejabberd_rdbms:start(),
     ejabberd_auth:start(),
     cyrsasl:start(),
@@ -76,6 +79,7 @@ start(_, _) ->
 prep_stop(State) ->
     stop_modules(),
     broadcast_c2s_shutdown(),
+    mod_websockets:stop(),
     timer:sleep(5000),
     State.
 
@@ -132,6 +136,15 @@ stop_modules() ->
               end
       end, ?MYHOSTS).
 
+maybe_start_alarms() ->
+    case ejabberd_config:get_local_option(alarms) of
+        undefined ->
+            ok;
+        Env when is_list(Env) ->
+            [application:set_env(alarms, K, V) || {K, V} <- Env],
+            alarms:start()
+    end.
+
 connect_nodes() ->
     case ejabberd_config:get_local_option(cluster_nodes) of
         undefined ->
@@ -160,7 +173,6 @@ get_log_path() ->
                     Path
             end
     end.
-
 
 %% If ejabberd is running on some Windows machine, get nameservers and add to Erlang
 maybe_add_nameservers() ->

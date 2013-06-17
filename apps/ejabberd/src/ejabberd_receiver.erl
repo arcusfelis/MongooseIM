@@ -45,6 +45,7 @@
 	 terminate/2, code_change/3]).
 
 -include("ejabberd.hrl").
+-include("jlib.hrl").
 
 -record(state, {socket,
 		sock_mod,
@@ -294,7 +295,7 @@ activate_socket(#state{socket = Socket,
 	    ok
     end.
 
-%% Data processing for connectors directly generating xmlelement in
+%% Data processing for connectors directly generating xmlel in
 %% Erlang data structure.
 %% WARNING: Shaper does not work with Erlang data structure.
 process_data([], State) ->
@@ -317,7 +318,7 @@ process_data(Data,
 	     #state{xml_stream_state = XMLStreamState,
 		    shaper_state = ShaperState,
 		    c2s_pid = C2SPid} = State) ->
-    ?DEBUG("Received XML on stream = ~p", [binary_to_list(Data)]),
+    ?DEBUG("Received XML on stream = \"~s\"", [Data]),
     XMLStreamState1 = xml_stream:parse(XMLStreamState, Data),
     {NewShaperState, Pause} = shaper:update(ShaperState, size(Data)),
     if
@@ -332,10 +333,10 @@ process_data(Data,
 		shaper_state = NewShaperState}.
 
 %% Element coming from XML parser are wrapped inside xmlstreamelement
-%% When we receive directly xmlelement tuple (from a socket module
+%% When we receive directly xmlel tuple (from a socket module
 %% speaking directly Erlang XML), we wrap it inside the same
 %% xmlstreamelement coming from the XML parser.
-element_wrapper({xmlel, _, _, _} = XMLElement) ->
+element_wrapper(#xmlel{} = XMLElement) ->
     {xmlstreamelement, XMLElement};
 element_wrapper(Element) ->
     Element.
