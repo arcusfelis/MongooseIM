@@ -25,7 +25,6 @@
 -type literal_jid() :: binary().
 -type escaped_resource() :: binary().
 -type elem() :: #xmlel{}.
--type jid() :: tuple().
 
 
 %% ----------------------------------------------------------------------
