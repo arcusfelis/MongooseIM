@@ -31,7 +31,7 @@
 %% Other types
 -type filter() :: iolist().
 -type escaped_message_id() :: binary().
--type archive_behaviour_bin() :: binary(). % <<"roster">> | <<"always">> | <<"newer">>.
+-type archive_behaviour_bin() :: binary(). % <<"roster">> | <<"always">> | <<"never">>.
 
 %% ----------------------------------------------------------------------
 %% Constants
@@ -51,11 +51,11 @@ encode_direction(outgoing) -> "O".
 
 encode_behaviour(<<"roster">>) -> "R";
 encode_behaviour(<<"always">>) -> "A";
-encode_behaviour(<<"newer">>)  -> "N".
+encode_behaviour(<<"never">>)  -> "N".
 
 decode_behaviour(<<"R">>) -> <<"roster">>;
 decode_behaviour(<<"A">>) -> <<"always">>;
-decode_behaviour(<<"N">>) -> <<"newer">>.
+decode_behaviour(<<"N">>) -> <<"never">>.
 
 %% ----------------------------------------------------------------------
 %% gen_mod callbacks
@@ -220,7 +220,7 @@ handle_package(Dir,
             IsInteresting =
             case behaviour(LServer, SUser, SRJID, BareSRJID) of
                 always -> true;
-                newer  -> false;
+                never  -> false;
                 roster -> is_jid_in_user_roster(LServer, LUser, BareSRJID)
             end,
             ?INFO_MSG("IsInteresting ~p.", [IsInteresting]),
@@ -266,7 +266,8 @@ wrap_message(Packet, QueryID, MessageUID, DateTime, FromJID) ->
     #xmlel{
         name = <<"message">>,
         attrs = [],
-        children = [result(QueryID, MessageUID), forwarded(Packet, DateTime, FromJID)]}.
+        children = [result(QueryID, MessageUID,
+                           [forwarded(Packet, DateTime, FromJID)])]}.
 
 -spec forwarded(elem(), calendar:datetime(), jid()) -> elem().
 forwarded(Packet, DateTime, FromJID) ->
@@ -281,14 +282,13 @@ delay(DateTime, FromJID) ->
 
 
 %% @doc This element will be added in each forwarded message.
-result(QueryID, MessageUID) ->
-    %% <result xmlns='urn:xmpp:mam:tmp' queryid='f27' id='28482-98726-73623' />
+result(QueryID, MessageUID, Children) when is_list(Children) ->
     #xmlel{
         name = <<"result">>,
         attrs = [{<<"xmlns">>, mam_ns_binary()},
                  {<<"queryid">>, QueryID},
                  {<<"id">>, MessageUID}],
-        children = []}.
+        children = Children}.
 
 
 %% @doc This element will be added into "iq/query".
@@ -330,7 +330,7 @@ result_query(SetEl) ->
 result_prefs(DefaultMode, AlwaysJIDs, NewerJIDs) ->
     AlwaysEl = #xmlel{name = <<"always">>,
                       children = encode_jids(AlwaysJIDs)},
-    NewerEl  = #xmlel{name = <<"newer">>,
+    NewerEl  = #xmlel{name = <<"never">>,
                       children = encode_jids(NewerJIDs)},
     #xmlel{
        name = <<"prefs">>,
@@ -351,7 +351,7 @@ encode_jids(JIDs) ->
 parse_prefs(El=#xmlel{name = <<"prefs">>, attrs = Attrs}) ->
     {value, Default} = xml:get_attr(<<"default">>, Attrs),
     AlwaysJIDs = parse_jid_list(El, <<"always">>),
-    NewerJIDs  = parse_jid_list(El, <<"newer">>),
+    NewerJIDs  = parse_jid_list(El, <<"never">>),
     {Default, AlwaysJIDs, NewerJIDs}.
 
 parse_jid_list(El, Name) ->
@@ -378,7 +378,7 @@ behaviour(LServer, SUser, SJID, BareSJID) ->
         {selected, ["behaviour"], [{Behavour}]} ->
             case Behavour of
                 "A" -> always;
-                "N" -> newer;
+                "N" -> never;
                 "R" -> roster
             end;
         _ -> always %% default for everybody

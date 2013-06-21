@@ -252,7 +252,7 @@ CREATE TABLE mam_config(
   -- If empty, than it is a default behaviour.
   remote_jid varchar(250) NOT NULL,
   -- A - always archive;
-  -- N - newer archive;
+  -- N - never archive;
   -- R - roster (only for remote_jid == "")
   behaviour character(1) NOT NULL
 );
