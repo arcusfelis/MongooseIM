@@ -4,8 +4,9 @@
 %% ejabberd handlers
 -export([process_mam_iq/3,
          on_send_packet/3,
-         on_receive_packet/4,
-         on_remove_user/2]).
+         on_remove_user/2,
+         filter_packet/1]).
+
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
 -include_lib("exml/include/exml.hrl").
@@ -61,20 +62,21 @@ decode_behaviour(<<"N">>) -> <<"never">>.
 %% gen_mod callbacks
 
 start(Host, Opts) ->
-    ?INFO_MSG("mod_mam starting", []),
+    ?DEBUG("mod_mam starting", []),
     IQDisc = gen_mod:get_opt(iqdisc, Opts, one_queue), %% Type
     mod_disco:register_feature(Host, mam_ns_binary()),
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host, mam_ns_binary(),
                                   ?MODULE, process_mam_iq, IQDisc),
     ejabberd_hooks:add(user_send_packet, Host, ?MODULE, on_send_packet, 90),
-    ejabberd_hooks:add(user_receive_packet, Host, ?MODULE, on_receive_packet, 90),
+    ejabberd_hooks:add(filter_packet, global, ?MODULE, filter_packet, 90),
     ejabberd_hooks:add(remove_user, Host, ?MODULE, on_remove_user, 50),
     ok.
 
 stop(Host) ->
-    ?INFO_MSG("mod_mam stopping", []),
+    ?DEBUG("mod_mam stopping", []),
     ejabberd_hooks:delete(user_send_packet, Host, ?MODULE, on_send_packet, 90),
     ejabberd_hooks:delete(user_receive_packet, Host, ?MODULE, on_receive_packet, 90),
+    ejabberd_hooks:delete(filter_packet, global, ?MODULE, filter_packet, 90),
     ejabberd_hooks:delete(remove_user, Host, ?MODULE, on_remove_user, 50),
     gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, mam_ns_string()),
     mod_disco:unregister_feature(Host, mam_ns_binary()),
@@ -92,10 +94,10 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
                _To,
                IQ=#iq{type = set,
                       sub_el = PrefsEl = #xmlel{name = <<"prefs">>}}) ->
-    ?INFO_MSG("Handling mam prefs IQ~n    from ~p ~n    packet ~p.",
+    ?DEBUG("Handling mam prefs IQ~n    from ~p ~n    packet ~p.",
               [From, IQ]),
     {DefaultMode, AlwaysJIDs, NewerJIDs} = parse_prefs(PrefsEl),
-    ?INFO_MSG("Parsed data~n\tDefaultMode ~p~n\tAlwaysJIDs ~p~n\tNewerJIDS ~p~n",
+    ?DEBUG("Parsed data~n\tDefaultMode ~p~n\tAlwaysJIDs ~p~n\tNewerJIDS ~p~n",
               [DefaultMode, AlwaysJIDs, NewerJIDs]),
     update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NewerJIDs),
     ResultPrefsEl = result_prefs(DefaultMode, AlwaysJIDs, NewerJIDs),
@@ -105,10 +107,10 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
                _To,
                IQ=#iq{type = get,
                       sub_el = PrefsEl = #xmlel{name = <<"prefs">>}}) ->
-    ?INFO_MSG("Handling mam prefs IQ~n    from ~p ~n    packet ~p.",
+    ?DEBUG("Handling mam prefs IQ~n    from ~p ~n    packet ~p.",
               [From, IQ]),
     {DefaultMode, AlwaysJIDs, NewerJIDs} = get_prefs(LServer, LUser, <<"always">>),
-    ?INFO_MSG("Extracted data~n\tDefaultMode ~p~n\tAlwaysJIDs ~p~n\tNewerJIDS ~p~n",
+    ?DEBUG("Extracted data~n\tDefaultMode ~p~n\tAlwaysJIDs ~p~n\tNewerJIDS ~p~n",
               [DefaultMode, AlwaysJIDs, NewerJIDs]),
     ResultPrefsEl = result_prefs(DefaultMode, AlwaysJIDs, NewerJIDs),
     IQ#iq{type = result, sub_el = [ResultPrefsEl]};
@@ -117,7 +119,7 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
                To,
                IQ=#iq{type = get,
                       sub_el = QueryEl = #xmlel{name = <<"query">>}}) ->
-    ?INFO_MSG("Handling mam IQ~n    from ~p ~n    to ~p~n    packet ~p.",
+    ?DEBUG("Handling mam IQ~n    from ~p ~n    to ~p~n    packet ~p.",
               [From, To, IQ]),
     QueryID = xml:get_tag_attr_s(<<"queryid">>, QueryEl),
     %% Filtering by date.
@@ -146,14 +148,14 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
                    ]), default_result_limit())),
 
 
-    ?INFO_MSG("Parsed data~n\tStart ~p~n\tEnd ~p~n\tQueryId ~p~n\tPageSize ~p~n"
+    ?DEBUG("Parsed data~n\tStart ~p~n\tEnd ~p~n\tQueryId ~p~n\tPageSize ~p~n"
               "\tWithSJID ~p~n\tWithSResource ~p~n\tRSM: ~p~n",
               [Start, End, QueryID, PageSize, WithSJID, WithSResource, RSM]),
     SUser = ejabberd_odbc:escape(LUser),
     Filter = prepare_filter(SUser, Start, End, WithSJID, WithSResource),
     TotalCount = calc_count(LServer, Filter),
     Offset     = calc_offset(LServer, Filter, PageSize, TotalCount, RSM),
-    ?INFO_MSG("RSM info: ~nTotal count: ~p~nOffset: ~p~n",
+    ?DEBUG("RSM info: ~nTotal count: ~p~nOffset: ~p~n",
               [TotalCount, Offset]),
     MessageRows = extract_messages(LServer, Filter, Offset, PageSize),
     {FirstId, LastId} =
@@ -178,65 +180,105 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
 %%       attribute as the target JID. 
 on_send_packet(From, To, Packet) ->
 
-    ?INFO_MSG("Send packet~n    from ~p ~n    to ~p~n    packet ~p.",
+    ?DEBUG("Send packet~n    from ~p ~n    to ~p~n    packet ~p.",
               [From, To, Packet]),
-    handle_package(outgoing, From, To, From, Packet).
+    handle_package(outgoing, false, From, To, From, Packet),
+    ok.
 
 %% @doc Handle an incoming message.
 %%
 %% Note: For incoming messages, the server MUST use the value of the
 %%       'from' attribute as the target JID. 
-on_receive_packet(_JID, From, To, Packet) ->
-    ?INFO_MSG("Receive packet~n    from ~p ~n    to ~p~n    packet ~p.",
+%%
+%% Return drop to drop the packet, or the original input to let it through.
+%% From and To are jid records.
+-spec filter_packet(Value) -> Value when
+    Value :: {From, To, Packet} | drop,
+    From :: jid(),
+    To :: jid(),
+    Packet :: elem().
+filter_packet(drop) ->
+    drop;
+filter_packet({From, To, Packet}) ->
+    ?DEBUG("Receive packet~n    from ~p ~n    to ~p~n    packet ~p.",
               [From, To, Packet]),
-    handle_package(incoming, To, From, From, Packet),
-    ok.
+    Packet2 =
+    case handle_package(incoming, true, To, From, From, Packet) of
+        undefined -> Packet;
+        Id -> 
+            BareTo = jlib:jid_to_binary(jlib:jid_remove_resource(To)),
+            Archived = #xmlel{
+                name = <<"archived">>,
+                attrs=[{<<"by">>, BareTo}, {<<"id">>, Id}]},
+            xml:append_subtags(Packet, [Archived]) 
+    end,
+    {From, To, Packet2}.
 
 on_remove_user(User, Server) ->
     LUser = jlib:nodeprep(User),
     LServer = jlib:nameprep(Server),
     SUser = ejabberd_odbc:escape(LUser),
     remove_user(LServer, SUser),
-    ?INFO_MSG("Remove user ~p from ~p.", [LUser, LServer]),
+    ?DEBUG("Remove user ~p from ~p.", [LUser, LServer]),
     ok.
 
 %% ----------------------------------------------------------------------
 %% Helpers
 
-handle_package(Dir,
+-spec handle_package(Dir, ReturnId, LocalJID, RemoteJID, FromJID, Packet) ->
+    MaybeId when
+    Dir :: incoming | outgoing,
+    ReturnId :: boolean(),
+    LocalJID :: jid(),
+    RemoteJID :: jid(),
+    FromJID :: jid(),
+    Packet :: elem(),
+    MaybeId :: binary() | undefined.
+
+handle_package(Dir, ReturnId,
                _LocalJID=#jid{luser = LUser, lserver = LServer},
                RemoteJID=#jid{lresource = RLResource},
                FromJID=#jid{}, Packet) ->
     IsComplete = is_complete_message(Packet),
-    ?INFO_MSG("IsComplete ~p.", [IsComplete]),
     case IsComplete of
         true ->
-            SUser = ejabberd_odbc:escape(LUser),
-            %% Convert `#jid{}' to prepared `{S,U,R}'
-            LRJID = jlib:jid_tolower(RemoteJID),
-            BareLRJID = jlib:jid_remove_resource(LRJID),
-            SRJID = ejabberd_odbc:escape(jlib:jid_to_binary(LRJID)),
-            BareSRJID = ejabberd_odbc:escape(jlib:jid_to_binary(BareLRJID)),
-            IsInteresting =
-            case behaviour(LServer, SUser, SRJID, BareSRJID) of
-                always -> true;
-                never  -> false;
-                roster -> is_jid_in_user_roster(LServer, LUser, BareSRJID)
-            end,
-            ?INFO_MSG("IsInteresting ~p.", [IsInteresting]),
-            case IsInteresting of
-                true -> 
-                    SRResource = ejabberd_odbc:escape(RLResource),
-                    SData = ejabberd_odbc:escape(term_to_binary(Packet)),
-                    SDir = encode_direction(Dir),
-                    FromLJID = jlib:jid_tolower(FromJID),
-                    FromSJID = ejabberd_odbc:escape(jlib:jid_to_binary(FromLJID)),
-                    archive_message(LServer, SUser, BareSRJID, SRResource, SDir,
-                                    FromSJID, SData);
-                false -> ok
-            end,
-            ok;
-        false -> ok
+        SUser = ejabberd_odbc:escape(LUser),
+        %% Convert `#jid{}' to prepared `{S,U,R}'
+        LRJID = jlib:jid_tolower(RemoteJID),
+        BareLRJID = jlib:jid_remove_resource(LRJID),
+        SRJID = ejabberd_odbc:escape(jlib:jid_to_binary(LRJID)),
+        BareSRJID = ejabberd_odbc:escape(jlib:jid_to_binary(BareLRJID)),
+        IsInteresting =
+        case behaviour(LServer, SUser, SRJID, BareSRJID) of
+            always -> true;
+            never  -> false;
+            roster -> is_jid_in_user_roster(LServer, LUser, BareSRJID)
+        end,
+        case IsInteresting of
+            true -> 
+            SRResource = ejabberd_odbc:escape(RLResource),
+            SData = ejabberd_odbc:escape(term_to_binary(Packet)),
+            SDir = encode_direction(Dir),
+            FromLJID = jlib:jid_tolower(FromJID),
+            FromSJID = ejabberd_odbc:escape(jlib:jid_to_binary(FromLJID)),
+            case ReturnId of
+                true ->
+                %% Archive and return id
+                AtomicF = fun() ->
+                archive_message(LServer, SUser, BareSRJID, SRResource,
+                                SDir, FromSJID, SData),
+                last_insert_id(LServer)
+                end,
+                {atomic, Id} = ejabberd_odbc:sql_transaction(LServer, AtomicF),
+                Id;
+                false ->
+                archive_message(LServer, SUser, BareSRJID, SRResource,
+                                SDir, FromSJID, SData),
+                undefined
+            end;
+            false -> undefined
+        end;
+        false -> undefined
     end.
 
 %% @doc Check, that the stanza is a message with body.
@@ -399,7 +441,7 @@ query_behaviour(LServer, SUser, SJID, BareSJID) ->
          ") "
        "ORDER BY remote_jid DESC "
        "LIMIT 1"]),
-    ?INFO_MSG("query_behaviour query returns ~p", [Result]),
+    ?DEBUG("query_behaviour query returns ~p", [Result]),
     Result.
 
 update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NewerJIDs) ->
@@ -414,7 +456,7 @@ update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NewerJIDs) ->
     %% Run as a transaction
     {atomic, [DelResult, InsResult]} =
         sql_transaction_map(LServer, [DelQuery, InsQuery]),
-    ?INFO_MSG("update_settings query returns ~p and ~p", [DelResult, InsResult]),
+    ?DEBUG("update_settings query returns ~p and ~p", [DelResult, InsResult]),
     ok.
 
 encode_first_config_row(SUser, SBehavour, SJID) ->
@@ -468,8 +510,15 @@ archive_message(LServer, SUser, BareSJID, SResource, Direction, FromSJID, SData)
        "VALUES ('", SUser,"', '", BareSJID, "', '", SResource, "',"
                "'", SData, "', '", Direction, "', '", FromSJID, "', ",
                 integer_to_list(current_unix_timestamp()), ")"]),
-    ?INFO_MSG("archive_message query returns ~p", [Result]),
+    ?DEBUG("archive_message query returns ~p", [Result]),
     ok.
+
+
+last_insert_id(LServer) ->
+    {selected, [_], [{Id}]} =
+    ejabberd_odbc:sql_query(LServer, "SELECT LAST_INSERT_ID()"),
+    Id.
+
 
 remove_user(LServer, SUser) ->
     Result1 =
@@ -484,7 +533,7 @@ remove_user(LServer, SUser) ->
       ["DELETE "
        "FROM mam_message "
        "WHERE local_username='", SUser, "'"]),
-    ?INFO_MSG("remove_user query returns ~p and ~p", [Result1, Result2]),
+    ?DEBUG("remove_user query returns ~p and ~p", [Result1, Result2]),
     ok.
 
 message_row_to_xml({BUID,BSeconds,BFromJID,BPacket}, QueryID) ->
@@ -523,7 +572,7 @@ extract_messages(LServer, Filter, IOffset, IMax) ->
              _ -> [integer_to_list(IOffset), ", "]
          end,
          integer_to_list(IMax)]),
-    ?INFO_MSG("extract_messages query returns ~p", [MessageRows]),
+    ?DEBUG("extract_messages query returns ~p", [MessageRows]),
     MessageRows.
 
     %% #rsm_in{
@@ -679,3 +728,4 @@ get_one_of_path(Elem, [H|T], Def) ->
     end;
 get_one_of_path(_Elem, [], Def) ->
     Def.
+
