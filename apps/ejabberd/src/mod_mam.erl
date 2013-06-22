@@ -141,37 +141,49 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
     end,
     %% This element's name is "limit".
     %% But it must be "max" according XEP-0313.
-    PageSize = min(max_result_limit(),
-                   maybe_integer(get_one_of_path_bin(QueryEl, [
+    Limit = get_one_of_path_bin(QueryEl, [
                     [{elem, <<"set">>}, {elem, <<"max">>}, cdata],
                     [{elem, <<"set">>}, {elem, <<"limit">>}, cdata]
-                   ]), default_result_limit())),
-
-
-    ?DEBUG("Parsed data~n\tStart ~p~n\tEnd ~p~n\tQueryId ~p~n\tPageSize ~p~n"
-              "\tWithSJID ~p~n\tWithSResource ~p~n\tRSM: ~p~n",
-              [Start, End, QueryID, PageSize, WithSJID, WithSResource, RSM]),
+                   ]),
+    PageSize = min(max_result_limit(),
+                   maybe_integer(Limit, default_result_limit())),
+    ?DEBUG("Parsed data~n\tStart ~p~n\tEnd ~p~n\tQueryId ~p~n\t"
+               "Limit ~p~n\tPageSize ~p~n\t"
+               "WithSJID ~p~n\tWithSResource ~p~n\tRSM: ~p~n",
+          [Start, End, QueryID, Limit, PageSize, WithSJID, WithSResource, RSM]),
     SUser = ejabberd_odbc:escape(LUser),
     Filter = prepare_filter(SUser, Start, End, WithSJID, WithSResource),
     TotalCount = calc_count(LServer, Filter),
     Offset     = calc_offset(LServer, Filter, PageSize, TotalCount, RSM),
     ?DEBUG("RSM info: ~nTotal count: ~p~nOffset: ~p~n",
               [TotalCount, Offset]),
-    MessageRows = extract_messages(LServer, Filter, Offset, PageSize),
-    {FirstId, LastId} =
-        case MessageRows of
-            []    -> {undefined, undefined};
-            [_|_] -> {message_row_to_id(hd(MessageRows)),
-                      message_row_to_id(lists:last(MessageRows))}
-        end,
-    [send_message(To, From, message_row_to_xml(M, QueryID))
-     || M <- MessageRows],
-    ResultSetEl = result_set(FirstId, LastId, Offset, TotalCount),
-    ResultQueryEl = result_query(ResultSetEl),
-    %% On receiving the query, the server pushes to the client a series of
-    %% messages from the archive that match the client's given criteria,
-    %% and finally returns the <iq/> result.
-    IQ#iq{type = result, sub_el = [ResultQueryEl]}.
+
+    %% If a query returns a number of stanzas greater than this limit and the
+    %% client did not specify a limit using RSM then the server should return
+    %% a policy-violation error to the client. 
+    case TotalCount - Offset > max_result_limit() andalso Limit =:= <<>> of
+        true ->
+        ErrorEl = ?STANZA_ERRORT(<<"">>, <<"modify">>, <<"policy-violation">>,
+                                 <<"en">>, <<"Too many results">>),          
+        IQ#iq{type = error, sub_el = [ErrorEl]};
+
+        false ->
+        MessageRows = extract_messages(LServer, Filter, Offset, PageSize),
+        {FirstId, LastId} =
+            case MessageRows of
+                []    -> {undefined, undefined};
+                [_|_] -> {message_row_to_id(hd(MessageRows)),
+                          message_row_to_id(lists:last(MessageRows))}
+            end,
+        [send_message(To, From, message_row_to_xml(M, QueryID))
+         || M <- MessageRows],
+        ResultSetEl = result_set(FirstId, LastId, Offset, TotalCount),
+        ResultQueryEl = result_query(ResultSetEl),
+        %% On receiving the query, the server pushes to the client a series of
+        %% messages from the archive that match the client's given criteria,
+        %% and finally returns the <iq/> result.
+        IQ#iq{type = result, sub_el = [ResultQueryEl]}
+    end.
 
 
 %% @doc Handle an outgoing message.
