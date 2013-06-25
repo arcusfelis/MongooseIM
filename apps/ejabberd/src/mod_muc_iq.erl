@@ -33,7 +33,9 @@ start_link() ->
 process_iq(Host, From, RoomJID, IQ = #iq{xmlns = XMLNS}) ->
     case ets:lookup(muc_iqtable, {XMLNS, Host}) of
         [{_, Module, Function}] ->
-            Module:Function(From, RoomJID, IQ) ;
+            Module:Function(From, RoomJID, IQ);
+        [{_, Module, Function, Opts}] ->
+            gen_iq_handler:stop_iq_handler(Module, Function, Opts);
         [] -> error
     end.
 
@@ -88,10 +90,14 @@ handle_call(_Request, _From, State) ->
 handle_cast({register_iq_handler, Host, XMLNS, Module, Function}, State) ->
     ets:insert(muc_iqtable, {{XMLNS, Host}, Module, Function}),
     {noreply, State};
+handle_cast({register_iq_handler, Host, XMLNS, Module, Function, Opts}, State) ->
+    ets:insert(muc_iqtable, {{XMLNS, Host}, Module, Function, Opts}),
+    {noreply, State};
 handle_cast({unregister_iq_handler, Host, XMLNS}, State) ->
     ets:delete(muc_iqtable, {XMLNS, Host}),
     {noreply, State};
-handle_cast(_Msg, State) ->
+handle_cast(Msg, State) ->
+    ?WARNING_MSG("Strange message ~p.", [Msg]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
