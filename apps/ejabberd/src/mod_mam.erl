@@ -63,7 +63,8 @@ decode_behaviour(<<"N">>) -> <<"never">>.
 %% ----------------------------------------------------------------------
 %% gen_mod callbacks
 
-start(Host, Opts) ->
+start(DefaultHost, Opts) ->
+    Host = gen_mod:get_opt_host(DefaultHost, Opts, DefaultHost),
     ?DEBUG("mod_mam starting", []),
     IQDisc = gen_mod:get_opt(iqdisc, Opts, one_queue), %% Type
     mod_disco:register_feature(Host, mam_ns_binary()),
