@@ -6,7 +6,8 @@
          user_send_packet/3,
          remove_user/2,
          filter_packet/1,
-         room_packet/4]).
+         room_packet/4,
+         room_process_mam_iq/3]).
 
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
@@ -66,6 +67,8 @@ start(Host, Opts) ->
     ?DEBUG("mod_mam starting", []),
     IQDisc = gen_mod:get_opt(iqdisc, Opts, one_queue), %% Type
     mod_disco:register_feature(Host, mam_ns_binary()),
+    gen_iq_handler:add_iq_handler(mod_muc_iq, Host, mam_ns_binary(),
+                                  ?MODULE, room_process_mam_iq, IQDisc),
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host, mam_ns_binary(),
                                   ?MODULE, process_mam_iq, IQDisc),
     ejabberd_hooks:add(room_packet, Host, ?MODULE, room_packet, 90),
@@ -81,6 +84,7 @@ stop(Host) ->
     ejabberd_hooks:delete(filter_packet, global, ?MODULE, filter_packet, 90),
     ejabberd_hooks:delete(remove_user, Host, ?MODULE, remove_user, 50),
     gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, mam_ns_string()),
+    gen_iq_handler:remove_iq_handler(mod_muc_iq, Host, mam_ns_string()),
     mod_disco:unregister_feature(Host, mam_ns_binary()),
     ok.
 
@@ -232,14 +236,25 @@ remove_user(User, Server) ->
     LUser = jlib:nodeprep(User),
     LServer = jlib:nameprep(Server),
     SUser = ejabberd_odbc:escape(LUser),
-    remove_user(LServer, SUser),
+    remove_user_from_db(LServer, SUser),
     ?DEBUG("Remove user ~p from ~p.", [LUser, LServer]),
     ok.
 
 
 %% @doc Handle public MUC-message.
 room_packet(FromNick, FromJID, RoomJID, Packet) ->
+    ?DEBUG("Incoming room packet.", []),
     ok.
+
+room_process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
+                    RoomJID,
+                    IQ=#iq{type = get,
+                           sub_el = QueryEl = #xmlel{name = <<"query">>}}) ->
+    ?INFO_MSG("Handle IQ query.", []),
+    ignore;
+room_process_mam_iq(_, _, _) ->
+    ?INFO_MSG("Bad IQ.", []),
+    error.
 
 %% ----------------------------------------------------------------------
 %% Helpers
@@ -539,7 +554,7 @@ last_insert_id(LServer) ->
     Id.
 
 
-remove_user(LServer, SUser) ->
+remove_user_from_db(LServer, SUser) ->
     Result1 =
     ejabberd_odbc:sql_query(
       LServer,
