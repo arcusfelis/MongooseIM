@@ -3,9 +3,10 @@
 -export([start/2, stop/1]).
 %% ejabberd handlers
 -export([process_mam_iq/3,
-         on_send_packet/3,
-         on_remove_user/2,
-         filter_packet/1]).
+         user_send_packet/3,
+         remove_user/2,
+         filter_packet/1,
+         room_packet/4]).
 
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
@@ -67,17 +68,18 @@ start(Host, Opts) ->
     mod_disco:register_feature(Host, mam_ns_binary()),
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host, mam_ns_binary(),
                                   ?MODULE, process_mam_iq, IQDisc),
-    ejabberd_hooks:add(user_send_packet, Host, ?MODULE, on_send_packet, 90),
+    ejabberd_hooks:add(room_packet, Host, ?MODULE, room_packet, 90),
+    ejabberd_hooks:add(user_send_packet, Host, ?MODULE, user_send_packet, 90),
     ejabberd_hooks:add(filter_packet, global, ?MODULE, filter_packet, 90),
-    ejabberd_hooks:add(remove_user, Host, ?MODULE, on_remove_user, 50),
+    ejabberd_hooks:add(remove_user, Host, ?MODULE, remove_user, 50),
     ok.
 
 stop(Host) ->
     ?DEBUG("mod_mam stopping", []),
-    ejabberd_hooks:delete(user_send_packet, Host, ?MODULE, on_send_packet, 90),
-    ejabberd_hooks:delete(user_receive_packet, Host, ?MODULE, on_receive_packet, 90),
+    ejabberd_hooks:add(room_packet, Host, ?MODULE, room_packet, 90),
+    ejabberd_hooks:delete(user_send_packet, Host, ?MODULE, user_send_packet, 90),
     ejabberd_hooks:delete(filter_packet, global, ?MODULE, filter_packet, 90),
-    ejabberd_hooks:delete(remove_user, Host, ?MODULE, on_remove_user, 50),
+    ejabberd_hooks:delete(remove_user, Host, ?MODULE, remove_user, 50),
     gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, mam_ns_string()),
     mod_disco:unregister_feature(Host, mam_ns_binary()),
     ok.
@@ -190,8 +192,7 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
 %%
 %% Note: for outgoing messages, the server MUST use the value of the 'to' 
 %%       attribute as the target JID. 
-on_send_packet(From, To, Packet) ->
-
+user_send_packet(From, To, Packet) ->
     ?DEBUG("Send packet~n    from ~p ~n    to ~p~n    packet ~p.",
               [From, To, Packet]),
     handle_package(outgoing, false, From, To, From, Packet),
@@ -226,12 +227,18 @@ filter_packet({From, To, Packet}) ->
     end,
     {From, To, Packet2}.
 
-on_remove_user(User, Server) ->
+
+remove_user(User, Server) ->
     LUser = jlib:nodeprep(User),
     LServer = jlib:nameprep(Server),
     SUser = ejabberd_odbc:escape(LUser),
     remove_user(LServer, SUser),
     ?DEBUG("Remove user ~p from ~p.", [LUser, LServer]),
+    ok.
+
+
+%% @doc Handle public MUC-message.
+room_packet(FromNick, FromJID, RoomJID, Packet) ->
     ok.
 
 %% ----------------------------------------------------------------------
@@ -577,7 +584,7 @@ extract_messages(LServer, Filter, IOffset, IMax) ->
       ["SELECT id, added_at, from_jid, message "
        "FROM mam_message ",
         Filter,
-       " ORDER BY added_at"
+       " ORDER BY added_at, id"
        " LIMIT ",
          case IOffset of
              0 -> "";
