@@ -247,14 +247,19 @@ room_packet(FromNick, FromJID, RoomJID, Packet) ->
     ?DEBUG("Incoming room packet.", []),
     ok.
 
+%% `process_mam_iq/3' is simular.
+-spec room_process_mam_iq(From, To, IQ) -> IQ | ignore | error when
+    From :: jid(),
+    To :: jid(),
+    IQ :: #iq{}.
 room_process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
                     RoomJID,
                     IQ=#iq{type = get,
                            sub_el = QueryEl = #xmlel{name = <<"query">>}}) ->
-    ?INFO_MSG("Handle IQ query.", []),
+    ?DEBUG("Handle IQ query.", []),
     ignore;
 room_process_mam_iq(_, _, _) ->
-    ?INFO_MSG("Bad IQ.", []),
+    ?DEBUG("Bad IQ.", []),
     error.
 
 %% ----------------------------------------------------------------------
