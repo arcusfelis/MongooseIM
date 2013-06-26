@@ -229,22 +229,42 @@ CREATE TABLE mam_message(
   -- Message UID
   -- A server-assigned UID that MUST be unique within the archive.
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  -- User's name
   local_username varchar(250) NOT NULL,
+  -- FromJID used to form a message without looking into stanza.
+  -- This value will be send to the client "as is".
   from_jid varchar(250) NOT NULL,
   -- The remote JID that the stanza is to (for an outgoing message) or from (for an incoming message).
+  -- This field is for sorting and filtering.
   remote_bare_jid varchar(250) NOT NULL,
   remote_resource varchar(250) NOT NULL,
   -- I - incoming, remote_jid is a value from From.
   -- O - outgoing, remote_jid is a value from To.
+  -- Has no meaning for MUC-rooms.
   direction character(1) NOT NULL,
   -- A timestamp of when the message was sent (for an outgoing message) or received (for an incoming message).
   -- added_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   added_at int NOT NULL,
-  -- Term-encoded message
+  -- Term-encoded message packet
   message blob NOT NULL
 );
 CREATE INDEX i_mam_message_username_added_at USING BTREE ON mam_message(local_username, added_at);
 CREATE INDEX i_mam_message_username_jid_added_at USING BTREE ON mam_message(local_username, remote_bare_jid, added_at);
+
+CREATE TABLE mam_muc_message(
+  -- Message UID
+  -- A server-assigned UID that MUST be unique within the archive.
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  room_name varchar(250) NOT NULL,
+  -- A nick of the message's originator
+  nick_name varchar(250) NOT NULL,
+  -- A timestamp of when the message was sent
+  added_at int NOT NULL,
+  -- Term-encoded message packet
+  message blob NOT NULL
+);
+CREATE INDEX i_mam_muc_message_room_name_added_at USING BTREE ON mam_muc_message(room_name, added_at);
+
 
 
 CREATE TABLE mam_config(

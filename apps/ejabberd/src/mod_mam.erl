@@ -5,9 +5,7 @@
 -export([process_mam_iq/3,
          user_send_packet/3,
          remove_user/2,
-         filter_packet/1,
-         room_packet/4,
-         room_process_mam_iq/3]).
+         filter_packet/1]).
 
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
@@ -68,11 +66,8 @@ start(DefaultHost, Opts) ->
     ?DEBUG("mod_mam starting", []),
     IQDisc = gen_mod:get_opt(iqdisc, Opts, one_queue), %% Type
     mod_disco:register_feature(Host, mam_ns_binary()),
-    gen_iq_handler:add_iq_handler(mod_muc_iq, Host, mam_ns_binary(),
-                                  ?MODULE, room_process_mam_iq, IQDisc),
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host, mam_ns_binary(),
                                   ?MODULE, process_mam_iq, IQDisc),
-    ejabberd_hooks:add(room_packet, Host, ?MODULE, room_packet, 90),
     ejabberd_hooks:add(user_send_packet, Host, ?MODULE, user_send_packet, 90),
     ejabberd_hooks:add(filter_packet, global, ?MODULE, filter_packet, 90),
     ejabberd_hooks:add(remove_user, Host, ?MODULE, remove_user, 50),
@@ -80,12 +75,10 @@ start(DefaultHost, Opts) ->
 
 stop(Host) ->
     ?DEBUG("mod_mam stopping", []),
-    ejabberd_hooks:add(room_packet, Host, ?MODULE, room_packet, 90),
     ejabberd_hooks:delete(user_send_packet, Host, ?MODULE, user_send_packet, 90),
     ejabberd_hooks:delete(filter_packet, global, ?MODULE, filter_packet, 90),
     ejabberd_hooks:delete(remove_user, Host, ?MODULE, remove_user, 50),
     gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, mam_ns_string()),
-    gen_iq_handler:remove_iq_handler(mod_muc_iq, Host, mam_ns_string()),
     mod_disco:unregister_feature(Host, mam_ns_binary()),
     ok.
 
@@ -136,7 +129,7 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
     RSM   = jlib:rsm_decode(QueryEl),
     %% Filtering by contact.
     With  = xml:get_path_s(QueryEl, [{elem, <<"with">>}, cdata]),
-    {WithSJID, WithSResource} =
+    {SWithJID, SWithResource} =
     case With of
         <<>> -> {undefined, undefined};
         _    ->
@@ -156,10 +149,10 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
                    maybe_integer(Limit, default_result_limit())),
     ?DEBUG("Parsed data~n\tStart ~p~n\tEnd ~p~n\tQueryId ~p~n\t"
                "Limit ~p~n\tPageSize ~p~n\t"
-               "WithSJID ~p~n\tWithSResource ~p~n\tRSM: ~p~n",
-          [Start, End, QueryID, Limit, PageSize, WithSJID, WithSResource, RSM]),
+               "SWithJID ~p~n\tSWithResource ~p~n\tRSM: ~p~n",
+          [Start, End, QueryID, Limit, PageSize, SWithJID, SWithResource, RSM]),
     SUser = ejabberd_odbc:escape(LUser),
-    Filter = prepare_filter(SUser, Start, End, WithSJID, WithSResource),
+    Filter = prepare_filter(SUser, Start, End, SWithJID, SWithResource),
     TotalCount = calc_count(LServer, Filter),
     Offset     = calc_offset(LServer, Filter, PageSize, TotalCount, RSM),
     ?DEBUG("RSM info: ~nTotal count: ~p~nOffset: ~p~n",
@@ -241,29 +234,8 @@ remove_user(User, Server) ->
     ?DEBUG("Remove user ~p from ~p.", [LUser, LServer]),
     ok.
 
-
-%% @doc Handle public MUC-message.
-room_packet(FromNick, FromJID, RoomJID, Packet) ->
-    ?DEBUG("Incoming room packet.", []),
-    ok.
-
-%% `process_mam_iq/3' is simular.
--spec room_process_mam_iq(From, To, IQ) -> IQ | ignore | error when
-    From :: jid(),
-    To :: jid(),
-    IQ :: #iq{}.
-room_process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
-                    RoomJID,
-                    IQ=#iq{type = get,
-                           sub_el = QueryEl = #xmlel{name = <<"query">>}}) ->
-    ?DEBUG("Handle IQ query.", []),
-    ignore;
-room_process_mam_iq(_, _, _) ->
-    ?DEBUG("Bad IQ.", []),
-    error.
-
 %% ----------------------------------------------------------------------
-%% Helpers
+%% Internal functions
 
 -spec handle_package(Dir, ReturnId, LocalJID, RemoteJID, FromJID, Packet) ->
     MaybeId when
@@ -615,11 +587,11 @@ extract_messages(LServer, Filter, IOffset, IMax) ->
     ?DEBUG("extract_messages query returns ~p", [MessageRows]),
     MessageRows.
 
-    %% #rsm_in{
-    %%    max = non_neg_integer() | undefined,
-    %%    direction = before | aft | undefined,
-    %%    id = binary() | undefined,
-    %%    index = non_neg_integer() | undefined}
+%% #rsm_in{
+%%    max = non_neg_integer() | undefined,
+%%    direction = before | aft | undefined,
+%%    id = binary() | undefined,
+%%    index = non_neg_integer() | undefined}
 -spec calc_offset(LServer, Filter, PageSize, TotalCount, RSM) -> Offset
     when
     LServer  :: server_hostname(),
@@ -694,14 +666,14 @@ calc_count(LServer, Filter) ->
     list_to_integer(binary_to_list(BCount)).
 
 
--spec prepare_filter(SUser, IStart, IEnd, WithSJID, WithSResource) -> filter()
+-spec prepare_filter(SUser, IStart, IEnd, SWithJID, SWithResource) -> filter()
     when
     SUser   :: escaped_username(),
     IStart  :: unix_timestamp() | undefined,
     IEnd    :: unix_timestamp() | undefined,
-    WithSJID :: escaped_jid(),
-    WithSResource :: escaped_resource().
-prepare_filter(SUser, IStart, IEnd, WithSJID, WithSResource) ->
+    SWithJID :: escaped_jid(),
+    SWithResource :: escaped_resource().
+prepare_filter(SUser, IStart, IEnd, SWithJID, SWithResource) ->
    ["WHERE local_username='", SUser, "'",
      case IStart of
         undefined -> "";
@@ -711,15 +683,18 @@ prepare_filter(SUser, IStart, IEnd, WithSJID, WithSResource) ->
         undefined -> "";
         _         -> [" AND added_at <= ", integer_to_list(IEnd)]
      end,
-     case WithSJID of
+     case SWithJID of
         undefined -> "";
-        _         -> [" AND remote_bare_jid = '", WithSJID, "'"]
+        _         -> [" AND remote_bare_jid = '", SWithJID, "'"]
      end,
-     case WithSResource of
+     case SWithResource of
         undefined -> "";
-        _         -> [" AND remote_resource = '", WithSResource, "'"]
+        _         -> [" AND remote_resource = '", SWithResource, "'"]
      end].
 
+
+%% ----------------------------------------------------------------------
+%% Helpers
 
 %% "maybe" means, that the function may return 'undefined'.
 -spec maybe_unix_timestamp(iso8601_datetime_binary()) -> unix_timestamp();
