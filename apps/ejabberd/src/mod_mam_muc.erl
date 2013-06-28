@@ -5,6 +5,11 @@
 -export([room_packet/4,
          room_process_mam_iq/3]).
 
+%% Client API
+-export([delete_archive/2,
+         delete_archive_after_destruction/3,
+         enable_logging/3]).
+
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
 -include_lib("exml/include/exml.hrl").
@@ -59,6 +64,28 @@ stop(Host) ->
     ejabberd_hooks:add(room_packet, Host, ?MODULE, room_packet, 90),
     gen_iq_handler:remove_iq_handler(mod_muc_iq, Host, mam_ns_string()),
     mod_disco:unregister_feature(Host, mam_ns_binary()),
+    ok.
+
+%% ----------------------------------------------------------------------
+%% API
+
+
+%% @doc Delete all messages from the room.
+delete_archive(LServer, RoomName) ->
+    SRoomName = ejabberd_odbc:escape(RoomName),
+    {selected, _ColumnNames, _MessageRows} =
+    ejabberd_odbc:sql_query(LServer,
+    ["DELETE FROM mam_muc_message WHERE room_name = \"", SRoomName, "\""]),
+    true.
+
+%% @doc All messages will be deleted after the room is destroyed.
+%% If `DeleteIt' is true, than messages will be lost.
+%% If `DeleteIt' is false, than messages will be stored.
+delete_archive_after_destruction(LServer, RoomName, DeleteIt) ->
+    ok.
+
+%% @doc Enable logging for the room.
+enable_logging(LServer, RoomName, Enabled) ->
     ok.
 
 %% ----------------------------------------------------------------------
