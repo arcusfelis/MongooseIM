@@ -14,6 +14,8 @@
 -include_lib("ejabberd/include/jlib.hrl").
 -include_lib("exml/include/exml.hrl").
 
+-define(MAYBE_BIN(X), (is_binary(X) orelse (X) =:= undefined)).
+
 %% ----------------------------------------------------------------------
 %% Datetime types
 -type iso8601_datetime_binary() :: binary().
@@ -177,14 +179,14 @@ room_process_mam_iq(_, _, _) ->
 send_message(From, To, Mess) ->
     ejabberd_sm:route(From, To, Mess).
 
-
 %% @doc This element will be added into "iq/query".
 -spec result_set(FirstId, LastId, FirstIndexI, CountI) -> elem() when
     FirstId :: binary() | undefined,
     LastId  :: binary() | undefined,
     FirstIndexI :: non_neg_integer() | undefined,
     CountI      :: non_neg_integer().
-result_set(FirstId, LastId, FirstIndexI, CountI) ->
+result_set(FirstId, LastId, FirstIndexI, CountI)
+        when ?MAYBE_BIN(FirstId), ?MAYBE_BIN(LastId) ->
     %% <result xmlns='urn:xmpp:mam:tmp' queryid='f27' id='28482-98726-73623' />
     FirstEl = [#xmlel{name = <<"first">>,
                       attrs = [{<<"index">>, integer_to_binary(FirstIndexI)}],
