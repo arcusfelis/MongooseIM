@@ -27,7 +27,7 @@
 -type server_hostname() :: binary().
 -type elem() :: #xmlel{}.
 -type escaped_nick_name() :: binary(). 
--type escaped_room_name() :: binary(). 
+-type escaped_room_id() :: binary(). 
 
 
 %% ----------------------------------------------------------------------
@@ -53,6 +53,7 @@ max_result_limit() -> 50.
 
 start(DefaultHost, Opts) ->
     Host = gen_mod:get_opt_host(DefaultHost, Opts, DefaultHost),
+    start_supervisor(Host),
     ?DEBUG("mod_mam_muc starting", []),
     IQDisc = gen_mod:get_opt(iqdisc, Opts, one_queue), %% Type
     mod_disco:register_feature(Host, mam_ns_binary()),
@@ -62,6 +63,7 @@ start(DefaultHost, Opts) ->
     ok.
 
 stop(Host) ->
+    stop_supervisor(Host),
     ?DEBUG("mod_mam stopping", []),
     ejabberd_hooks:add(room_packet, Host, ?MODULE, room_packet, 90),
     gen_iq_handler:remove_iq_handler(mod_muc_iq, Host, mam_ns_string()),
@@ -69,16 +71,48 @@ stop(Host) ->
     ok.
 
 %% ----------------------------------------------------------------------
+%% OTP helpers
+
+sup_name() ->
+    ejabberd_mod_mam_muc_sup.
+
+start_supervisor(Host) ->
+    Proc = gen_mod:get_module_proc(Host, sup_name()),
+    ChildSpec =
+    {Proc,
+     {ejabberd_tmp_sup, start_link,
+      [Proc, mod_mam_muc_cache]},
+     permanent,
+     infinity,
+     supervisor,
+     [ejabberd_tmp_sup]},
+    supervisor:start_child(ejabberd_sup, ChildSpec).
+
+stop_supervisor(Host) ->
+    Proc = gen_mod:get_module_proc(Host, sup_name()),
+    supervisor:terminate_child(ejabberd_sup, Proc),
+    supervisor:delete_child(ejabberd_sup, Proc).
+
+
+%% ----------------------------------------------------------------------
 %% API
 
 
 %% @doc Delete all messages from the room.
 delete_archive(LServer, RoomName) ->
-    SRoomName = ejabberd_odbc:escape(RoomName),
+    RoomId = mod_mam_muc_cache:room_id(LServer, RoomName),
+    SRoomId = integer_to_list(RoomId),
+    %% TODO: use transaction
     {selected, _ColumnNames, _MessageRows} =
     ejabberd_odbc:sql_query(LServer,
-    ["DELETE FROM mam_muc_message WHERE room_name = \"", SRoomName, "\""]),
+    ["DELETE FROM mam_muc_message WHERE room_id = \"", SRoomId, "\""]),
+    {selected, _ColumnNames, _MessageRows} =
+    ejabberd_odbc:sql_query(LServer,
+    ["DELETE FROM mam_muc_room WHERE id = \"", SRoomId, "\""]),
     true.
+
+ensure_exists(LServer, RoomName) ->
+    ok.
 
 %% @doc All messages will be deleted after the room is destroyed.
 %% If `DeleteIt' is true, than messages will be lost.
@@ -97,11 +131,16 @@ enable_logging(LServer, RoomName, Enabled) ->
 room_packet(FromNick, _FromJID,
             _To=#jid{lserver = LServer, luser = RoomName}, Packet) ->
     ?DEBUG("Incoming room packet.", []),
-    SRoomName = ejabberd_odbc:escape(RoomName),
+    case mod_mam_muc_cache:is_logging_enabled(LServer, RoomName) of
+    false -> ok;
+    true ->
+    RoomId = mod_mam_muc_cache:room_id(LServer, RoomName),
+    SRoomId = integer_to_list(RoomId),
     SFromNick = ejabberd_odbc:escape(FromNick),
     SData = ejabberd_odbc:escape(term_to_binary(Packet)),
-    archive_message(LServer, SRoomName, SFromNick, SData),
-    ok.
+    archive_message(LServer, SRoomId, SFromNick, SData),
+    ok
+    end.
 
 %% `process_mam_iq/3' is simular.
 -spec room_process_mam_iq(From, To, IQ) -> IQ | ignore | error when
@@ -137,8 +176,9 @@ room_process_mam_iq(From=#jid{lserver = LServer},
     PageSize = min(max_result_limit(),
                    maybe_integer(Limit, default_result_limit())),
 
-    SRoomName = ejabberd_odbc:escape(RoomName),
-    Filter = prepare_filter(SRoomName, Start, End, SWithNick),
+    RoomId = mod_mam_muc_cache:room_id(LServer, RoomName),
+    SRoomId = integer_to_list(RoomId),
+    Filter = prepare_filter(SRoomId, Start, End, SWithNick),
     TotalCount = calc_count(LServer, Filter),
     Offset     = calc_offset(LServer, Filter, PageSize, TotalCount, RSM),
     ?DEBUG("RSM info: ~nTotal count: ~p~nOffset: ~p~n",
@@ -257,13 +297,13 @@ result(QueryID, MessageUID, Children) when is_list(Children) ->
 %% ----------------------------------------------------------------------
 %% SQL Internal functions
 
-archive_message(LServer, SRoomName, SNick, SData) ->
+archive_message(LServer, SRoomId, SNick, SData) ->
     Result =
     ejabberd_odbc:sql_query(
       LServer,
-      ["INSERT INTO mam_muc_message(room_name, nick_name, "
+      ["INSERT INTO mam_muc_message(room_id, nick_name, "
                                     "message, added_at) "
-       "VALUES ('", SRoomName, "', '", SNick, "', '", SData, "', ",
+       "VALUES ('", SRoomId, "', '", SNick, "', '", SData, "', ",
                 integer_to_list(current_unix_timestamp()), ")"]),
     ?DEBUG("archive_message query returns ~p", [Result]),
     ok.
@@ -346,14 +386,14 @@ calc_count(LServer, Filter) ->
       ["SELECT COUNT(*) FROM mam_muc_message ", Filter]),
     list_to_integer(binary_to_list(BCount)).
 
--spec prepare_filter(SRoomName, IStart, IEnd, SWithNick) -> filter()
+-spec prepare_filter(SRoomId, IStart, IEnd, SWithNick) -> filter()
     when
-    SRoomName :: escaped_room_name(),
+    SRoomId   :: escaped_room_id(),
     IStart    :: unix_timestamp() | undefined,
     IEnd      :: unix_timestamp() | undefined,
     SWithNick :: escaped_nick_name().
-prepare_filter(SRoomName, IStart, IEnd, SWithNick) ->
-   ["WHERE room_name='", SRoomName, "'",
+prepare_filter(SRoomId, IStart, IEnd, SWithNick) ->
+   ["WHERE room_id='", SRoomId, "'",
      case IStart of
         undefined -> "";
         _         -> [" AND added_at >= ", integer_to_list(IStart)]

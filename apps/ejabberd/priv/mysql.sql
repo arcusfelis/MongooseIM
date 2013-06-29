@@ -255,7 +255,7 @@ CREATE TABLE mam_muc_message(
   -- Message UID
   -- A server-assigned UID that MUST be unique within the archive.
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  room_name varchar(250) NOT NULL,
+  room_id INT UNSIGNED NOT NULL,
   -- A nick of the message's originator
   nick_name varchar(250) NOT NULL,
   -- A timestamp of when the message was sent
@@ -263,7 +263,25 @@ CREATE TABLE mam_muc_message(
   -- Term-encoded message packet
   message blob NOT NULL
 );
-CREATE INDEX i_mam_muc_message_room_name_added_at USING BTREE ON mam_muc_message(room_name, added_at);
+CREATE INDEX i_mam_muc_message_room_name_added_at USING BTREE ON mam_muc_message(room_id, added_at);
+
+CREATE TABLE mam_muc_room(
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  room_name varchar(250) NOT NULL,
+  -- 0 -- save
+  -- 1 -- delete
+  -- NULL -- use default settings
+  delete_archive_after_destruction character(1),
+  -- 0 -- disable archiving
+  -- 1 -- enable archiving
+  -- NULL -- use default settings
+  enable_logging character(1),
+  -- 0 -- disable user calls
+  -- 1 -- enable user calls
+  -- NULL -- use default settings
+  enable_access character(1)
+);
+CREATE INDEX i_mam_muc_room_name USING BTREE ON mam_muc_room(room_name);
 
 
 
