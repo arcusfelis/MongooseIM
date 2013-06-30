@@ -279,7 +279,7 @@ CREATE TABLE mam_muc_room(
   -- 0 -- disable user calls
   -- 1 -- enable user calls
   -- NULL -- use default settings
-  enable_access character(1)
+  enable_querying character(1)
 );
 CREATE INDEX i_mam_muc_room_name USING BTREE ON mam_muc_room(room_name);
 

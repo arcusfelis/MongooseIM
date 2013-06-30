@@ -8,7 +8,8 @@
 %% Client API
 -export([delete_archive/2,
          delete_archive_after_destruction/3,
-         enable_logging/3]).
+         enable_logging/3,
+         enable_querying/3]).
 
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
@@ -80,12 +81,11 @@ start_supervisor(Host) ->
     Proc = gen_mod:get_module_proc(Host, sup_name()),
     ChildSpec =
     {Proc,
-     {ejabberd_tmp_sup, start_link,
-      [Proc, mod_mam_muc_cache]},
+     {mod_mam_muc_cache, start_link, []},
      permanent,
-     infinity,
-     supervisor,
-     [ejabberd_tmp_sup]},
+     5000,
+     worker,
+     [mod_mam_muc_cache]},
     supervisor:start_child(ejabberd_sup, ChildSpec).
 
 stop_supervisor(Host) ->
@@ -111,17 +111,23 @@ delete_archive(LServer, RoomName) ->
     ["DELETE FROM mam_muc_room WHERE id = \"", SRoomId, "\""]),
     true.
 
-ensure_exists(LServer, RoomName) ->
-    ok.
-
 %% @doc All messages will be deleted after the room is destroyed.
 %% If `DeleteIt' is true, than messages will be lost.
 %% If `DeleteIt' is false, than messages will be stored.
+%% If `DeleteIt' is undefined, then the default behaviour will be chosen.
 delete_archive_after_destruction(LServer, RoomName, DeleteIt) ->
+    set_bool(LServer, RoomName, "delete_archive_after_destruction", DeleteIt),
     ok.
 
 %% @doc Enable logging for the room.
 enable_logging(LServer, RoomName, Enabled) ->
+    set_bool(LServer, RoomName, "enable_logging", Enabled),
+    mod_mam_muc_cache:update_logging_enabled(LServer, RoomName, Enabled),
+    ok.
+
+enable_querying(LServer, RoomName, Enabled) ->
+    set_bool(LServer, RoomName, "enable_querying", Enabled),
+    mod_mam_muc_cache:update_querying_enabled(LServer, RoomName, Enabled),
     ok.
 
 %% ----------------------------------------------------------------------
@@ -151,6 +157,9 @@ room_process_mam_iq(From=#jid{lserver = LServer},
                     To=#jid{luser = RoomName},
                     IQ=#iq{type = get,
                            sub_el = QueryEl = #xmlel{name = <<"query">>}}) ->
+    case mod_mam_muc_cache:is_querying_enabled(LServer, RoomName) of
+    false -> error;
+    true ->
     ?DEBUG("Handle IQ query.", []),
     QueryID = xml:get_tag_attr_s(<<"queryid">>, QueryEl),
     %% Filtering by date.
@@ -208,6 +217,7 @@ room_process_mam_iq(From=#jid{lserver = LServer},
         %% messages from the archive that match the client's given criteria,
         %% and finally returns the <iq/> result.
         IQ#iq{type = result, sub_el = [ResultQueryEl]}
+    end
     end;
 room_process_mam_iq(_, _, _) ->
     ?DEBUG("Bad IQ.", []),
@@ -433,6 +443,19 @@ extract_messages(LServer, Filter, IOffset, IMax) ->
          integer_to_list(IMax)]),
     ?DEBUG("extract_messages query returns ~p", [MessageRows]),
     MessageRows.
+
+sql_bool(true)      -> "\"1\"";
+sql_bool(false)     -> "\"0\"";
+sql_bool(undefined) -> "null".
+
+set_bool(LServer, RoomName, FieldName, FieldValue) ->
+    RoomId = mod_mam_muc_cache:room_id(LServer, RoomName),
+    SRoomId = integer_to_list(RoomId),
+    ejabberd_odbc:sql_query(
+      LServer,
+      ["UPDATE mam_muc_room "
+       "SET ", FieldName, " = ", sql_bool(FieldValue), " "
+       "WHERE id = \"", SRoomId, "\""]).
 
 %% ----------------------------------------------------------------------
 %% Helpers
