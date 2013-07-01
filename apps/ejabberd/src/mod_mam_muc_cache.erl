@@ -162,13 +162,7 @@ select_bool(LServer, RoomName, Field) ->
     end.
 
 create_room_archive(LServer, RoomName) ->
-    SRoomName = ejabberd_odbc:escape(RoomName),
-    ejabberd_odbc:sql_query(
-      LServer,
-      ["INSERT INTO mam_muc_room(room_name) "
-       "VALUES ('", SRoomName,"')"]),
-    ok.
-
+    mod_mam_muc:create_room_archive(LServer, RoomName).
     
 
 %%====================================================================

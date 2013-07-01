@@ -9,7 +9,8 @@
 -export([delete_archive/2,
          delete_archive_after_destruction/3,
          enable_logging/3,
-         enable_querying/3]).
+         enable_querying/3,
+         create_room_archive/2]).
 
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
@@ -48,6 +49,8 @@ rsm_ns_binary() -> <<"http://jabber.org/protocol/rsm">>.
 default_result_limit() -> 50.
 
 max_result_limit() -> 50.
+
+should_delete_archive_after_destruction_by_default(_LServer) -> true.
 
 %% ----------------------------------------------------------------------
 %% gen_mod callbacks
@@ -97,6 +100,19 @@ stop_supervisor(Host) ->
 %% ----------------------------------------------------------------------
 %% API
 
+%% Call it before `mod_muc:forget_room(Host, Name)'.
+handle_room_destruction(LServer, RoomName) ->
+    ShouldDelete =
+    case query_delete_archive_after_destruction(LServer, RoomName) of
+        undefined ->
+            should_delete_archive_after_destruction_by_default(LServer);
+        Bool ->
+            Bool
+    end,
+    case ShouldDelete of
+        true -> delete_archive(LServer, RoomName);
+        false -> false
+    end.
 
 %% @doc Delete all messages from the room.
 delete_archive(LServer, RoomName) ->
@@ -129,6 +145,15 @@ enable_querying(LServer, RoomName, Enabled) ->
     set_bool(LServer, RoomName, "enable_querying", Enabled),
     mod_mam_muc_cache:update_querying_enabled(LServer, RoomName, Enabled),
     ok.
+
+create_room_archive(LServer, RoomName) ->
+    SRoomName = ejabberd_odbc:escape(RoomName),
+    ejabberd_odbc:sql_query(
+      LServer,
+      ["INSERT INTO mam_muc_room(room_name) "
+       "VALUES ('", SRoomName,"')"]),
+    ok.
+
 
 %% ----------------------------------------------------------------------
 %% hooks and handlers
@@ -456,6 +481,33 @@ set_bool(LServer, RoomName, FieldName, FieldValue) ->
       ["UPDATE mam_muc_room "
        "SET ", FieldName, " = ", sql_bool(FieldValue), " "
        "WHERE id = \"", SRoomId, "\""]).
+
+query_delete_archive_after_destruction(LServer, RoomName) ->
+    select_bool(LServer, RoomName, "delete_archive_after_destruction").
+
+select_bool(LServer, RoomName, Field) ->
+    SRoomName = ejabberd_odbc:escape(RoomName),
+    Result =
+    ejabberd_odbc:sql_query(
+      LServer,
+      ["SELECT " ++ Field ++ " "
+       "FROM mam_muc_room "
+       "WHERE room_name='", SRoomName, "' "
+       "LIMIT 1"]),
+
+    case Result of
+        {selected, [Field], [{Res}]} ->
+            case Res of
+                null    -> undefined;
+                <<"1">> -> true;
+                <<"0">> -> false
+            end;
+        {selected, [Field], []} ->
+            %% The room is not found
+            create_room_archive(LServer, RoomName),
+            undefined
+    end.
+
 
 %% ----------------------------------------------------------------------
 %% Helpers
