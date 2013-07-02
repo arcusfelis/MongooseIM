@@ -231,6 +231,7 @@ filter_packet({From, To, Packet}) ->
     case handle_package(incoming, true, To, From, From, Packet) of
         undefined -> Packet;
         Id -> 
+            ?DEBUG("Archived ~p", [Id]),
             BareTo = jlib:jid_to_binary(jlib:jid_remove_resource(To)),
             replace_archived_elem(BareTo, Id, Packet)
     end,

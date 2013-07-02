@@ -2,7 +2,7 @@
 -behavior(gen_mod).
 -export([start/2, stop/1]).
 %% ejabberd handlers
--export([room_packet/4,
+-export([filter_room_packet/4,
          room_process_mam_iq/3,
          forget_room/2]).
 
@@ -64,14 +64,16 @@ start(DefaultHost, Opts) ->
     mod_disco:register_feature(Host, mam_ns_binary()),
     gen_iq_handler:add_iq_handler(mod_muc_iq, Host, mam_ns_binary(),
                                   ?MODULE, room_process_mam_iq, IQDisc),
-    ejabberd_hooks:add(room_packet, Host, ?MODULE, room_packet, 90),
+    ejabberd_hooks:add(filter_room_packet, Host, ?MODULE,
+                       filter_room_packet, 90),
     ejabberd_hooks:add(forget_room, Host, ?MODULE, forget_room, 90),
     ok.
 
 stop(Host) ->
     stop_supervisor(Host),
     ?DEBUG("mod_mam stopping", []),
-    ejabberd_hooks:add(room_packet, Host, ?MODULE, room_packet, 90),
+    ejabberd_hooks:add(filter_room_packet, Host, ?MODULE,
+                       filter_room_packet, 90),
     gen_iq_handler:remove_iq_handler(mod_muc_iq, Host, mam_ns_string()),
     mod_disco:unregister_feature(Host, mam_ns_binary()),
     ok.
@@ -162,18 +164,24 @@ forget_room(LServer, RoomName) ->
     end.
 
 %% @doc Handle public MUC-message.
-room_packet(FromNick, _FromJID,
-            _To=#jid{lserver = LServer, luser = RoomName}, Packet) ->
+filter_room_packet(Packet, FromNick, _FromJID,
+                   To=#jid{lserver = LServer, luser = RoomName}) ->
     ?DEBUG("Incoming room packet.", []),
     case mod_mam_muc_cache:is_logging_enabled(LServer, RoomName) of
-    false -> ok;
+    false -> Packet;
     true ->
     RoomId = mod_mam_muc_cache:room_id(LServer, RoomName),
     SRoomId = integer_to_list(RoomId),
     SFromNick = ejabberd_odbc:escape(FromNick),
     SData = ejabberd_odbc:escape(term_to_binary(Packet)),
+    AtomicF = fun() ->
     archive_message(LServer, SRoomId, SFromNick, SData),
-    ok
+    last_insert_id(LServer)
+    end,
+    {atomic, Id} = ejabberd_odbc:sql_transaction(LServer, AtomicF),
+    ?DEBUG("Archived ~p", [Id]),
+    BareTo = jlib:jid_to_binary(To),
+    replace_archived_elem(BareTo, Id, Packet)
     end.
 
 %% `process_mam_iq/3' is simular.
@@ -345,6 +353,11 @@ archive_message(LServer, SRoomId, SNick, SData) ->
                 integer_to_list(current_unix_timestamp()), ")"]),
     ?DEBUG("archive_message query returns ~p", [Result]),
     ok.
+
+last_insert_id(LServer) ->
+    {selected, [_], [{Id}]} =
+    ejabberd_odbc:sql_query(LServer, "SELECT LAST_INSERT_ID()"),
+    Id.
 
 %% #rsm_in{
 %%    max = non_neg_integer() | undefined,
@@ -559,3 +572,23 @@ get_one_of_path(Elem, [H|T], Def) ->
     end;
 get_one_of_path(_Elem, [], Def) ->
     Def.
+
+
+replace_archived_elem(By, Id, Packet) ->
+    append_archived_elem(By, Id,
+    delete_archived_elem(By, Packet)).
+
+append_archived_elem(By, Id, Packet) ->
+    Archived = #xmlel{
+        name = <<"archived">>,
+        attrs=[{<<"by">>, By}, {<<"id">>, Id}]},
+    xml:append_subtags(Packet, [Archived]).
+
+delete_archived_elem(By, Packet=#xmlel{children=Cs}) ->
+    Packet#xmlel{children=[C || C <- Cs, not is_archived_elem_for(C, By)]}.
+
+%% @doc Return true, if the first element points on `By'.
+is_archived_elem_for(#xmlel{name = <<"archived">>, attrs=As}, By) ->
+    lists:member({<<"by">>, By}, As);
+is_archived_elem_for(_, _) ->
+    false.
