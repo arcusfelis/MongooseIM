@@ -658,7 +658,8 @@ process_groupchat_message(From, #xmlel{name = <<"message">>,
             case IsAllowed of
             true ->
                 case ejabberd_hooks:run_fold(filter_room_packet,
-                Packet, [FromNick, From, StateData#state.jid]) of
+                       StateData#state.host, Packet,
+                       [FromNick, From, StateData#state.jid]) of
                 drop -> 
                 {next_state, normal_state, NewStateData1};
                 Packet1 ->
