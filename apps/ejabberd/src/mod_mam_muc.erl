@@ -3,7 +3,8 @@
 -export([start/2, stop/1]).
 %% ejabberd handlers
 -export([room_packet/4,
-         room_process_mam_iq/3]).
+         room_process_mam_iq/3,
+         forget_room/2]).
 
 %% Client API
 -export([delete_archive/2,
@@ -64,6 +65,7 @@ start(DefaultHost, Opts) ->
     gen_iq_handler:add_iq_handler(mod_muc_iq, Host, mam_ns_binary(),
                                   ?MODULE, room_process_mam_iq, IQDisc),
     ejabberd_hooks:add(room_packet, Host, ?MODULE, room_packet, 90),
+    ejabberd_hooks:add(forget_room, Host, ?MODULE, forget_room, 90),
     ok.
 
 stop(Host) ->
@@ -100,8 +102,8 @@ stop_supervisor(Host) ->
 %% ----------------------------------------------------------------------
 %% API
 
-%% Call it before `mod_muc:forget_room(Host, Name)'.
-handle_room_destruction(LServer, RoomName) ->
+%% This hook is called from `mod_muc:forget_room(Host, Name)'.
+forget_room(LServer, RoomName) ->
     ShouldDelete =
     case query_delete_archive_after_destruction(LServer, RoomName) of
         undefined ->
