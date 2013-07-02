@@ -635,14 +635,12 @@ process_groupchat_message(From, #xmlel{name = <<"message">>,
                 false ->
                 {StateData, true};
                 Subject ->
-                case can_change_subject(Role,
-                            StateData) of
+                case can_change_subject(Role, StateData) of
                     true ->
                     NSD =
                         StateData#state{
                           subject = Subject,
-                          subject_author =
-                          FromNick},
+                          subject_author = FromNick},
                     case (NSD#state.config)#config.persistent of
                         true ->
                         mod_muc:store_room(
@@ -659,6 +657,11 @@ process_groupchat_message(From, #xmlel{name = <<"message">>,
             end,
             case IsAllowed of
             true ->
+                case ejabberd_hooks:run_fold(filter_room_packet,
+                Packet, [FromNick, From, StateData#state.jid]) of
+                drop -> 
+                {next_state, normal_state, NewStateData1};
+                Packet1 ->
                 lists:foreach(
                   fun({_LJID, Info}) ->
                       ejabberd_router:route(
@@ -666,15 +669,16 @@ process_groupchat_message(From, #xmlel{name = <<"message">>,
                       StateData#state.jid,
                       FromNick),
                     Info#user.jid,
-                    Packet)
+                    Packet1)
                   end,
                   ?DICT:to_list(StateData#state.users)),
                 NewStateData2 =
                 add_message_to_history(FromNick,
                                From,
-                               Packet,
+                               Packet1,
                                NewStateData1),
-                {next_state, normal_state, NewStateData2};
+                {next_state, normal_state, NewStateData2}
+                end;
             _ ->
                 Err =
                 case (StateData#state.config)#config.allow_change_subj of
