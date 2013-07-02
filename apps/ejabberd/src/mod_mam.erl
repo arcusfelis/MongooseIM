@@ -7,6 +7,9 @@
          remove_user/2,
          filter_packet/1]).
 
+%% Client API
+-export([delete_archive/2]).
+
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
 -include_lib("exml/include/exml.hrl").
@@ -57,6 +60,17 @@ encode_behaviour(<<"never">>)  -> "N".
 decode_behaviour(<<"R">>) -> <<"roster">>;
 decode_behaviour(<<"A">>) -> <<"always">>;
 decode_behaviour(<<"N">>) -> <<"never">>.
+
+%% ----------------------------------------------------------------------
+%% API
+
+delete_archive(User, Server) ->
+    LUser = jlib:nodeprep(User),
+    LServer = jlib:nameprep(Server),
+    SUser = ejabberd_odbc:escape(LUser),
+    remove_user_from_db(LServer, SUser),
+    ?DEBUG("Remove user ~p from ~p.", [LUser, LServer]),
+    ok.
 
 %% ----------------------------------------------------------------------
 %% gen_mod callbacks
@@ -218,21 +232,13 @@ filter_packet({From, To, Packet}) ->
         undefined -> Packet;
         Id -> 
             BareTo = jlib:jid_to_binary(jlib:jid_remove_resource(To)),
-            Archived = #xmlel{
-                name = <<"archived">>,
-                attrs=[{<<"by">>, BareTo}, {<<"id">>, Id}]},
-            xml:append_subtags(Packet, [Archived]) 
+            replace_archived_elem(BareTo, Id, Packet)
     end,
     {From, To, Packet2}.
 
 
 remove_user(User, Server) ->
-    LUser = jlib:nodeprep(User),
-    LServer = jlib:nameprep(Server),
-    SUser = ejabberd_odbc:escape(LUser),
-    remove_user_from_db(LServer, SUser),
-    ?DEBUG("Remove user ~p from ~p.", [LUser, LServer]),
-    ok.
+    delete_archive(User, Server).
 
 %% ----------------------------------------------------------------------
 %% Internal functions
@@ -725,9 +731,6 @@ iso8601_datetime_binary_to_timestamp(DateTime) when is_binary(DateTime) ->
     jlib:datetime_string_to_timestamp(binary_to_list(DateTime)).
 
 
--spec maybe_integer(binary()) -> integer() | undefined.
-maybe_integer(Bin) -> maybe_integer(Bin, undefined).
-
 maybe_integer(<<>>, Def) -> Def;
 maybe_integer(Bin, _Def) when is_binary(Bin) ->
     list_to_integer(binary_to_list(Bin)).
@@ -744,3 +747,21 @@ get_one_of_path(Elem, [H|T], Def) ->
 get_one_of_path(_Elem, [], Def) ->
     Def.
 
+replace_archived_elem(By, Id, Packet) ->
+    append_archived_elem(By, Id,
+    delete_archived_elem(By, Packet)).
+
+append_archived_elem(By, Id, Packet) ->
+    Archived = #xmlel{
+        name = <<"archived">>,
+        attrs=[{<<"by">>, By}, {<<"id">>, Id}]},
+    xml:append_subtags(Packet, [Archived]).
+
+delete_archived_elem(By, Packet=#xmlel{children=Cs}) ->
+    Packet#xmlel{children=[C || C <- Cs, not is_archived_elem_for(C, By)]}.
+
+%% @doc Return true, if the first element points on `By'.
+is_archived_elem_for(#xmlel{name = <<"archived">>, attrs=As}, By) ->
+    lists:member({<<"by">>, By}, As);
+is_archived_elem_for(_, _) ->
+    false.

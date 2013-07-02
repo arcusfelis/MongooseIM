@@ -102,22 +102,8 @@ stop_supervisor(Host) ->
 %% ----------------------------------------------------------------------
 %% API
 
-%% This hook is called from `mod_muc:forget_room(Host, Name)'.
-forget_room(LServer, RoomName) ->
-    ShouldDelete =
-    case query_delete_archive_after_destruction(LServer, RoomName) of
-        undefined ->
-            should_delete_archive_after_destruction_by_default(LServer);
-        Bool ->
-            Bool
-    end,
-    case ShouldDelete of
-        true -> delete_archive(LServer, RoomName);
-        false -> false
-    end.
-
 %% @doc Delete all messages from the room.
-delete_archive(LServer, RoomName) ->
+delete_archive(RoomName, LServer) ->
     RoomId = mod_mam_muc_cache:room_id(LServer, RoomName),
     SRoomId = integer_to_list(RoomId),
     %% TODO: use transaction
@@ -143,6 +129,7 @@ enable_logging(LServer, RoomName, Enabled) ->
     mod_mam_muc_cache:update_logging_enabled(LServer, RoomName, Enabled),
     ok.
 
+%% @doc Enable access to the archive for the room.
 enable_querying(LServer, RoomName, Enabled) ->
     set_bool(LServer, RoomName, "enable_querying", Enabled),
     mod_mam_muc_cache:update_querying_enabled(LServer, RoomName, Enabled),
@@ -159,6 +146,20 @@ create_room_archive(LServer, RoomName) ->
 
 %% ----------------------------------------------------------------------
 %% hooks and handlers
+
+%% This hook is called from `mod_muc:forget_room(Host, Name)'.
+forget_room(LServer, RoomName) ->
+    ShouldDelete =
+    case query_delete_archive_after_destruction(LServer, RoomName) of
+        undefined ->
+            should_delete_archive_after_destruction_by_default(LServer);
+        Bool ->
+            Bool
+    end,
+    case ShouldDelete of
+        true -> delete_archive(RoomName, LServer);
+        false -> false
+    end.
 
 %% @doc Handle public MUC-message.
 room_packet(FromNick, _FromJID,
