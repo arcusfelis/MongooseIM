@@ -16,7 +16,13 @@ Packet filtration
 
 Q: Which MUC-messages should be saved into an archive?
 
+Q: Should we archive offline messages?
+A: Yes, we should.
 
+A message addressed to an unknown user MUST be dropped.
+Use ``ejabberd_auth:is_user_exists(LUser, LServer)`` to distinguish.
+
+Do not archive MUC-messages using ``mod_mam`` (use ``mod_mam_muc`` only).
 
 API to configure MUC archives.
 ------------------------------
@@ -31,5 +37,10 @@ Hooks
 Q: Which function does delete information about a room from the DB?
 A: It is ``mod_muc:forget_room/2``. It has no hooks, so we should add one.
 
+We can use the same hooks for incoming messages as in ``mod_offline``.
 
-Do not archive MUC-messages using ``mod_mam`` (use ``mod_mam_muc`` only).
+Hooks ``user_receive_packet`` and ``filter_packet`` are different.
+First is executed after routing for connected user, the second is
+called before.
+
+
