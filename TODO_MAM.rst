@@ -22,6 +22,10 @@ A: Yes, we should.
 A message addressed to an unknown user MUST be dropped.
 Use ``ejabberd_auth:is_user_exists(LUser, LServer)`` to distinguish.
 
+We can use ``ejabberd_auth_anonymous:anonymous_user_exist(User, Server)``
+or ``ejabberd_auth_anonymous:is_user_exists(User, Server)``
+to detect anonymous users.
+
 Do not archive MUC-messages using ``mod_mam`` (use ``mod_mam_muc`` only).
 
 API to configure MUC archives.
@@ -44,3 +48,7 @@ First is executed after routing for connected user, the second is
 called before.
 
 
+Caching
+-------
+
+Results of ``ejabberd_auth:is_user_exists/2`` SHOULD be cached.

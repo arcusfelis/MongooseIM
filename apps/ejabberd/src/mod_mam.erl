@@ -224,16 +224,21 @@ user_send_packet(From, To, Packet) ->
     Packet :: elem().
 filter_packet(drop) ->
     drop;
-filter_packet({From, To, Packet}) ->
+filter_packet({From, To=#jid{luser=LUser, lserver=LServer}, Packet}) ->
     ?DEBUG("Receive packet~n    from ~p ~n    to ~p~n    packet ~p.",
               [From, To, Packet]),
     Packet2 =
-    case handle_package(incoming, true, To, From, From, Packet) of
-        undefined -> Packet;
-        Id -> 
-            ?DEBUG("Archived ~p", [Id]),
-            BareTo = jlib:jid_to_binary(jlib:jid_remove_resource(To)),
-            replace_archived_elem(BareTo, Id, Packet)
+    case ejabberd_auth:is_user_exists(LUser, LServer)
+    andalso not ejabberd_auth_anonymous:is_user_exists(LUser, LServer) of
+    false -> Packet;
+    true ->
+        case handle_package(incoming, true, To, From, From, Packet) of
+            undefined -> Packet;
+            Id -> 
+                ?DEBUG("Archived ~p", [Id]),
+                BareTo = jlib:jid_to_binary(jlib:jid_remove_resource(To)),
+                replace_archived_elem(BareTo, Id, Packet)
+        end
     end,
     {From, To, Packet2}.
 
