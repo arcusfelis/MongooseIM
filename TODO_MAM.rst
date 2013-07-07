@@ -52,3 +52,4 @@ Caching
 -------
 
 Results of ``ejabberd_auth:is_user_exists/2`` SHOULD be cached.
+

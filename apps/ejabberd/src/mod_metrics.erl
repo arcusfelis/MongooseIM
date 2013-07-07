@@ -11,20 +11,32 @@
 -behaviour (gen_mod).
 
 -export ([start/2, stop/1]).
+-export([start_link/1]).
+
+%% gen_server callbacks
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2,
+         terminate/2, code_change/3]).
 
 -define(REST_LISTENER, ejabberd_metrics_rest).
+-define(PROCNAME, ejabberd_metrics).
+-include("ejabberd.hrl").
+-include("jlib.hrl").
+
+-record(state, {host}).
 
 -spec start(binary(), list()) -> ok.
 start(Host, Opts) ->
     init_folsom(Host),
     start_cowboy(Opts),
     metrics_hooks(add, Host),
+    start_server(Host),
     ok.
 
 -spec stop(binary()) -> ok.
 stop(Host) ->
     stop_cowboy(),
     metrics_hooks(delete, Host),
+    stop_server(Host),
     ok.
 
 init_folsom(Host) ->
@@ -37,7 +49,10 @@ init_folsom(Host) ->
     lists:foreach(fun(Name) ->
         folsom_metrics:new_counter(Name),
         folsom_metrics:tag_metric(Name, Host)
-    end, get_total_counters(Host)).
+    end, get_total_counters(Host)),
+
+    folsom_metrics:new_gauge({Host, odbcMessageQueryLength}),
+    folsom_metrics:tag_metric({Host, odbcMessageQueryLength}, Host).
 
 metrics_hooks(Op, Host) ->
     lists:foreach(fun(Hook) ->
@@ -119,3 +134,107 @@ start_cowboy(Opts) ->
 
 stop_cowboy() ->
     cowboy:stop(?REST_LISTENER).
+
+start_server(Host) ->
+    Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
+    ChildSpec =
+	{Proc,
+	 {?MODULE, start_link, [Host]},
+	 permanent,
+	 1000,
+	 worker,
+	 [?MODULE]},
+    supervisor:start_child(ejabberd_sup, ChildSpec),
+    ok.
+
+stop_server(Host) ->
+    Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
+    supervisor:terminate_child(ejabberd_sup, Proc),
+    supervisor:delete_child(ejabberd_sup, Proc),
+    ok.
+
+%%====================================================================
+%% API
+%%====================================================================
+
+start_link(Host) ->
+    gen_server:start_link(?MODULE, [Host], []).
+
+%%====================================================================
+%% gen_server callbacks
+%%====================================================================
+
+%%--------------------------------------------------------------------
+%% Function: init(Args) -> {ok, State} |
+%%                         {ok, State, Timeout} |
+%%                         ignore               |
+%%                         {stop, Reason}
+%% Description: Initiates the server
+%%--------------------------------------------------------------------
+init([Host]) ->
+    {ok, _TRef} = timer:send_interval(1000, update_metrics),
+    {ok, #state{host=Host}}.
+
+%%--------------------------------------------------------------------
+%% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
+%%                                      {reply, Reply, State, Timeout} |
+%%                                      {noreply, State} |
+%%                                      {noreply, State, Timeout} |
+%%                                      {stop, Reason, Reply, State} |
+%%                                      {stop, Reason, State}
+%% Description: Handling call messages
+%%--------------------------------------------------------------------
+handle_call(Msg, _From, State) ->
+    ?WARNING_MSG("Strange message ~p.", [Msg]),
+    {reply, ok, State}.
+
+
+%%--------------------------------------------------------------------
+%% Function: handle_cast(Msg, State) -> {noreply, State} |
+%%                                      {noreply, State, Timeout} |
+%%                                      {stop, Reason, State}
+%% Description: Handling cast messages
+%%--------------------------------------------------------------------
+
+handle_cast(Msg, State) ->
+    ?WARNING_MSG("Strange message ~p.", [Msg]),
+    {noreply, State}.
+
+%%--------------------------------------------------------------------
+%% Function: handle_info(Info, State) -> {noreply, State} |
+%%                                       {noreply, State, Timeout} |
+%%                                       {stop, Reason, State}
+%% Description: Handling all non call/cast messages
+%%--------------------------------------------------------------------
+
+handle_info(update_metrics, State=#state{host=Host}) ->
+    Workers = ejabberd_odbc_sup:get_pids(Host),
+    Lengths = [message_queue_len(Pid) || Pid <- Workers],
+    folsom_metrics:notify({{Host, odbcMessageQueryLength}, lists:sum(Lengths)}),
+    {noreply, State}.
+
+%%--------------------------------------------------------------------
+%% Function: terminate(Reason, State) -> void()
+%% Description: This function is called by a gen_server when it is about to
+%% terminate. It should be the opposite of Module:init/1 and do any necessary
+%% cleaning up. When it returns, the gen_server terminates with Reason.
+%% The return value is ignored.
+%%--------------------------------------------------------------------
+terminate(_Reason, _State) ->
+    ok.
+
+%%--------------------------------------------------------------------
+%% Func: code_change(OldVsn, State, Extra) -> {ok, NewState}
+%% Description: Convert process state when code is changed
+%%--------------------------------------------------------------------
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+
+%%====================================================================
+%% Internal functions
+%%====================================================================
+
+message_queue_len(Pid) ->
+    {message_queue_len, Len} = erlang:process_info(Pid, message_queue_len),
+    Len.
