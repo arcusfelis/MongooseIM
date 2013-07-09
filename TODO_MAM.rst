@@ -53,3 +53,12 @@ Caching
 
 Results of ``ejabberd_auth:is_user_exists/2`` SHOULD be cached.
 
+Unique IDs
+----------
+
+We can use ``{now(), node()}``.
+``filter_packet`` is called on the sender's node of the cluster (at least in
+MongooseIM). 
+Can also use ``{from(), now(), to()}`` (this does not work, because anyone
+can call ``ejabber_router:route/*``).
+

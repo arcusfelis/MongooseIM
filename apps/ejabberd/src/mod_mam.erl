@@ -240,7 +240,7 @@ filter_packet({From, To=#jid{luser=LUser, lserver=LServer}, Packet}) ->
                 replace_archived_elem(BareTo, Id, Packet)
         end
     end,
-    {From, To, Packet2}.
+    {From, To, add_debug_info(Packet2)}.
 
 
 remove_user(User, Server) ->
@@ -771,3 +771,6 @@ is_archived_elem_for(#xmlel{name = <<"archived">>, attrs=As}, By) ->
     lists:member({<<"by">>, By}, As);
 is_archived_elem_for(_, _) ->
     false.
+
+add_debug_info(El=#xmlel{attrs=Attrs}) ->
+    El#xmlel{attrs=[{<<"mam_node">>, atom_to_binary(node(), utf8)}|Attrs]}.
