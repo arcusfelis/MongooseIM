@@ -109,6 +109,7 @@ get_total_counters(Host) ->
 
 start_cowboy(Opts) ->
     NumAcceptors = gen_mod:get_opt(num_acceptors, Opts, 10),
+    IP = gen_mod:get_opt(ip, Opts, {0,0,0,0}),
     case gen_mod:get_opt(port, Opts, undefined) of
         undefined ->
             ok;
@@ -121,7 +122,7 @@ start_cowboy(Opts) ->
                                 {"/metrics/host/:host", ?REST_LISTENER, [host_metrics]}
                                 ]}]),
             case cowboy:start_http(?REST_LISTENER, NumAcceptors,
-                                   [{port, Port}],
+                                   [{port, Port}, {ip, IP}],
                                    [{env, [{dispatch, Dispatch}]}]) of
                 {error, {already_started, _Pid}} ->
                     ok;
