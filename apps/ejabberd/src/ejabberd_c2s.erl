@@ -1512,11 +1512,11 @@ send_element(#state{server = Server, sockmod = SockMod} = StateData, El)
     ejabberd_hooks:run(xmpp_send_element,
                        Server, [Server, El]),
     SockMod:send_xml(StateData#state.socket,
-				       {xmlstreamelement, add_debug_info(El)});
+				       {xmlstreamelement, El});
 send_element(#state{server = Server} = StateData, El) ->
     ejabberd_hooks:run(xmpp_send_element,
                        Server, [Server, El]),
-    send_text(StateData, xml:element_to_binary(add_debug_info(El))).
+    send_text(StateData, xml:element_to_binary(El)).
 
 send_header(StateData, Server, Version, Lang)
   when StateData#state.xml_socket ->
@@ -2329,6 +2329,3 @@ pack_string(String, Pack) ->
         none ->
             {String, gb_trees:insert(String, String, Pack)}
     end.
-
-add_debug_info(El=#xmlel{attrs=Attrs}) ->
-    El#xmlel{attrs=[{<<"c2s_node">>, atom_to_binary(node(), utf8)}|Attrs]}.
