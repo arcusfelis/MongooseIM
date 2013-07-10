@@ -51,6 +51,8 @@ init_folsom(Host) ->
         folsom_metrics:tag_metric(Name, Host)
     end, get_total_counters(Host)),
 
+    %% Called from `ejabberd_router:do_route/3'.
+    folsom_metrics:new_histogram(route_time),
     folsom_metrics:new_gauge({Host, odbcMessageQueryLength}),
     folsom_metrics:tag_metric({Host, odbcMessageQueryLength}, Host).
 

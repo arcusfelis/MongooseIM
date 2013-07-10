@@ -57,8 +57,14 @@ Unique IDs
 ----------
 
 We can use ``{now(), node()}``.
+Each node can have a short id.
+
 ``filter_packet`` is called on the sender's node of the cluster (at least in
 MongooseIM). 
 Can also use ``{from(), now(), to()}`` (this does not work, because anyone
 can call ``ejabber_router:route/*``).
 
+Tests
+-----
+
+- Check dates with escalus.

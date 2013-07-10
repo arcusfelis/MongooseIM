@@ -8,7 +8,8 @@
          filter_packet/1]).
 
 %% Client API
--export([delete_archive/2]).
+-export([delete_archive/2,
+         archive_size/2]).
 
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
@@ -17,7 +18,7 @@
 %% ----------------------------------------------------------------------
 %% Datetime types
 -type iso8601_datetime_binary() :: binary().
-%% Seconds from 01.01.1970
+%% Microseconds from 01.01.1970
 -type unix_timestamp() :: non_neg_integer().
 
 %% ----------------------------------------------------------------------
@@ -68,17 +69,25 @@ delete_archive(User, Server) ->
     LUser = jlib:nodeprep(User),
     LServer = jlib:nameprep(Server),
     SUser = ejabberd_odbc:escape(LUser),
-    remove_user_from_db(LServer, SUser),
     ?DEBUG("Remove user ~p from ~p.", [LUser, LServer]),
+    remove_user_from_db(LServer, SUser),
     ok.
+
+archive_size(User, Server) ->
+    LUser = jlib:nodeprep(User),
+    LServer = jlib:nameprep(Server),
+    SUser = ejabberd_odbc:escape(LUser),
+    calc_archive_size(LServer, SUser).
 
 %% ----------------------------------------------------------------------
 %% gen_mod callbacks
 
 start(DefaultHost, Opts) ->
-    Host = gen_mod:get_opt_host(DefaultHost, Opts, DefaultHost),
     ?DEBUG("mod_mam starting", []),
-    IQDisc = gen_mod:get_opt(iqdisc, Opts, one_queue), %% Type
+    Host = gen_mod:get_opt_host(DefaultHost, Opts, DefaultHost),
+    start_supervisor(Host),
+    %% Only parallel is recommended hare.
+    IQDisc = gen_mod:get_opt(iqdisc, Opts, parallel), %% Type
     mod_disco:register_feature(Host, mam_ns_binary()),
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host, mam_ns_binary(),
                                   ?MODULE, process_mam_iq, IQDisc),
@@ -89,12 +98,43 @@ start(DefaultHost, Opts) ->
 
 stop(Host) ->
     ?DEBUG("mod_mam stopping", []),
+    stop_supervisor(Host),
     ejabberd_hooks:delete(user_send_packet, Host, ?MODULE, user_send_packet, 90),
     ejabberd_hooks:delete(filter_packet, global, ?MODULE, filter_packet, 90),
     ejabberd_hooks:delete(remove_user, Host, ?MODULE, remove_user, 50),
     gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, mam_ns_string()),
     mod_disco:unregister_feature(Host, mam_ns_binary()),
     ok.
+
+%% ----------------------------------------------------------------------
+%% OTP helpers
+
+write_worker_name() ->
+    ejabberd_mod_mam_writer.
+
+start_supervisor(Host) ->
+    Proc = gen_mod:get_module_proc(Host, write_worker_name()),
+    ChildSpec =
+    {Proc,
+     {mod_mam_async_writer, start_link, [Proc, Host]},
+     permanent,
+     5000,
+     worker,
+     [mod_mam_async_writer]},
+    supervisor:start_child(ejabberd_sup, ChildSpec).
+
+stop_supervisor(Host) ->
+    Proc = gen_mod:get_module_proc(Host, write_worker_name()),
+    supervisor:terminate_child(ejabberd_sup, Proc),
+    supervisor:delete_child(ejabberd_sup, Proc).
+
+get_writer_pid(Host) ->
+    name_to_pid(gen_mod:get_module_proc(Host, write_worker_name())).
+
+name_to_pid(Name) ->
+    ensure_pid(whereis(Name)).
+
+ensure_pid(Pid) when is_pid(Pid) -> Pid.
 
 %% ----------------------------------------------------------------------
 %% hooks and handlers
@@ -136,6 +176,9 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
     ?DEBUG("Handling mam IQ~n    from ~p ~n    to ~p~n    packet ~p.",
               [From, To, IQ]),
     QueryID = xml:get_tag_attr_s(<<"queryid">>, QueryEl),
+
+    wait_flushing(LServer),
+
     %% Filtering by date.
     %% Start :: integer() | undefined
     Start = maybe_unix_timestamp(xml:get_path_s(QueryEl, [{elem, <<"start">>}, cdata])),
@@ -177,6 +220,7 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
     %% a policy-violation error to the client. 
     case TotalCount - Offset > max_result_limit() andalso Limit =:= <<>> of
         true ->
+        ?DEBUG("Policy violation by ~p.", [LUser]),
         ErrorEl = ?STANZA_ERRORT(<<"">>, <<"modify">>, <<"policy-violation">>,
                                  <<"en">>, <<"Too many results">>),          
         IQ#iq{type = error, sub_el = [ErrorEl]};
@@ -285,20 +329,13 @@ handle_package(Dir, ReturnId,
             SDir = encode_direction(Dir),
             FromLJID = jlib:jid_tolower(FromJID),
             FromSJID = ejabberd_odbc:escape(jlib:jid_to_binary(FromLJID)),
+            Id = generate_message_id(),
+            WriterPid = get_writer_pid(LServer),
+            archive_message(WriterPid, Id, SUser, BareSRJID, SRResource,
+                            SDir, FromSJID, SData),
             case ReturnId of
-                true ->
-                %% Archive and return id
-                AtomicF = fun() ->
-                archive_message(LServer, SUser, BareSRJID, SRResource,
-                                SDir, FromSJID, SData),
-                last_insert_id(LServer)
-                end,
-                {atomic, Id} = ejabberd_odbc:sql_transaction(LServer, AtomicF),
-                Id;
-                false ->
-                archive_message(LServer, SUser, BareSRJID, SRResource,
-                                SDir, FromSJID, SData),
-                undefined
+                true  -> integer_to_binary(Id);
+                false -> undefined
             end;
             false -> undefined
         end;
@@ -524,27 +561,12 @@ decode_prefs_rows([], DefaultMode, AlwaysJIDs, NewerJIDs) ->
     {DefaultMode, AlwaysJIDs, NewerJIDs}.
 
 
-archive_message(LServer, SUser, BareSJID, SResource, Direction, FromSJID, SData) ->
-    Result =
-    ejabberd_odbc:sql_query(
-      LServer,
-      ["INSERT INTO mam_message(local_username, remote_bare_jid, "
-                                "remote_resource, message, direction, "
-                                "from_jid, added_at) "
-       "VALUES ('", SUser,"', '", BareSJID, "', '", SResource, "',"
-               "'", SData, "', '", Direction, "', '", FromSJID, "', ",
-                integer_to_list(current_unix_timestamp()), ")"]),
-    ?DEBUG("archive_message query returns ~p", [Result]),
-    ok.
-
-
-last_insert_id(LServer) ->
-    {selected, [_], [{Id}]} =
-    ejabberd_odbc:sql_query(LServer, "SELECT LAST_INSERT_ID()"),
-    Id.
+archive_message(WriterPid, Id, SUser, BareSJID, SResource, Direction, FromSJID, SData) ->
+    mod_mam_async_writer:archive_message(WriterPid, Id, SUser, BareSJID, SResource, Direction, FromSJID, SData).
 
 
 remove_user_from_db(LServer, SUser) ->
+    wait_flushing(LServer),
     Result1 =
     ejabberd_odbc:sql_query(
       LServer,
@@ -560,19 +582,29 @@ remove_user_from_db(LServer, SUser) ->
     ?DEBUG("remove_user query returns ~p and ~p", [Result1, Result2]),
     ok.
 
-message_row_to_xml({BUID,BSeconds,BFromJID,BPacket}, QueryID) ->
+calc_archive_size(LServer, SUser) ->
+    {selected, _ColumnNames, [{BSize}]} =
+    ejabberd_odbc:sql_query(
+      LServer,
+      ["SELECT COUNT(*) "
+       "FROM mam_message "
+       "WHERE local_username = '", SUser, "'"]),
+    list_to_integer(binary_to_list(BSize)).
+
+message_row_to_xml({BUID,BFromJID,BPacket}, QueryID) ->
+    UID = list_to_integer(binary_to_list(BUID)),
+    {Microseconds, _NodeId} = decode_compact_uuid(UID),
     Packet = binary_to_term(BPacket),
     FromJID = jlib:binary_to_jid(BFromJID),
-    Seconds  = list_to_integer(binary_to_list(BSeconds)),
-    DateTime = calendar:now_to_universal_time(seconds_to_now(Seconds)),
+    DateTime = calendar:now_to_universal_time(microseconds_to_now(Microseconds)),
     wrap_message(Packet, QueryID, BUID, DateTime, FromJID).
 
-message_row_to_id({BUID,_,_,_}) ->
+message_row_to_id({BUID,_,_}) ->
     BUID.
 
 %% Each record is a tuple of form 
 %% `{<<"3">>,<<"1366312523">>,<<"bob@localhost">>,<<"res1">>,<<binary>>}'.
-%% Columns are `["id","added_at","from_jid","message"]'.
+%% Columns are `["id","from_jid","message"]'.
 -spec extract_messages(LServer, Filter, IOffset, IMax) ->
     [Record] when
     LServer :: server_hostname(),
@@ -586,10 +618,10 @@ extract_messages(LServer, Filter, IOffset, IMax) ->
     {selected, _ColumnNames, MessageRows} =
     ejabberd_odbc:sql_query(
       LServer,
-      ["SELECT id, added_at, from_jid, message "
+      ["SELECT id, from_jid, message "
        "FROM mam_message ",
         Filter,
-       " ORDER BY added_at, id"
+       " ORDER BY id"
        " LIMIT ",
          case IOffset of
              0 -> "";
@@ -689,11 +721,13 @@ prepare_filter(SUser, IStart, IEnd, SWithJID, SWithResource) ->
    ["WHERE local_username='", SUser, "'",
      case IStart of
         undefined -> "";
-        _         -> [" AND added_at >= ", integer_to_list(IStart)]
+        _         -> [" AND id >= ",
+                      integer_to_list(encode_compact_uuid(IStart, 0))]
      end,
      case IEnd of
         undefined -> "";
-        _         -> [" AND added_at <= ", integer_to_list(IEnd)]
+        _         -> [" AND id <= ",
+                      integer_to_list(encode_compact_uuid(IEnd, 255))]
      end,
      case SWithJID of
         undefined -> "";
@@ -715,20 +749,17 @@ maybe_unix_timestamp(<<>>) -> undefined;
 maybe_unix_timestamp(ISODateTime) -> 
     case iso8601_datetime_binary_to_timestamp(ISODateTime) of
         undefined -> undefined;
-        Stamp -> now_to_seconds(Stamp)
+        Stamp -> now_to_microseconds(Stamp)
     end.
 
--spec current_unix_timestamp() -> unix_timestamp().
-current_unix_timestamp() ->
-    now_to_seconds(os:timestamp()).
+-spec now_to_microseconds(erlang:timestamp()) -> unix_timestamp().
+now_to_microseconds({Mega, Secs, Micro}) ->
+    (1000000 * Mega + Secs) * 1000000 + Micro.
 
--spec now_to_seconds(erlang:timestamp()) -> unix_timestamp().
-now_to_seconds({Mega, Secs, _}) ->
-    1000000 * Mega + Secs.
-
--spec seconds_to_now(unix_timestamp()) -> erlang:timestamp().
-seconds_to_now(Seconds) when is_integer(Seconds) ->
-    {Seconds div 1000000, Seconds rem 1000000, 0}.
+-spec microseconds_to_now(unix_timestamp()) -> erlang:timestamp().
+microseconds_to_now(MicroSeconds) when is_integer(MicroSeconds) ->
+    Seconds = MicroSeconds div 1000000,
+    {Seconds div 1000000, Seconds rem 1000000, MicroSeconds rem 1000000}.
 
 %% @doc Returns time in `now()' format.
 -spec iso8601_datetime_binary_to_timestamp(iso8601_datetime_binary()) ->
@@ -772,5 +803,31 @@ is_archived_elem_for(#xmlel{name = <<"archived">>, attrs=As}, By) ->
 is_archived_elem_for(_, _) ->
     false.
 
+
+generate_message_id() ->
+    {ok, NodeId} = ejabberd_node_id:node_id(),
+    %% Use monotone function here.
+    encode_compact_uuid(now_to_microseconds(now()), NodeId).
+
+
 add_debug_info(El=#xmlel{attrs=Attrs}) ->
     El#xmlel{attrs=[{<<"node">>, atom_to_binary(node(), utf8)}|Attrs]}.
+
+%% Removed a leading 0 from 64-bit binary representation.
+%% Put node id as a last byte.
+%% It will stop working at `{{4253,5,31},{22,20,37}}'.
+encode_compact_uuid(Microseconds, NodeId)
+    when is_integer(Microseconds), is_integer(NodeId) ->
+    (Microseconds bsl 8) + NodeId.
+
+decode_compact_uuid(Id) ->
+    Microseconds = Id bsr 8,
+    NodeId = Id band 8,
+    {Microseconds, NodeId}.
+
+%% TODO: it is too simple, can add a separate process per node,
+%% that will wait that all nodes flush.
+%% Also, this process can monitor DB and protect against overloads.
+wait_flushing(_LServer) ->
+    timer:sleep(500).
+

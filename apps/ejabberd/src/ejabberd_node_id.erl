@@ -32,7 +32,16 @@ register_node(NodeName) ->
     ok.
 
 node_id() ->
-    select_node_id(node()).
+    %% Save result into the process's memory space.
+    case get(node_id) of
+        undefined ->
+            NodeId = select_node_id(node()),
+            put(node_id, NodeId),
+            NodeId;
+        NodeId ->
+            NodeId
+    end.
+
 
 next_node_id() ->
     max_node_id() + 1.

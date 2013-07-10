@@ -57,9 +57,9 @@ should_delete_archive_after_destruction_by_default(_LServer) -> true.
 %% gen_mod callbacks
 
 start(DefaultHost, Opts) ->
+    ?DEBUG("mod_mam_muc starting", []),
     Host = gen_mod:get_opt_host(DefaultHost, Opts, DefaultHost),
     start_supervisor(Host),
-    ?DEBUG("mod_mam_muc starting", []),
     IQDisc = gen_mod:get_opt(iqdisc, Opts, one_queue), %% Type
     mod_disco:register_feature(Host, mam_ns_binary()),
     gen_iq_handler:add_iq_handler(mod_muc_iq, Host, mam_ns_binary(),
@@ -70,8 +70,8 @@ start(DefaultHost, Opts) ->
     ok.
 
 stop(Host) ->
-    stop_supervisor(Host),
     ?DEBUG("mod_mam stopping", []),
+    stop_supervisor(Host),
     ejabberd_hooks:add(filter_room_packet, Host, ?MODULE,
                        filter_room_packet, 90),
     gen_iq_handler:remove_iq_handler(mod_muc_iq, Host, mam_ns_string()),
