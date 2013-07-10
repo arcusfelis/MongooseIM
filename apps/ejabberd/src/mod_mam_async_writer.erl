@@ -1,7 +1,9 @@
 %% @doc Stores cache using ETS-table.
 -module(mod_mam_async_writer).
 -export([start_link/2,
-         archive_message/8]).
+         srv_name/1,
+         archive_message/8,
+         queue_length/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -13,10 +15,14 @@
 
 -record(state, {
     flush_interval=500,
-    max_queue_size=10,
+    max_packet_size=30,
     host,
+    conn,
     acc=[],
     flush_interval_tref}).
+
+srv_name() ->
+    ejabberd_mod_mam_writer.
 
 %%====================================================================
 %% API
@@ -25,20 +31,33 @@
 start_link(ProcName, Host) ->
     gen_server:start_link({local, ProcName}, ?MODULE, [Host], []).
 
-archive_message(WriterPid, Id, SUser, BareSJID, SResource, Direction, FromSJID, SData) ->
+srv_name(Host) ->
+    gen_mod:get_module_proc(Host, srv_name()).
+
+archive_message(Host, Id, SUser, BareSJID, SResource, Direction, FromSJID, SData) ->
     Msg = {archive_message, Id, SUser, BareSJID, SResource, Direction, FromSJID, SData},
-    gen_server:cast(WriterPid, Msg).
+    gen_server:cast(srv_name(Host), Msg).
+
+%% For folsom.
+queue_length(Host) ->
+    case whereis(srv_name(Host)) of
+    undefined ->
+        {error, not_running};
+    Pid ->
+        {message_queue_len, Len} = erlang:process_info(Pid, message_queue_len),
+        {ok, Len}
+    end.
 
 %%====================================================================
 %% Internal functions
 %%====================================================================
 
-run_flush(State=#state{host=Host, flush_interval_tref=TRef, acc=Acc}) ->
+run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc}) ->
     erlang:cancel_timer(TRef),
     ?DEBUG("Flushed ~p entries.", [length(Acc)]),
     Result =
     ejabberd_odbc:sql_query(
-      Host,
+      Conn,
       ["INSERT INTO mam_message(id, local_username, remote_bare_jid, "
                                 "remote_resource, message, direction, "
                                 "from_jid) "
@@ -61,7 +80,9 @@ join([H|T]) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([Host]) ->
-    {ok, #state{host=Host}}.
+    %% Use a private ODBC-connection.
+    {ok, Conn} = ejabberd_odbc:get_dedicated_connection(Host),
+    {ok, #state{host=Host, conn=Conn}}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -85,7 +106,7 @@ handle_call(_, _From, State) ->
 
 handle_cast({archive_message, Id, SUser, BareSJID, SResource, Direction, FromSJID, SData},
             State=#state{acc=Acc, flush_interval_tref=TRef, flush_interval=Int,
-                         max_queue_size=Max}) ->
+                         max_packet_size=Max}) ->
     ?DEBUG("Schedule to write ~p.", [Id]),
     Values = ["(", integer_to_list(Id), ", '", SUser,"', '", BareSJID, "', "
                "'", SResource, "', '", SData, "', '", Direction, "', "

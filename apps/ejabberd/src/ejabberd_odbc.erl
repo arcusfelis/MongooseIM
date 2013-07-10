@@ -40,7 +40,8 @@
 	 escape/1,
 	 escape_like/1,
 	 to_bool/1,
-	 keep_alive/1]).
+	 keep_alive/1,
+     get_dedicated_connection/1]).
 
 %% gen_fsm callbacks
 -export([init/1,
@@ -95,6 +96,9 @@ start_link(Host, StartInterval) ->
     ?GEN_FSM:start_link(ejabberd_odbc, [Host, StartInterval],
 			fsm_limit_opts() ++ ?FSMOPTS).
 
+get_dedicated_connection(Host) ->
+    ejabberd_odbc_sup:get_dedicated_connection(Host).
+
 sql_query(Host, Query) ->
     sql_call(Host, {sql_query, Query}).
 
@@ -116,14 +120,19 @@ sql_transaction(Host, F) when is_function(F) ->
 sql_bloc(Host, F) ->
     sql_call(Host, {sql_bloc, F}).
 
-sql_call(Host, Msg) ->
+sql_call(Host, Msg) when is_binary(Host) ->
     case get(?STATE_KEY) of
         undefined ->
             ?GEN_FSM:sync_send_event(ejabberd_odbc_sup:get_random_pid(Host),
 				     {sql_cmd, Msg, now()}, ?TRANSACTION_TIMEOUT);
         _State ->
             nested_op(Msg)
-    end.
+    end;
+%% For dedicated connections.
+sql_call(Pid, Msg) when is_pid(Pid) ->
+    ?GEN_FSM:sync_send_event(Pid,
+             {sql_cmd, Msg, now()}, ?TRANSACTION_TIMEOUT).
+
 
 % perform a harmless query on all opened connexions to avoid connexion close.
 keep_alive(PID) ->

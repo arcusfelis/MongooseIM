@@ -53,8 +53,11 @@ init_folsom(Host) ->
 
     %% Called from `ejabberd_router:do_route/3'.
     folsom_metrics:new_histogram(route_time),
-    folsom_metrics:new_gauge({Host, odbcMessageQueryLength}),
-    folsom_metrics:tag_metric({Host, odbcMessageQueryLength}, Host).
+
+    folsom_metrics:new_gauge({Host, modMamMessageQueueLength}),
+    folsom_metrics:tag_metric({Host, modMamMessageQueueLength}, Host),
+    folsom_metrics:new_gauge({Host, odbcQueryQueueLength}),
+    folsom_metrics:tag_metric({Host, odbcQueryQueueLength}, Host).
 
 metrics_hooks(Op, Host) ->
     lists:foreach(fun(Hook) ->
@@ -213,7 +216,13 @@ handle_cast(Msg, State) ->
 handle_info(update_metrics, State=#state{host=Host}) ->
     Workers = ejabberd_odbc_sup:get_pids(Host),
     Lengths = [message_queue_len(Pid) || Pid <- Workers],
-    folsom_metrics:notify({{Host, odbcMessageQueryLength}, lists:sum(Lengths)}),
+    folsom_metrics:notify({{Host, odbcQueryQueueLength}, lists:sum(Lengths)}),
+    case mod_mam_async_writer:queue_length(Host) of
+    {ok, MamWriterQLen} ->
+        folsom_metrics:notify({{Host, modMamMessageQueueLength}, MamWriterQLen});
+    {error, _Reason} ->
+        skip
+    end,
     {noreply, State}.
 
 %%--------------------------------------------------------------------

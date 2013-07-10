@@ -109,11 +109,9 @@ stop(Host) ->
 %% ----------------------------------------------------------------------
 %% OTP helpers
 
-write_worker_name() ->
-    ejabberd_mod_mam_writer.
 
 start_supervisor(Host) ->
-    Proc = gen_mod:get_module_proc(Host, write_worker_name()),
+    Proc = mod_mam_async_writer:srv_name(Host),
     ChildSpec =
     {Proc,
      {mod_mam_async_writer, start_link, [Proc, Host]},
@@ -124,17 +122,10 @@ start_supervisor(Host) ->
     supervisor:start_child(ejabberd_sup, ChildSpec).
 
 stop_supervisor(Host) ->
-    Proc = gen_mod:get_module_proc(Host, write_worker_name()),
+    Proc = mod_mam_async_writer:srv_name(Host),
     supervisor:terminate_child(ejabberd_sup, Proc),
     supervisor:delete_child(ejabberd_sup, Proc).
 
-get_writer_pid(Host) ->
-    name_to_pid(gen_mod:get_module_proc(Host, write_worker_name())).
-
-name_to_pid(Name) ->
-    ensure_pid(whereis(Name)).
-
-ensure_pid(Pid) when is_pid(Pid) -> Pid.
 
 %% ----------------------------------------------------------------------
 %% hooks and handlers
@@ -330,8 +321,7 @@ handle_package(Dir, ReturnId,
             FromLJID = jlib:jid_tolower(FromJID),
             FromSJID = ejabberd_odbc:escape(jlib:jid_to_binary(FromLJID)),
             Id = generate_message_id(),
-            WriterPid = get_writer_pid(LServer),
-            archive_message(WriterPid, Id, SUser, BareSRJID, SRResource,
+            archive_message(LServer, Id, SUser, BareSRJID, SRResource,
                             SDir, FromSJID, SData),
             case ReturnId of
                 true  -> integer_to_binary(Id);

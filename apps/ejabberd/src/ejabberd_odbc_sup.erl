@@ -33,7 +33,8 @@
 	 add_pid/2,
 	 remove_pid/2,
 	 get_pids/1,
-	 get_random_pid/1
+	 get_random_pid/1,
+     get_dedicated_connection/1
 	]).
 
 -include("ejabberd.hrl").
@@ -63,31 +64,8 @@ start_link(Host) ->
 			  ?MODULE, [Host]).
 
 init([Host]) ->
-    PoolSize = case ejabberd_config:get_local_option({odbc_pool_size, Host}) of
-		   I when is_integer(I) ->
-		       I;
-	    undefined ->
-		       ?DEFAULT_POOL_SIZE;
-		   Other ->
-		       ?ERROR_MSG("Wrong odbc_pool_size definition '~p' "
-				  "for host ~p, default to ~p~n",
-				  [Other, Host, ?DEFAULT_POOL_SIZE]),
-		       ?DEFAULT_POOL_SIZE
-	       end,
-    StartInterval = case ejabberd_config:get_local_option({odbc_start_interval,
-							   Host}) of
-			Interval when is_integer(Interval) ->
-			    Interval;
-			undefined ->
-			    ?DEFAULT_ODBC_START_INTERVAL;
-			_Other2 ->
-			    ?ERROR_MSG("Wrong odbc_start_interval "
-				       "definition '~p' for host ~p, "
-				       "defaulting to ~p~n",
-				       [_Other2, Host,
-					?DEFAULT_ODBC_START_INTERVAL]),
-			    ?DEFAULT_ODBC_START_INTERVAL
-		    end,
+    PoolSize = pool_size(Host),
+    StartInterval = start_interval(Host),
     {ok, {{one_for_one, PoolSize*10, 1},
 	  lists:map(
 	    fun(I) ->
@@ -119,3 +97,35 @@ remove_pid(Host, Pid) ->
 		mnesia:delete_object(#sql_pool{host = Host, pid = Pid})
 	end,
     mnesia:ets(F).
+
+get_dedicated_connection(Host) ->
+    StartInterval = start_interval(Host),
+    ejabberd_odbc:start_link(Host, StartInterval*1000).
+
+start_interval(Host) ->
+    case ejabberd_config:get_local_option({odbc_start_interval, Host}) of
+    Interval when is_integer(Interval) ->
+        Interval;
+    undefined ->
+        ?DEFAULT_ODBC_START_INTERVAL;
+    _Other2 ->
+        ?ERROR_MSG("Wrong odbc_start_interval "
+               "definition '~p' for host ~p, "
+               "defaulting to ~p~n",
+               [_Other2, Host,
+            ?DEFAULT_ODBC_START_INTERVAL]),
+        ?DEFAULT_ODBC_START_INTERVAL
+    end.
+
+pool_size(Host) ->
+    case ejabberd_config:get_local_option({odbc_pool_size, Host}) of
+    I when is_integer(I) ->
+        I;
+    undefined ->
+        ?DEFAULT_POOL_SIZE;
+    Other ->
+        ?ERROR_MSG("Wrong odbc_pool_size definition '~p' "
+           "for host ~p, default to ~p~n",
+           [Other, Host, ?DEFAULT_POOL_SIZE]),
+        ?DEFAULT_POOL_SIZE
+    end.
