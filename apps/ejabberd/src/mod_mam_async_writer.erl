@@ -2,7 +2,7 @@
 -module(mod_mam_async_writer).
 -export([start_link/2,
          srv_name/1,
-         archive_message/8,
+         archive_message/6,
          queue_length/1]).
 
 %% gen_server callbacks
@@ -24,6 +24,9 @@
 srv_name() ->
     ejabberd_mod_mam_writer.
 
+encode_direction(incoming) -> "I";
+encode_direction(outgoing) -> "O".
+
 %%====================================================================
 %% API
 %%====================================================================
@@ -34,8 +37,22 @@ start_link(ProcName, Host) ->
 srv_name(Host) ->
     gen_mod:get_module_proc(Host, srv_name()).
 
-archive_message(Host, Id, SUser, BareSJID, SResource, Direction, FromSJID, SData) ->
-    Msg = {archive_message, Id, SUser, BareSJID, SResource, Direction, FromSJID, SData},
+
+archive_message(Id, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
+                RemJID=#jid{lresource=RemLResource}, SrcJID, Data) ->
+    SLocLUser = ejabberd_odbc:escape(LocLUser),
+    SBareRemJID = esc_jid(jlib:jid_tolower(jlib:jid_remove_resource(RemJID))),
+    SSrcJID = esc_jid(SrcJID),
+    SDir = encode_direction(Dir),
+    SRemLResource = ejabberd_odbc:escape(RemLResource),
+    SData = ejabberd_odbc:escape(Data),
+    SId = integer_to_list(Id),
+    archive_message(LocLServer, SId, SLocLUser, SBareRemJID,
+                    SRemLResource, SDir, SSrcJID, SData).
+
+
+archive_message(Host, SId, SLocLUser, SBareRemJID, SRemLResource, SDir, SSrcJID, SData) ->
+    Msg = {archive_message, SId, SLocLUser, SBareRemJID, SRemLResource, SDir, SSrcJID, SData},
     gen_server:cast(srv_name(Host), Msg).
 
 %% For folsom.
@@ -69,6 +86,9 @@ run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc}) ->
 
 join([H|T]) ->
     [H, [", " ++ X || X <- T]].
+
+esc_jid(JID) ->
+    ejabberd_odbc:escape(jlib:jid_to_binary(JID)).
 
 %%====================================================================
 %% gen_server callbacks
@@ -106,13 +126,13 @@ handle_call(_, _From, State) ->
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
 
-handle_cast({archive_message, Id, SUser, BareSJID, SResource, Direction, FromSJID, SData},
+handle_cast({archive_message, SId, SLocLUser, SBareRemJID, SRemLResource, SDir, SSrcJID, SData},
             State=#state{acc=Acc, flush_interval_tref=TRef, flush_interval=Int,
                          max_packet_size=Max}) ->
-    ?DEBUG("Schedule to write ~p.", [Id]),
-    Values = ["(", integer_to_list(Id), ", '", SUser,"', '", BareSJID, "', "
-               "'", SResource, "', '", SData, "', '", Direction, "', "
-               "'", FromSJID, "')"],
+    ?DEBUG("Schedule to write ~p.", [SId]),
+    Values = ["('", SId, "', '", SLocLUser,"', '", SBareRemJID, "', "
+               "'", SRemLResource, "', '", SData, "', '", SDir, "', "
+               "'", SSrcJID, "')"],
     TRef2 = case {Acc, TRef} of
             {[], undefined} -> erlang:send_after(Int, self(), flush);
             {_, _} -> TRef

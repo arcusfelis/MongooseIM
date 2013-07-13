@@ -51,9 +51,6 @@ default_result_limit() -> 50.
 
 max_result_limit() -> 50.
 
-encode_direction(incoming) -> "I";
-encode_direction(outgoing) -> "O".
-
 encode_behaviour(<<"roster">>) -> "R";
 encode_behaviour(<<"always">>) -> "A";
 encode_behaviour(<<"never">>)  -> "N".
@@ -284,45 +281,34 @@ remove_user(User, Server) ->
 %% ----------------------------------------------------------------------
 %% Internal functions
 
--spec handle_package(Dir, ReturnId, LocalJID, RemoteJID, FromJID, Packet) ->
+-spec handle_package(Dir, ReturnId, LocJID, RemJID, SrcJID, Packet) ->
     MaybeId when
     Dir :: incoming | outgoing,
     ReturnId :: boolean(),
-    LocalJID :: jid(),
-    RemoteJID :: jid(),
-    FromJID :: jid(),
+    LocJID :: jid(),
+    RemJID :: jid(),
+    SrcJID :: jid(),
     Packet :: elem(),
     MaybeId :: binary() | undefined.
 
 handle_package(Dir, ReturnId,
-               _LocalJID=#jid{luser = LUser, lserver = LServer},
-               RemoteJID=#jid{lresource = RLResource},
-               FromJID=#jid{}, Packet) ->
+               LocJID=#jid{},
+               RemJID=#jid{},
+               SrcJID=#jid{}, Packet) ->
     IsComplete = is_complete_message(Packet),
     case IsComplete of
         true ->
-        SUser = ejabberd_odbc:escape(LUser),
-        %% Convert `#jid{}' to prepared `{S,U,R}'
-        LRJID = jlib:jid_tolower(RemoteJID),
-        BareLRJID = jlib:jid_remove_resource(LRJID),
-        SRJID = ejabberd_odbc:escape(jlib:jid_to_binary(LRJID)),
-        BareSRJID = ejabberd_odbc:escape(jlib:jid_to_binary(BareLRJID)),
         IsInteresting =
-        case behaviour(LServer, SUser, SRJID, BareSRJID) of
+        case behaviour(LocJID, RemJID) of
             always -> true;
             never  -> false;
-            roster -> is_jid_in_user_roster(LServer, LUser, BareSRJID)
+            roster -> is_jid_in_user_roster(LocJID, RemJID)
         end,
         case IsInteresting of
             true -> 
-            SRResource = ejabberd_odbc:escape(RLResource),
-            SData = ejabberd_odbc:escape(term_to_binary(Packet)),
-            SDir = encode_direction(Dir),
-            FromLJID = jlib:jid_tolower(FromJID),
-            FromSJID = ejabberd_odbc:escape(jlib:jid_to_binary(FromLJID)),
             Id = generate_message_id(),
-            archive_message(LServer, Id, SUser, BareSRJID, SRResource,
-                            SDir, FromSJID, SData),
+            Data = term_to_binary(Packet),
+            mod_mam_async_writer:archive_message(Id, Dir, LocJID, RemJID, SrcJID, Data),
             case ReturnId of
                 true  -> integer_to_binary(Id);
                 false -> undefined
@@ -353,25 +339,25 @@ is_complete_message(_) -> false.
 
 %% @doc Form `<forwarded/>' element, according to the XEP.
 -spec wrap_message(Packet::elem(), QueryID::binary(),
-                   MessageUID::term(), DateTime::calendar:datetime(), FromJID::jid()) ->
+                   MessageUID::term(), DateTime::calendar:datetime(), SrcJID::jid()) ->
         Wrapper::elem().
-wrap_message(Packet, QueryID, MessageUID, DateTime, FromJID) ->
+wrap_message(Packet, QueryID, MessageUID, DateTime, SrcJID) ->
     #xmlel{
         name = <<"message">>,
         attrs = [],
         children = [result(QueryID, MessageUID,
-                           [forwarded(Packet, DateTime, FromJID)])]}.
+                           [forwarded(Packet, DateTime, SrcJID)])]}.
 
 -spec forwarded(elem(), calendar:datetime(), jid()) -> elem().
-forwarded(Packet, DateTime, FromJID) ->
+forwarded(Packet, DateTime, SrcJID) ->
     #xmlel{
         name = <<"forwarded">>,
         attrs = [{<<"xmlns">>, <<"urn:xmpp:forward:0">>}],
-        children = [delay(DateTime, FromJID), Packet]}.
+        children = [delay(DateTime, SrcJID), Packet]}.
 
 -spec delay(calendar:datetime(), jid()) -> elem().
-delay(DateTime, FromJID) ->
-    jlib:timestamp_to_xml(DateTime, utc, FromJID, <<>>).
+delay(DateTime, SrcJID) ->
+    jlib:timestamp_to_xml(DateTime, utc, SrcJID, <<>>).
 
 
 %% @doc This element will be added in each forwarded message.
@@ -458,16 +444,23 @@ send_message(From, To, Mess) ->
     ejabberd_sm:route(From, To, Mess).
 
 
-is_jid_in_user_roster(LServer, LUser, JID) ->
+is_jid_in_user_roster(#jid{lserver=LServer, luser=LUser},
+                      #jid{} = RemJID) ->
+    RemBareJID = jlib:jid_remove_resource(RemJID),
     {Subscription, _Groups} =
     ejabberd_hooks:run_fold(
         roster_get_jid_info, LServer,
-        {none, []}, [LUser, LServer, JID]),
+        {none, []}, [LUser, LServer, RemBareJID]),
     Subscription == from orelse Subscription == both.
 
 
-behaviour(LServer, SUser, SJID, BareSJID) ->
-    case query_behaviour(LServer, SUser, SJID, BareSJID) of
+behaviour(#jid{lserver=LocLServer, luser=LocLUser},
+          #jid{} = RemJID) ->
+    RemLJID      = jlib:jid_tolower(RemJID),
+    SLocLUser    = ejabberd_odbc:escape(LocLUser),
+    SRemLBareJID = esc_jid(jlib:jid_remove_resource(RemLJID)),
+    SRemLJID     = esc_jid(jlib:jid_tolower(RemJID)),
+    case query_behaviour(LocLServer, SLocLUser, SRemLJID, SRemLBareJID) of
         {selected, ["behaviour"], [{Behavour}]} ->
             case Behavour of
                 "A" -> always;
@@ -477,17 +470,17 @@ behaviour(LServer, SUser, SJID, BareSJID) ->
         _ -> always %% default for everybody
     end.
 
-query_behaviour(LServer, SUser, SJID, BareSJID) ->
+query_behaviour(LServer, SUser, SRemLJID, SRemLBareJID) ->
     Result =
     ejabberd_odbc:sql_query(
       LServer,
       ["SELECT behaviour "
        "FROM mam_config "
        "WHERE local_username='", SUser, "' "
-         "AND (remote_jid='' OR remote_jid='", SJID, "'",
-               case BareSJID of
-                    SJID -> "";
-                    _    -> [" OR remote_jid='", BareSJID, "'"]
+         "AND (remote_jid='' OR remote_jid='", SRemLJID, "'",
+               case SRemLBareJID of
+                    SRemLJID -> "";
+                    _        -> [" OR remote_jid='", SRemLBareJID, "'"]
                end,
          ") "
        "ORDER BY remote_jid DESC "
@@ -551,8 +544,8 @@ decode_prefs_rows([], DefaultMode, AlwaysJIDs, NewerJIDs) ->
     {DefaultMode, AlwaysJIDs, NewerJIDs}.
 
 
-archive_message(WriterPid, Id, SUser, BareSJID, SResource, Direction, FromSJID, SData) ->
-    mod_mam_async_writer:archive_message(WriterPid, Id, SUser, BareSJID, SResource, Direction, FromSJID, SData).
+esc_jid(JID) ->
+    ejabberd_odbc:escape(jlib:jid_to_binary(JID)).
 
 
 remove_user_from_db(LServer, SUser) ->
@@ -581,13 +574,13 @@ calc_archive_size(LServer, SUser) ->
        "WHERE local_username = '", SUser, "'"]),
     list_to_integer(binary_to_list(BSize)).
 
-message_row_to_xml({BUID,BFromJID,BPacket}, QueryID) ->
+message_row_to_xml({BUID,BSrcJID,BPacket}, QueryID) ->
     UID = list_to_integer(binary_to_list(BUID)),
     {Microseconds, _NodeId} = decode_compact_uuid(UID),
     Packet = binary_to_term(BPacket),
-    FromJID = jlib:binary_to_jid(BFromJID),
+    SrcJID = jlib:binary_to_jid(BSrcJID),
     DateTime = calendar:now_to_universal_time(microseconds_to_now(Microseconds)),
-    wrap_message(Packet, QueryID, BUID, DateTime, FromJID).
+    wrap_message(Packet, QueryID, BUID, DateTime, SrcJID).
 
 message_row_to_id({BUID,_,_}) ->
     BUID.
