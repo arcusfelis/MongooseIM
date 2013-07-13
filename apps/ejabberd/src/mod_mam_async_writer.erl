@@ -52,8 +52,10 @@ queue_length(Host) ->
 %% Internal functions
 %%====================================================================
 
+run_flush(State=#state{acc=[]}) ->
+    State;
 run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc}) ->
-    erlang:cancel_timer(TRef),
+    TRef =/= undefined andalso erlang:cancel_timer(TRef),
     ?DEBUG("Flushed ~p entries.", [length(Acc)]),
     Result =
     ejabberd_odbc:sql_query(
