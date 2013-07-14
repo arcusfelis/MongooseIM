@@ -78,14 +78,21 @@ run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc}) ->
     ejabberd_odbc:sql_query(
       Conn,
       ["INSERT INTO mam_message(id, local_username, remote_bare_jid, "
-                                "remote_resource, message, direction, "
-                                "from_jid) "
-       "VALUES ", join(Acc)]),
+                                "remote_resource, direction, "
+                                "from_jid, message) "
+       "VALUES ", tuples(Acc)]),
+    % [SId, SLocLUser, SBareRemJID, SRemLResource, SDir, SSrcJID, SData]
     ?DEBUG("archive_message query returns ~p", [Result]),
     State#state{acc=[], flush_interval_tref=undefined}.
 
 join([H|T]) ->
     [H, [", " ++ X || X <- T]].
+
+tuples(Rows) ->
+    join([tuple(Row) || Row <- Rows]).
+
+tuple([H|T]) ->
+    ["('", H, "'", [[", '", X, "'"] || X <- T], ")"].
 
 esc_jid(JID) ->
     ejabberd_odbc:escape(jlib:jid_to_binary(JID)).
@@ -130,14 +137,12 @@ handle_cast({archive_message, SId, SLocLUser, SBareRemJID, SRemLResource, SDir, 
             State=#state{acc=Acc, flush_interval_tref=TRef, flush_interval=Int,
                          max_packet_size=Max}) ->
     ?DEBUG("Schedule to write ~p.", [SId]),
-    Values = ["('", SId, "', '", SLocLUser,"', '", SBareRemJID, "', "
-               "'", SRemLResource, "', '", SData, "', '", SDir, "', "
-               "'", SSrcJID, "')"],
+    Row = [SId, SLocLUser, SBareRemJID, SRemLResource, SDir, SSrcJID, SData],
     TRef2 = case {Acc, TRef} of
             {[], undefined} -> erlang:send_after(Int, self(), flush);
             {_, _} -> TRef
             end,
-    State2 = State#state{acc=[Values|Acc], flush_interval_tref=TRef2},
+    State2 = State#state{acc=[Row|Acc], flush_interval_tref=TRef2},
     case length(Acc) + 1 >= Max of
         true -> {noreply, run_flush(State2)};
         false -> {noreply, State2}

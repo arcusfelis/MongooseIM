@@ -36,6 +36,7 @@
 %% Other types
 -type filter() :: iolist().
 -type escaped_message_id() :: binary().
+-type archive_behaviour() :: atom(). % roster | always | never.
 -type archive_behaviour_bin() :: binary(). % <<"roster">> | <<"always">> | <<"never">>.
 
 %% ----------------------------------------------------------------------
@@ -51,23 +52,14 @@ default_result_limit() -> 50.
 
 max_result_limit() -> 50.
 
-encode_behaviour(<<"roster">>) -> "R";
-encode_behaviour(<<"always">>) -> "A";
-encode_behaviour(<<"never">>)  -> "N".
-
-decode_behaviour(<<"R">>) -> <<"roster">>;
-decode_behaviour(<<"A">>) -> <<"always">>;
-decode_behaviour(<<"N">>) -> <<"never">>.
-
 %% ----------------------------------------------------------------------
 %% API
 
 delete_archive(User, Server) ->
     LUser = jlib:nodeprep(User),
     LServer = jlib:nameprep(Server),
-    SUser = ejabberd_odbc:escape(LUser),
     ?DEBUG("Remove user ~p from ~p.", [LUser, LServer]),
-    remove_user_from_db(LServer, SUser),
+    remove_user_from_db(LServer, LUser),
     ok.
 
 archive_size(User, Server) ->
@@ -91,6 +83,11 @@ start(DefaultHost, Opts) ->
     ejabberd_hooks:add(user_send_packet, Host, ?MODULE, user_send_packet, 90),
     ejabberd_hooks:add(filter_packet, global, ?MODULE, filter_packet, 90),
     ejabberd_hooks:add(remove_user, Host, ?MODULE, remove_user, 50),
+    PF = prefs_module(Host),
+    case is_function_exist(PF, start, 1) of
+        true  -> PF:start(Host);
+        false -> ok
+    end,
     ok.
 
 stop(Host) ->
@@ -101,6 +98,11 @@ stop(Host) ->
     ejabberd_hooks:delete(remove_user, Host, ?MODULE, remove_user, 50),
     gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, mam_ns_string()),
     mod_disco:unregister_feature(Host, mam_ns_binary()),
+    PF = prefs_module(Host),
+    case is_function_exist(PF, stop, 1) of
+        true  -> PF:stop(Host);
+        false -> ok
+    end,
     ok.
 
 %% ----------------------------------------------------------------------
@@ -148,10 +150,10 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
 process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
                _To,
                IQ=#iq{type = get,
-                      sub_el = PrefsEl = #xmlel{name = <<"prefs">>}}) ->
+                      sub_el = #xmlel{name = <<"prefs">>}}) ->
     ?DEBUG("Handling mam prefs IQ~n    from ~p ~n    packet ~p.",
               [From, IQ]),
-    {DefaultMode, AlwaysJIDs, NewerJIDs} = get_prefs(LServer, LUser, <<"always">>),
+    {DefaultMode, AlwaysJIDs, NewerJIDs} = get_prefs(LServer, LUser, always),
     ?DEBUG("Extracted data~n\tDefaultMode ~p~n\tAlwaysJIDs ~p~n\tNewerJIDS ~p~n",
               [DefaultMode, AlwaysJIDs, NewerJIDs]),
     ResultPrefsEl = result_prefs(DefaultMode, AlwaysJIDs, NewerJIDs),
@@ -174,16 +176,6 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
     RSM   = jlib:rsm_decode(QueryEl),
     %% Filtering by contact.
     With  = xml:get_path_s(QueryEl, [{elem, <<"with">>}, cdata]),
-    {SWithJID, SWithResource} =
-    case With of
-        <<>> -> {undefined, undefined};
-        _    ->
-            WithJID = #jid{lresource = WithLResource} = jlib:binary_to_jid(With),
-            WithBareJID = jlib:jid_remove_resource(WithJID),
-            {ejabberd_odbc:escape(jlib:jid_to_binary(WithBareJID)),
-             case WithLResource of <<>> -> undefined;
-                  _ -> ejabberd_odbc:escape(WithLResource) end}
-    end,
     %% This element's name is "limit".
     %% But it must be "max" according XEP-0313.
     Limit = get_one_of_path_bin(QueryEl, [
@@ -192,12 +184,7 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
                    ]),
     PageSize = min(max_result_limit(),
                    maybe_integer(Limit, default_result_limit())),
-    ?DEBUG("Parsed data~n\tStart ~p~n\tEnd ~p~n\tQueryId ~p~n\t"
-               "Limit ~p~n\tPageSize ~p~n\t"
-               "SWithJID ~p~n\tSWithResource ~p~n\tRSM: ~p~n",
-          [Start, End, QueryID, Limit, PageSize, SWithJID, SWithResource, RSM]),
-    SUser = ejabberd_odbc:escape(LUser),
-    Filter = prepare_filter(SUser, Start, End, SWithJID, SWithResource),
+    Filter = prepare_filter(From, Start, End, With),
     TotalCount = calc_count(LServer, Filter),
     Offset     = calc_offset(LServer, Filter, PageSize, TotalCount, RSM),
     ?DEBUG("RSM info: ~nTotal count: ~p~nOffset: ~p~n",
@@ -299,7 +286,7 @@ handle_package(Dir, ReturnId,
     case IsComplete of
         true ->
         IsInteresting =
-        case behaviour(LocJID, RemJID) of
+        case get_behaviour(always, LocJID, RemJID) of
             always -> true;
             never  -> false;
             roster -> is_jid_in_user_roster(LocJID, RemJID)
@@ -402,7 +389,7 @@ result_query(SetEl) ->
         children = [SetEl]}.
 
 -spec result_prefs(DefaultMode, AlwaysJIDs, NewerJIDs) -> ResultPrefsEl when
-    DefaultMode :: binary(),
+    DefaultMode :: archive_behaviour(),
     AlwaysJIDs  :: [binary()],
     NewerJIDs   :: [binary()],
     ResultPrefsEl :: elem().
@@ -413,7 +400,8 @@ result_prefs(DefaultMode, AlwaysJIDs, NewerJIDs) ->
                       children = encode_jids(NewerJIDs)},
     #xmlel{
        name = <<"prefs">>,
-       attrs = [{<<"xmlns">>,mam_ns_binary()}, {<<"default">>, DefaultMode}],
+       attrs = [{<<"xmlns">>,mam_ns_binary()},
+                {<<"default">>, atom_to_binary(DefaultMode, utf8)}],
        children = [AlwaysEl, NewerEl]
     }.
 
@@ -424,14 +412,14 @@ encode_jids(JIDs) ->
 
 -spec parse_prefs(PrefsEl) -> {DefaultMode, AlwaysJIDs, NewerJIDs} when
     PrefsEl :: elem(),
-    DefaultMode :: binary(),
+    DefaultMode :: archive_behaviour(),
     AlwaysJIDs  :: [binary()],
     NewerJIDs   :: [binary()].
 parse_prefs(El=#xmlel{name = <<"prefs">>, attrs = Attrs}) ->
     {value, Default} = xml:get_attr(<<"default">>, Attrs),
     AlwaysJIDs = parse_jid_list(El, <<"always">>),
     NewerJIDs  = parse_jid_list(El, <<"never">>),
-    {Default, AlwaysJIDs, NewerJIDs}.
+    {valid_behavior(Default), AlwaysJIDs, NewerJIDs}.
 
 parse_jid_list(El, Name) ->
     case xml:get_subtag(El, Name) of
@@ -453,117 +441,44 @@ is_jid_in_user_roster(#jid{lserver=LServer, luser=LUser},
         {none, []}, [LUser, LServer, RemBareJID]),
     Subscription == from orelse Subscription == both.
 
+prefs_module(Host) ->
+    gen_mod:get_module_opt(Host, ?MODULE, prefs_module, mod_mam_odbc_prefs).
 
-behaviour(#jid{lserver=LocLServer, luser=LocLUser},
-          #jid{} = RemJID) ->
-    RemLJID      = jlib:jid_tolower(RemJID),
-    SLocLUser    = ejabberd_odbc:escape(LocLUser),
-    SRemLBareJID = esc_jid(jlib:jid_remove_resource(RemLJID)),
-    SRemLJID     = esc_jid(jlib:jid_tolower(RemJID)),
-    case query_behaviour(LocLServer, SLocLUser, SRemLJID, SRemLBareJID) of
-        {selected, ["behaviour"], [{Behavour}]} ->
-            case Behavour of
-                "A" -> always;
-                "N" -> never;
-                "R" -> roster
-            end;
-        _ -> always %% default for everybody
-    end.
-
-query_behaviour(LServer, SUser, SRemLJID, SRemLBareJID) ->
-    Result =
-    ejabberd_odbc:sql_query(
-      LServer,
-      ["SELECT behaviour "
-       "FROM mam_config "
-       "WHERE local_username='", SUser, "' "
-         "AND (remote_jid='' OR remote_jid='", SRemLJID, "'",
-               case SRemLBareJID of
-                    SRemLJID -> "";
-                    _        -> [" OR remote_jid='", SRemLBareJID, "'"]
-               end,
-         ") "
-       "ORDER BY remote_jid DESC "
-       "LIMIT 1"]),
-    ?DEBUG("query_behaviour query returns ~p", [Result]),
-    Result.
+get_behaviour(DefaultBehaviour, LocJID=#jid{lserver=LServer}, RemJID=#jid{}) ->
+    M = prefs_module(LServer),
+    M:get_behaviour(DefaultBehaviour, LocJID, RemJID).
 
 update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NewerJIDs) ->
-    SUser = ejabberd_odbc:escape(LUser),
-    DelQuery = ["DELETE FROM mam_config WHERE local_username = '", SUser, "'"],
-    InsQuery = ["INSERT INTO mam_config(local_username, behaviour, remote_jid) "
-       "VALUES ", encode_first_config_row(SUser, encode_behaviour(DefaultMode), ""),
-       [encode_config_row(SUser, "A", ejabberd_odbc:escape(JID))
-        || JID <- AlwaysJIDs],
-       [encode_config_row(SUser, "N", ejabberd_odbc:escape(JID))
-        || JID <- NewerJIDs]],
-    %% Run as a transaction
-    {atomic, [DelResult, InsResult]} =
-        sql_transaction_map(LServer, [DelQuery, InsQuery]),
-    ?DEBUG("update_settings query returns ~p and ~p", [DelResult, InsResult]),
-    ok.
-
-encode_first_config_row(SUser, SBehavour, SJID) ->
-    ["('", SUser, "', '", SBehavour, "', '", SJID, "')"].
-
-encode_config_row(SUser, SBehavour, SJID) ->
-    [", ('", SUser, "', '", SBehavour, "', '", SJID, "')"].
-
-sql_transaction_map(LServer, Queries) ->
-    AtomicF = fun() ->
-        [ejabberd_odbc:sql_query(LServer, Query) || Query <- Queries]
-    end,
-    ejabberd_odbc:sql_transaction(LServer, AtomicF).
+    M = prefs_module(LServer),
+    M:update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NewerJIDs).
 
 %% @doc Load settings from the database.
 -spec get_prefs(LServer, LUser, GlobalDefaultMode) -> Result when
     LServer     :: server_hostname(),
     LUser       :: literal_username(),
-    DefaultMode :: archive_behaviour_bin(),
-    GlobalDefaultMode :: archive_behaviour_bin(),
+    DefaultMode :: archive_behaviour(),
+    GlobalDefaultMode :: archive_behaviour(),
     Result      :: {DefaultMode, AlwaysJIDs, NewerJIDs},
     AlwaysJIDs  :: [literal_jid()],
     NewerJIDs   :: [literal_jid()].
+
 get_prefs(LServer, LUser, GlobalDefaultMode) ->
-    SUser = ejabberd_odbc:escape(LUser),
-    {selected, _ColumnNames, Rows} =
-    ejabberd_odbc:sql_query(
-      LServer,
-      ["SELECT remote_jid, behaviour "
-       "FROM mam_config "
-       "WHERE local_username='", SUser, "'"]),
-    decode_prefs_rows(Rows, GlobalDefaultMode, [], []).
-
-decode_prefs_rows([{<<>>, Behavour}|Rows], _DefaultMode, AlwaysJIDs, NewerJIDs) ->
-    decode_prefs_rows(Rows, decode_behaviour(Behavour), AlwaysJIDs, NewerJIDs);
-decode_prefs_rows([{JID, <<"A">>}|Rows], DefaultMode, AlwaysJIDs, NewerJIDs) ->
-    decode_prefs_rows(Rows, DefaultMode, [JID|AlwaysJIDs], NewerJIDs);
-decode_prefs_rows([{JID, <<"N">>}|Rows], DefaultMode, AlwaysJIDs, NewerJIDs) ->
-    decode_prefs_rows(Rows, DefaultMode, AlwaysJIDs, [JID|NewerJIDs]);
-decode_prefs_rows([], DefaultMode, AlwaysJIDs, NewerJIDs) ->
-    {DefaultMode, AlwaysJIDs, NewerJIDs}.
+    M = prefs_module(LServer),
+    M:get_prefs(LServer, LUser, GlobalDefaultMode).
 
 
-esc_jid(JID) ->
-    ejabberd_odbc:escape(jlib:jid_to_binary(JID)).
-
-
-remove_user_from_db(LServer, SUser) ->
+remove_user_from_db(LServer, LUser) ->
     wait_flushing(LServer),
-    Result1 =
-    ejabberd_odbc:sql_query(
-      LServer,
-      ["DELETE "
-       "FROM mam_config "
-       "WHERE local_username='", SUser, "'"]),
-    Result2 =
+    M = prefs_module(LServer),
+    M:remove_user_from_db(LServer, LUser),
+    SUser = ejabberd_odbc:escape(LUser),
     ejabberd_odbc:sql_query(
       LServer,
       ["DELETE "
        "FROM mam_message "
        "WHERE local_username='", SUser, "'"]),
-    ?DEBUG("remove_user query returns ~p and ~p", [Result1, Result2]),
     ok.
+
 
 calc_archive_size(LServer, SUser) ->
     {selected, _ColumnNames, [{BSize}]} =
@@ -586,7 +501,7 @@ message_row_to_id({BUID,_,_}) ->
     BUID.
 
 %% Each record is a tuple of form 
-%% `{<<"3">>,<<"1366312523">>,<<"bob@localhost">>,<<"res1">>,<<binary>>}'.
+%% `{<<"13663125233">>,<<"bob@localhost">>,<<"res1">>,<<binary>>}'.
 %% Columns are `["id","from_jid","message"]'.
 -spec extract_messages(LServer, Filter, IOffset, IMax) ->
     [Record] when
@@ -693,6 +608,20 @@ calc_count(LServer, Filter) ->
     list_to_integer(binary_to_list(BCount)).
 
 
+prepare_filter(#jid{luser=LUser}, Start, End, With) ->
+    SUser = ejabberd_odbc:escape(LUser),
+    {SWithJID, SWithResource} =
+    case With of
+        <<>> -> {undefined, undefined};
+        _    ->
+            WithJID = #jid{lresource = WithLResource} = jlib:binary_to_jid(With),
+            WithBareJID = jlib:jid_remove_resource(WithJID),
+            {ejabberd_odbc:escape(jlib:jid_to_binary(WithBareJID)),
+             case WithLResource of <<>> -> undefined;
+                  _ -> ejabberd_odbc:escape(WithLResource) end}
+    end,
+    prepare_filter(SUser, Start, End, SWithJID, SWithResource).
+
 -spec prepare_filter(SUser, IStart, IEnd, SWithJID, SWithResource) -> filter()
     when
     SUser   :: escaped_username(),
@@ -724,6 +653,11 @@ prepare_filter(SUser, IStart, IEnd, SWithJID, SWithResource) ->
 
 %% ----------------------------------------------------------------------
 %% Helpers
+
+-spec valid_behavior(archive_behaviour_bin()) -> archive_behaviour().
+valid_behavior(<<"always">>) -> always;
+valid_behavior(<<"never">>)  -> never;
+valid_behavior(<<"roster">>) -> roster.
 
 %% "maybe" means, that the function may return 'undefined'.
 -spec maybe_unix_timestamp(iso8601_datetime_binary()) -> unix_timestamp();
@@ -814,3 +748,6 @@ decode_compact_uuid(Id) ->
 wait_flushing(_LServer) ->
     timer:sleep(500).
 
+
+is_function_exist(M, F, A) ->
+    lists:member({F, A}, M:module_info(exports)).
