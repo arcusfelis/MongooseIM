@@ -140,11 +140,11 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
                       sub_el = PrefsEl = #xmlel{name = <<"prefs">>}}) ->
     ?DEBUG("Handling mam prefs IQ~n    from ~p ~n    packet ~p.",
               [From, IQ]),
-    {DefaultMode, AlwaysJIDs, NewerJIDs} = parse_prefs(PrefsEl),
-    ?DEBUG("Parsed data~n\tDefaultMode ~p~n\tAlwaysJIDs ~p~n\tNewerJIDS ~p~n",
-              [DefaultMode, AlwaysJIDs, NewerJIDs]),
-    update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NewerJIDs),
-    ResultPrefsEl = result_prefs(DefaultMode, AlwaysJIDs, NewerJIDs),
+    {DefaultMode, AlwaysJIDs, NeverJIDs} = parse_prefs(PrefsEl),
+    ?DEBUG("Parsed data~n\tDefaultMode ~p~n\tAlwaysJIDs ~p~n\tNeverJIDS ~p~n",
+              [DefaultMode, AlwaysJIDs, NeverJIDs]),
+    update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs),
+    ResultPrefsEl = result_prefs(DefaultMode, AlwaysJIDs, NeverJIDs),
     IQ#iq{type = result, sub_el = [ResultPrefsEl]};
 
 process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
@@ -153,10 +153,10 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
                       sub_el = #xmlel{name = <<"prefs">>}}) ->
     ?DEBUG("Handling mam prefs IQ~n    from ~p ~n    packet ~p.",
               [From, IQ]),
-    {DefaultMode, AlwaysJIDs, NewerJIDs} = get_prefs(LServer, LUser, always),
-    ?DEBUG("Extracted data~n\tDefaultMode ~p~n\tAlwaysJIDs ~p~n\tNewerJIDS ~p~n",
-              [DefaultMode, AlwaysJIDs, NewerJIDs]),
-    ResultPrefsEl = result_prefs(DefaultMode, AlwaysJIDs, NewerJIDs),
+    {DefaultMode, AlwaysJIDs, NeverJIDs} = get_prefs(LServer, LUser, always),
+    ?DEBUG("Extracted data~n\tDefaultMode ~p~n\tAlwaysJIDs ~p~n\tNeverJIDS ~p~n",
+              [DefaultMode, AlwaysJIDs, NeverJIDs]),
+    ResultPrefsEl = result_prefs(DefaultMode, AlwaysJIDs, NeverJIDs),
     IQ#iq{type = result, sub_el = [ResultPrefsEl]};
     
 process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
@@ -388,21 +388,21 @@ result_query(SetEl) ->
         attrs = [{<<"xmlns">>, mam_ns_binary()}],
         children = [SetEl]}.
 
--spec result_prefs(DefaultMode, AlwaysJIDs, NewerJIDs) -> ResultPrefsEl when
+-spec result_prefs(DefaultMode, AlwaysJIDs, NeverJIDs) -> ResultPrefsEl when
     DefaultMode :: archive_behaviour(),
     AlwaysJIDs  :: [binary()],
-    NewerJIDs   :: [binary()],
+    NeverJIDs   :: [binary()],
     ResultPrefsEl :: elem().
-result_prefs(DefaultMode, AlwaysJIDs, NewerJIDs) ->
+result_prefs(DefaultMode, AlwaysJIDs, NeverJIDs) ->
     AlwaysEl = #xmlel{name = <<"always">>,
                       children = encode_jids(AlwaysJIDs)},
-    NewerEl  = #xmlel{name = <<"never">>,
-                      children = encode_jids(NewerJIDs)},
+    NeverEl  = #xmlel{name = <<"never">>,
+                      children = encode_jids(NeverJIDs)},
     #xmlel{
        name = <<"prefs">>,
        attrs = [{<<"xmlns">>,mam_ns_binary()},
                 {<<"default">>, atom_to_binary(DefaultMode, utf8)}],
-       children = [AlwaysEl, NewerEl]
+       children = [AlwaysEl, NeverEl]
     }.
 
 encode_jids(JIDs) ->
@@ -410,16 +410,16 @@ encode_jids(JIDs) ->
      || JID <- JIDs].
 
 
--spec parse_prefs(PrefsEl) -> {DefaultMode, AlwaysJIDs, NewerJIDs} when
+-spec parse_prefs(PrefsEl) -> {DefaultMode, AlwaysJIDs, NeverJIDs} when
     PrefsEl :: elem(),
     DefaultMode :: archive_behaviour(),
     AlwaysJIDs  :: [binary()],
-    NewerJIDs   :: [binary()].
+    NeverJIDs   :: [binary()].
 parse_prefs(El=#xmlel{name = <<"prefs">>, attrs = Attrs}) ->
     {value, Default} = xml:get_attr(<<"default">>, Attrs),
     AlwaysJIDs = parse_jid_list(El, <<"always">>),
-    NewerJIDs  = parse_jid_list(El, <<"never">>),
-    {valid_behavior(Default), AlwaysJIDs, NewerJIDs}.
+    NeverJIDs  = parse_jid_list(El, <<"never">>),
+    {valid_behavior(Default), AlwaysJIDs, NeverJIDs}.
 
 parse_jid_list(El, Name) ->
     case xml:get_subtag(El, Name) of
@@ -448,9 +448,9 @@ get_behaviour(DefaultBehaviour, LocJID=#jid{lserver=LServer}, RemJID=#jid{}) ->
     M = prefs_module(LServer),
     M:get_behaviour(DefaultBehaviour, LocJID, RemJID).
 
-update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NewerJIDs) ->
+update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs) ->
     M = prefs_module(LServer),
-    M:update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NewerJIDs).
+    M:update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs).
 
 %% @doc Load settings from the database.
 -spec get_prefs(LServer, LUser, GlobalDefaultMode) -> Result when
@@ -458,9 +458,9 @@ update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NewerJIDs) ->
     LUser       :: literal_username(),
     DefaultMode :: archive_behaviour(),
     GlobalDefaultMode :: archive_behaviour(),
-    Result      :: {DefaultMode, AlwaysJIDs, NewerJIDs},
+    Result      :: {DefaultMode, AlwaysJIDs, NeverJIDs},
     AlwaysJIDs  :: [literal_jid()],
-    NewerJIDs   :: [literal_jid()].
+    NeverJIDs   :: [literal_jid()].
 
 get_prefs(LServer, LUser, GlobalDefaultMode) ->
     M = prefs_module(LServer),

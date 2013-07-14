@@ -21,7 +21,7 @@ get_behaviour(DefaultBehaviour,
         _ -> DefaultBehaviour
     end.
 
-update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NewerJIDs) ->
+update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs) ->
     SUser = ejabberd_odbc:escape(LUser),
     DelQuery = ["DELETE FROM mam_config WHERE local_username = '", SUser, "'"],
     InsQuery = ["INSERT INTO mam_config(local_username, behaviour, remote_jid) "
@@ -29,7 +29,7 @@ update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NewerJIDs) ->
        [encode_config_row(SUser, "A", ejabberd_odbc:escape(JID))
         || JID <- AlwaysJIDs],
        [encode_config_row(SUser, "N", ejabberd_odbc:escape(JID))
-        || JID <- NewerJIDs]],
+        || JID <- NeverJIDs]],
     %% Run as a transaction
     {atomic, [DelResult, InsResult]} =
         sql_transaction_map(LServer, [DelQuery, InsQuery]),
@@ -99,13 +99,13 @@ sql_transaction_map(LServer, Queries) ->
     end,
     ejabberd_odbc:sql_transaction(LServer, AtomicF).
 
-decode_prefs_rows([{<<>>, Behavour}|Rows], _DefaultMode, AlwaysJIDs, NewerJIDs) ->
-    decode_prefs_rows(Rows, decode_behaviour(Behavour), AlwaysJIDs, NewerJIDs);
-decode_prefs_rows([{JID, <<"A">>}|Rows], DefaultMode, AlwaysJIDs, NewerJIDs) ->
-    decode_prefs_rows(Rows, DefaultMode, [JID|AlwaysJIDs], NewerJIDs);
-decode_prefs_rows([{JID, <<"N">>}|Rows], DefaultMode, AlwaysJIDs, NewerJIDs) ->
-    decode_prefs_rows(Rows, DefaultMode, AlwaysJIDs, [JID|NewerJIDs]);
-decode_prefs_rows([], DefaultMode, AlwaysJIDs, NewerJIDs) ->
-    {DefaultMode, AlwaysJIDs, NewerJIDs}.
+decode_prefs_rows([{<<>>, Behavour}|Rows], _DefaultMode, AlwaysJIDs, NeverJIDs) ->
+    decode_prefs_rows(Rows, decode_behaviour(Behavour), AlwaysJIDs, NeverJIDs);
+decode_prefs_rows([{JID, <<"A">>}|Rows], DefaultMode, AlwaysJIDs, NeverJIDs) ->
+    decode_prefs_rows(Rows, DefaultMode, [JID|AlwaysJIDs], NeverJIDs);
+decode_prefs_rows([{JID, <<"N">>}|Rows], DefaultMode, AlwaysJIDs, NeverJIDs) ->
+    decode_prefs_rows(Rows, DefaultMode, AlwaysJIDs, [JID|NeverJIDs]);
+decode_prefs_rows([], DefaultMode, AlwaysJIDs, NeverJIDs) ->
+    {DefaultMode, AlwaysJIDs, NeverJIDs}.
 
 
