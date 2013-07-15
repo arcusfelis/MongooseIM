@@ -83,6 +83,7 @@ start(DefaultHost, Opts) ->
     ejabberd_hooks:add(user_send_packet, Host, ?MODULE, user_send_packet, 90),
     ejabberd_hooks:add(filter_packet, global, ?MODULE, filter_packet, 90),
     ejabberd_hooks:add(remove_user, Host, ?MODULE, remove_user, 50),
+    ejabberd_users:start(Host),
     PF = prefs_module(Host),
     case is_function_exist(PF, start, 1) of
         true  -> PF:start(Host);
@@ -247,8 +248,7 @@ filter_packet({From, To=#jid{luser=LUser, lserver=LServer}, Packet}) ->
     ?DEBUG("Receive packet~n    from ~p ~n    to ~p~n    packet ~p.",
               [From, To, Packet]),
     Packet2 =
-    case ejabberd_auth:is_user_exists(LUser, LServer)
-    andalso not ejabberd_auth_anonymous:is_user_exists(LUser, LServer) of
+    case ejabberd_users:is_user_exists(LUser, LServer) of
     false -> Packet;
     true ->
         case handle_package(incoming, true, To, From, From, Packet) of
