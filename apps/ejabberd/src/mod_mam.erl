@@ -294,8 +294,7 @@ handle_package(Dir, ReturnId,
         case IsInteresting of
             true -> 
             Id = generate_message_id(),
-            Data = term_to_binary(Packet),
-            mod_mam_async_writer:archive_message(Id, Dir, LocJID, RemJID, SrcJID, Data),
+            mod_mam_async_writer:archive_message(Id, Dir, LocJID, RemJID, SrcJID, Packet),
             case ReturnId of
                 true  -> integer_to_binary(Id);
                 false -> undefined

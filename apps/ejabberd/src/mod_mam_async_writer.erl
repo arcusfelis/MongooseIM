@@ -39,12 +39,13 @@ srv_name(Host) ->
 
 
 archive_message(Id, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
-                RemJID=#jid{lresource=RemLResource}, SrcJID, Data) ->
+                RemJID=#jid{lresource=RemLResource}, SrcJID, Packet) ->
     SLocLUser = ejabberd_odbc:escape(LocLUser),
     SBareRemJID = esc_jid(jlib:jid_tolower(jlib:jid_remove_resource(RemJID))),
     SSrcJID = esc_jid(SrcJID),
     SDir = encode_direction(Dir),
     SRemLResource = ejabberd_odbc:escape(RemLResource),
+    Data = term_to_binary(Packet, [compressed]),
     SData = ejabberd_odbc:escape(Data),
     SId = integer_to_list(Id),
     archive_message(LocLServer, SId, SLocLUser, SBareRemJID,

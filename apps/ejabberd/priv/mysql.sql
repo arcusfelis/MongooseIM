@@ -224,7 +224,6 @@ CREATE TABLE pubsub_subscription_opt (
 );
 CREATE UNIQUE INDEX i_pubsub_subscription_opt ON pubsub_subscription_opt(subid(32), opt_name(32));
 
-
 CREATE TABLE mam_message(
   -- Message UID (64 bits)
   -- A server-assigned UID that MUST be unique within the archive.
@@ -241,12 +240,12 @@ CREATE TABLE mam_message(
   -- I - incoming, remote_jid is a value from From.
   -- O - outgoing, remote_jid is a value from To.
   -- Has no meaning for MUC-rooms.
-  direction character(1) NOT NULL,
+  direction ENUM('I','O') NOT NULL,
   -- Term-encoded message packet
   message blob NOT NULL
 );
-CREATE INDEX i_mam_message_username_added_at USING BTREE ON mam_message(local_username, id);
-CREATE INDEX i_mam_message_username_jid_added_at USING BTREE ON mam_message(local_username, remote_bare_jid, id);
+CREATE INDEX i_mam_message_username_id USING BTREE ON mam_message(local_username, id);
+CREATE INDEX i_mam_message_username_jid_id USING BTREE ON mam_message(local_username, remote_bare_jid, id);
 
 CREATE TABLE mam_muc_message(
   -- Message UID

@@ -49,7 +49,7 @@ is_user_exists(LUser, LServer) ->
 
 remove_user(LUser, LServer) ->
     {atomic, ok} = mnesia:transaction(fun() ->
-        mnesia:delete(cached_user, {LUser, LServer}),
+        mnesia:delete(cached_user, {LUser, LServer}, write),
         ok
         end),
     ok.

@@ -68,3 +68,17 @@ Tests
 -----
 
 - Check dates with escalus.
+
+
+Maximum length of JID
+---------------------
+
+From http://xmpp.org/extensions/xep-0029.html
+node (256 bytes)@domain (255 bytes, 7-bit encoding)/resource (256 bytes)
+256+1+255+1+256=769 (bytes)
+
+From http://www.jabber.org/ietf/draft-ietf-xmpp-core-20.html
+Each allowable portion of a JID (node identifier, domain identifier, and 
+resource identifier) MUST NOT be more than 1023 bytes in length, resulting in 
+a maximum total size (including the '@' and '/' separators) of 3071 bytes.
+
