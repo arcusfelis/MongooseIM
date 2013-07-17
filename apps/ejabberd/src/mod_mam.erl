@@ -65,8 +65,8 @@ delete_archive(User, Server) ->
 archive_size(User, Server) ->
     LUser = jlib:nodeprep(User),
     LServer = jlib:nameprep(Server),
-    SUser = ejabberd_odbc:escape(LUser),
-    calc_archive_size(LServer, SUser).
+    UserID = mod_mam_cache:user_id(LServer, LUser),
+    calc_archive_size(LServer, UserID).
 
 %% ----------------------------------------------------------------------
 %% gen_mod callbacks
@@ -83,6 +83,7 @@ start(DefaultHost, Opts) ->
     ejabberd_hooks:add(user_send_packet, Host, ?MODULE, user_send_packet, 90),
     ejabberd_hooks:add(filter_packet, global, ?MODULE, filter_packet, 90),
     ejabberd_hooks:add(remove_user, Host, ?MODULE, remove_user, 50),
+    ejabberd_hooks:add(remove_user, Host, mod_mam_cache, remove_user, 50),
     ejabberd_users:start(Host),
     PF = prefs_module(Host),
     case is_function_exist(PF, start, 1) of
@@ -111,15 +112,23 @@ stop(Host) ->
 
 
 start_supervisor(Host) ->
-    Proc = mod_mam_async_writer:srv_name(Host),
-    ChildSpec =
-    {Proc,
-     {mod_mam_async_writer, start_link, [Proc, Host]},
+    WriterProc = mod_mam_async_writer:srv_name(Host),
+    WriterChildSpec =
+    {WriterProc,
+     {mod_mam_async_writer, start_link, [WriterProc, Host]},
      permanent,
      5000,
      worker,
      [mod_mam_async_writer]},
-    supervisor:start_child(ejabberd_sup, ChildSpec).
+    CacheChildSpec =
+    {mod_mam_cache,
+     {mod_mam_cache, start_link, []},
+     permanent,
+     5000,
+     worker,
+     [mod_mam_cache]},
+    supervisor:start_child(ejabberd_sup, CacheChildSpec),
+    supervisor:start_child(ejabberd_sup, WriterChildSpec).
 
 stop_supervisor(Host) ->
     Proc = mod_mam_async_writer:srv_name(Host),
@@ -474,18 +483,18 @@ remove_user_from_db(LServer, LUser) ->
     ejabberd_odbc:sql_query(
       LServer,
       ["DELETE "
-       "FROM mam_message "
-       "WHERE local_username='", SUser, "'"]),
+       "FROM mam_user "
+       "WHERE user_name='", SUser, "'"]),
     ok.
 
 
-calc_archive_size(LServer, SUser) ->
+calc_archive_size(LServer, UserID) ->
     {selected, _ColumnNames, [{BSize}]} =
     ejabberd_odbc:sql_query(
       LServer,
       ["SELECT COUNT(*) "
        "FROM mam_message "
-       "WHERE local_username = '", SUser, "'"]),
+       "WHERE user_id = '", integer_to_list(UserID), "'"]),
     list_to_integer(binary_to_list(BSize)).
 
 message_row_to_xml({BUID,BSrcJID,BPacket}, QueryID) ->
@@ -607,8 +616,8 @@ calc_count(LServer, Filter) ->
     list_to_integer(binary_to_list(BCount)).
 
 
-prepare_filter(#jid{luser=LUser}, Start, End, With) ->
-    SUser = ejabberd_odbc:escape(LUser),
+prepare_filter(#jid{lserver=LServer, luser=LUser}, Start, End, With) ->
+    UserID = mod_mam_cache:user_id(LServer, LUser),
     {SWithJID, SWithResource} =
     case With of
         <<>> -> {undefined, undefined};
@@ -619,17 +628,17 @@ prepare_filter(#jid{luser=LUser}, Start, End, With) ->
              case WithLResource of <<>> -> undefined;
                   _ -> ejabberd_odbc:escape(WithLResource) end}
     end,
-    prepare_filter(SUser, Start, End, SWithJID, SWithResource).
+    prepare_filter(UserID, Start, End, SWithJID, SWithResource).
 
--spec prepare_filter(SUser, IStart, IEnd, SWithJID, SWithResource) -> filter()
+-spec prepare_filter(UserID, IStart, IEnd, SWithJID, SWithResource) -> filter()
     when
-    SUser   :: escaped_username(),
+    UserID  :: non_neg_integer(),
     IStart  :: unix_timestamp() | undefined,
     IEnd    :: unix_timestamp() | undefined,
     SWithJID :: escaped_jid(),
     SWithResource :: escaped_resource().
-prepare_filter(SUser, IStart, IEnd, SWithJID, SWithResource) ->
-   ["WHERE local_username='", SUser, "'",
+prepare_filter(UserID, IStart, IEnd, SWithJID, SWithResource) ->
+   ["WHERE user_id='", integer_to_list(UserID), "'",
      case IStart of
         undefined -> "";
         _         -> [" AND id >= ",

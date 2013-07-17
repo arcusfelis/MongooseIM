@@ -19,16 +19,16 @@
 
 %% @private
 srv_name() ->
-    mod_mam_cache.
+    mod_mam_muc_cache.
 
 tbl_name_room_id() ->
-    mod_mam_cache_table_room_id.
+    mod_mam_muc_cache_table_room_id.
 
 tbl_name_logging() ->
-    mod_mam_cache_table_logging_enabled.
+    mod_mam_muc_cache_table_logging_enabled.
 
 tbl_name_querying() ->
-    mod_mam_cache_table_querying_enabled.
+    mod_mam_muc_cache_table_querying_enabled.
 
 %%====================================================================
 %% API

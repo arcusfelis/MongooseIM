@@ -224,12 +224,12 @@ CREATE TABLE pubsub_subscription_opt (
 );
 CREATE UNIQUE INDEX i_pubsub_subscription_opt ON pubsub_subscription_opt(subid(32), opt_name(32));
 
+
 CREATE TABLE mam_message(
   -- Message UID (64 bits)
   -- A server-assigned UID that MUST be unique within the archive.
   id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-  -- User's name
-  local_username varchar(250) NOT NULL,
+  user_id INT UNSIGNED NOT NULL,
   -- FromJID used to form a message without looking into stanza.
   -- This value will be send to the client "as is".
   from_jid varchar(250) NOT NULL,
@@ -244,8 +244,26 @@ CREATE TABLE mam_message(
   -- Term-encoded message packet
   message blob NOT NULL
 );
-CREATE INDEX i_mam_message_username_id USING BTREE ON mam_message(local_username, id);
-CREATE INDEX i_mam_message_username_jid_id USING BTREE ON mam_message(local_username, remote_bare_jid, id);
+CREATE INDEX i_mam_message_username_id USING BTREE ON mam_message(user_id, id);
+CREATE INDEX i_mam_message_username_jid_id USING BTREE ON mam_message(user_id, remote_bare_jid, id);
+
+CREATE TABLE mam_config(
+  user_id INT UNSIGNED NOT NULL,
+  -- If empty, than it is a default behaviour.
+  remote_jid varchar(250) NOT NULL,
+  -- A - always archive;
+  -- N - never archive;
+  -- R - roster (only for remote_jid == "")
+  behaviour ENUM('A', 'N', 'R') NOT NULL,
+);
+CREATE INDEX i_mam_config USING HASH ON mam_config(user_id, remote_jid);
+
+CREATE TABLE mam_user(
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_name varchar(250) NOT NULL
+);
+CREATE INDEX i_mam_user_name USING BTREE ON mam_user(user_name);
+
 
 CREATE TABLE mam_muc_message(
   -- Message UID
@@ -279,15 +297,3 @@ CREATE TABLE mam_muc_room(
 );
 CREATE INDEX i_mam_muc_room_name USING BTREE ON mam_muc_room(room_name);
 
-
-
-CREATE TABLE mam_config(
-  local_username varchar(250) NOT NULL,
-  -- If empty, than it is a default behaviour.
-  remote_jid varchar(250) NOT NULL,
-  -- A - always archive;
-  -- N - never archive;
-  -- R - roster (only for remote_jid == "")
-  behaviour character(1) NOT NULL
-);
-CREATE INDEX i_mam_config USING HASH ON mam_config(local_username, remote_jid);

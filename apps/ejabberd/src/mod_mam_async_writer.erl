@@ -40,7 +40,8 @@ srv_name(Host) ->
 
 archive_message(Id, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
                 RemJID=#jid{lresource=RemLResource}, SrcJID, Packet) ->
-    SLocLUser = ejabberd_odbc:escape(LocLUser),
+    UserID = mod_mam_cache:user_id(LocLServer, LocLUser),
+    SUserID = integer_to_list(UserID),
     SBareRemJID = esc_jid(jlib:jid_tolower(jlib:jid_remove_resource(RemJID))),
     SSrcJID = esc_jid(SrcJID),
     SDir = encode_direction(Dir),
@@ -48,12 +49,12 @@ archive_message(Id, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
     Data = term_to_binary(Packet, [compressed]),
     SData = ejabberd_odbc:escape(Data),
     SId = integer_to_list(Id),
-    archive_message(LocLServer, SId, SLocLUser, SBareRemJID,
+    archive_message(LocLServer, SId, SUserID, SBareRemJID,
                     SRemLResource, SDir, SSrcJID, SData).
 
 
-archive_message(Host, SId, SLocLUser, SBareRemJID, SRemLResource, SDir, SSrcJID, SData) ->
-    Msg = {archive_message, SId, SLocLUser, SBareRemJID, SRemLResource, SDir, SSrcJID, SData},
+archive_message(Host, SId, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData) ->
+    Msg = {archive_message, SId, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData},
     gen_server:cast(srv_name(Host), Msg).
 
 %% For folsom.
@@ -78,12 +79,17 @@ run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc}) ->
     Result =
     ejabberd_odbc:sql_query(
       Conn,
-      ["INSERT INTO mam_message(id, local_username, remote_bare_jid, "
+      ["INSERT INTO mam_message(id, user_id, remote_bare_jid, "
                                 "remote_resource, direction, "
                                 "from_jid, message) "
        "VALUES ", tuples(Acc)]),
-    % [SId, SLocLUser, SBareRemJID, SRemLResource, SDir, SSrcJID, SData]
-    ?DEBUG("archive_message query returns ~p", [Result]),
+    % [SId, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData]
+    case Result of
+        {updated, _Count} -> ok;
+        {error, Reason} ->
+            ?ERROR_MSG("archive_message query failed with reason ~p", [Reason]),
+            ok
+    end,
     State#state{acc=[], flush_interval_tref=undefined}.
 
 join([H|T]) ->
@@ -134,11 +140,11 @@ handle_call(_, _From, State) ->
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
 
-handle_cast({archive_message, SId, SLocLUser, SBareRemJID, SRemLResource, SDir, SSrcJID, SData},
+handle_cast({archive_message, SId, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData},
             State=#state{acc=Acc, flush_interval_tref=TRef, flush_interval=Int,
                          max_packet_size=Max}) ->
     ?DEBUG("Schedule to write ~p.", [SId]),
-    Row = [SId, SLocLUser, SBareRemJID, SRemLResource, SDir, SSrcJID, SData],
+    Row = [SId, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData],
     TRef2 = case {Acc, TRef} of
             {[], undefined} -> erlang:send_after(Int, self(), flush);
             {_, _} -> TRef
