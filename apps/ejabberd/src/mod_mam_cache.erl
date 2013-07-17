@@ -24,6 +24,9 @@ tbl_name_user_id() ->
 group_name() ->
     mod_mam_cache.
 
+su_key(LServer, LUserName) ->
+    {LServer, LUserName}.
+
 %%====================================================================
 %% API
 %%====================================================================
@@ -51,7 +54,7 @@ update_user_id(LServer, UserName, UserId) ->
 
 lookup_user_id(LServer, UserName) ->
     try
-        ets:lookup_element(tbl_name_user_id(), {UserName, LServer}, 2)
+        ets:lookup_element(tbl_name_user_id(), su_key(LServer, UserName), 2)
     catch error:badarg ->
         not_found
     end.
@@ -137,7 +140,7 @@ init([]) ->
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
 handle_call({update_user_id, LServer, UserName, UserId}, _From, State) ->
-    ets:insert(tbl_name_user_id(), {{LServer, UserName}, UserId}),
+    ets:insert(tbl_name_user_id(), {su_key(LServer, UserName), UserId}),
     {reply, ok, State}.
 
 
@@ -149,7 +152,7 @@ handle_call({update_user_id, LServer, UserName, UserId}, _From, State) ->
 %%--------------------------------------------------------------------
 
 handle_cast({remove_user, User, Server}, State) ->
-    ets:delete(tbl_name_user_id(), {Server, User}),
+    ets:delete(tbl_name_user_id(), su_key(Server, User)),
     {noreply, State};
 handle_cast(Msg, State) ->
     ?WARNING_MSG("Strange message ~p.", [Msg]),

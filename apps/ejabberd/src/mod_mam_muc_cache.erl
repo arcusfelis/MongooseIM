@@ -30,6 +30,9 @@ tbl_name_logging() ->
 tbl_name_querying() ->
     mod_mam_muc_cache_table_querying_enabled.
 
+sr_key(Server, RoomName) ->
+    {Server, RoomName}.
+
 %%====================================================================
 %% API
 %%====================================================================
@@ -93,21 +96,21 @@ update_room_id(LServer, RoomName, RoomId) ->
 
 lookup_querying_enabled(LServer, RoomName) ->
     try
-        ets:lookup_element(tbl_name_querying(), {RoomName, LServer}, 2)
+        ets:lookup_element(tbl_name_querying(), sr_key(LServer, RoomName), 2)
     catch error:badarg ->
         not_found
     end.
 
 lookup_logging_enabled(LServer, RoomName) ->
     try
-        ets:lookup_element(tbl_name_logging(), {RoomName, LServer}, 2)
+        ets:lookup_element(tbl_name_logging(), sr_key(LServer, RoomName), 2)
     catch error:badarg ->
         not_found
     end.
 
 lookup_room_id(LServer, RoomName) ->
     try
-        ets:lookup_element(tbl_name_room_id(), {RoomName, LServer}, 2)
+        ets:lookup_element(tbl_name_room_id(), sr_key(LServer, RoomName), 2)
     catch error:badarg ->
         not_found
     end.
@@ -194,13 +197,13 @@ init([]) ->
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
 handle_call({update_querying_enabled, LServer, RoomName, Enabled}, _From, State) ->
-    ets:insert(tbl_name_room_id(), {{LServer, RoomName}, Enabled}),
+    ets:insert(tbl_name_room_id(), {sr_key(LServer, RoomName), Enabled}),
     {reply, ok, State};
 handle_call({update_logging_enabled, LServer, RoomName, Enabled}, _From, State) ->
-    ets:insert(tbl_name_room_id(), {{LServer, RoomName}, Enabled}),
+    ets:insert(tbl_name_room_id(), {sr_key(LServer, RoomName), Enabled}),
     {reply, ok, State};
 handle_call({update_room_id, LServer, RoomName, RoomId}, _From, State) ->
-    ets:insert(tbl_name_room_id(), {{LServer, RoomName}, RoomId}),
+    ets:insert(tbl_name_room_id(), {sr_key(LServer, RoomName), RoomId}),
     {reply, ok, State}.
 
 
