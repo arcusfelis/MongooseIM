@@ -13,25 +13,48 @@
          enable_querying/3,
          create_room_archive/2]).
 
+
+-import(mod_mam_utils,
+        [maybe_microseconds/1,
+         microseconds_to_now/1]).
+
+%% UID
+-import(mod_mam_utils,
+        [generate_message_id/0,
+         encode_compact_uuid/2,
+         decode_compact_uuid/1]).
+
+%% XML
+-import(mod_mam_utils,
+        [replace_archived_elem/3,
+         get_one_of_path/2,
+         wrap_message/5,
+         result_set/4,
+         result_query/1]).
+
+%% Other
+-import(mod_mam_utils,
+        [maybe_integer/2]).
+
+%% Ejabberd
+-import(mod_mam_utils,
+        [send_message/3]).
+
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
 -include_lib("exml/include/exml.hrl").
 
--define(MAYBE_BIN(X), (is_binary(X) orelse (X) =:= undefined)).
 
 %% ----------------------------------------------------------------------
 %% Datetime types
--type iso8601_datetime_binary() :: binary().
-%% Seconds from 01.01.1970
+%% Microseconds from 01.01.1970
 -type unix_timestamp() :: non_neg_integer().
 
 %% ----------------------------------------------------------------------
 %% XMPP types
 -type server_hostname() :: binary().
--type elem() :: #xmlel{}.
 -type escaped_nick_name() :: binary(). 
 -type escaped_room_id() :: binary(). 
-
 
 %% ----------------------------------------------------------------------
 %% Other types
@@ -45,8 +68,6 @@ mam_ns_string() -> "urn:xmpp:mam:tmp".
 
 mam_ns_binary() -> <<"urn:xmpp:mam:tmp">>.
 
-rsm_ns_binary() -> <<"http://jabber.org/protocol/rsm">>.
-
 default_result_limit() -> 50.
 
 max_result_limit() -> 50.
@@ -56,11 +77,10 @@ should_delete_archive_after_destruction_by_default(_LServer) -> true.
 %% ----------------------------------------------------------------------
 %% gen_mod callbacks
 
-start(DefaultHost, Opts) ->
+start(Host, Opts) ->
     ?DEBUG("mod_mam_muc starting", []),
-    Host = gen_mod:get_opt_host(DefaultHost, Opts, DefaultHost),
     start_supervisor(Host),
-    IQDisc = gen_mod:get_opt(iqdisc, Opts, one_queue), %% Type
+    IQDisc = gen_mod:get_opt(iqdisc, Opts, parallel), %% Type
     mod_disco:register_feature(Host, mam_ns_binary()),
     gen_iq_handler:add_iq_handler(mod_muc_iq, Host, mam_ns_binary(),
                                   ?MODULE, room_process_mam_iq, IQDisc),
@@ -85,18 +105,29 @@ sup_name() ->
     ejabberd_mod_mam_muc_sup.
 
 start_supervisor(Host) ->
-    Proc = gen_mod:get_module_proc(Host, sup_name()),
-    ChildSpec =
-    {Proc,
+    WriterProc = mod_mam_muc_async_writer:srv_name(Host),
+    WriterChildSpec =
+    {WriterProc,
+     {mod_mam_muc_async_writer, start_link, [WriterProc, Host]},
+     permanent,
+     5000,
+     worker,
+     [mod_mam_muc_async_writer]},
+    CacheChildSpec =
+    {mod_mam_muc_cache,
      {mod_mam_muc_cache, start_link, []},
      permanent,
      5000,
      worker,
      [mod_mam_muc_cache]},
-    supervisor:start_child(ejabberd_sup, ChildSpec).
+    supervisor:start_child(ejabberd_sup, WriterChildSpec),
+    supervisor:start_child(ejabberd_sup, CacheChildSpec).
 
 stop_supervisor(Host) ->
-    Proc = gen_mod:get_module_proc(Host, sup_name()),
+    WriterProc = mod_mam_muc_async_writer:srv_name(Host),
+    stop_child(WriterProc).
+
+stop_child(Proc) ->
     supervisor:terminate_child(ejabberd_sup, Proc),
     supervisor:delete_child(ejabberd_sup, Proc).
 
@@ -170,18 +201,10 @@ filter_room_packet(Packet, FromNick, _FromJID,
     case mod_mam_muc_cache:is_logging_enabled(LServer, RoomName) of
     false -> Packet;
     true ->
-    RoomId = mod_mam_muc_cache:room_id(LServer, RoomName),
-    SRoomId = integer_to_list(RoomId),
-    SFromNick = ejabberd_odbc:escape(FromNick),
-    SData = ejabberd_odbc:escape(term_to_binary(Packet)),
-    AtomicF = fun() ->
-    archive_message(LServer, SRoomId, SFromNick, SData),
-    last_insert_id(LServer)
-    end,
-    {atomic, Id} = ejabberd_odbc:sql_transaction(LServer, AtomicF),
-    ?DEBUG("Archived ~p", [Id]),
+    Id = generate_message_id(),
+    mod_mam_muc_async_writer:archive_message(LServer, RoomName, Id, FromNick, Packet),
     BareTo = jlib:jid_to_binary(To),
-    replace_archived_elem(BareTo, Id, Packet)
+    replace_archived_elem(BareTo, integer_to_binary(Id), Packet)
     end.
 
 %% `process_mam_iq/3' is simular.
@@ -200,8 +223,8 @@ room_process_mam_iq(From=#jid{lserver = LServer},
     QueryID = xml:get_tag_attr_s(<<"queryid">>, QueryEl),
     %% Filtering by date.
     %% Start :: integer() | undefined
-    Start = maybe_unix_timestamp(xml:get_path_s(QueryEl, [{elem, <<"start">>}, cdata])),
-    End   = maybe_unix_timestamp(xml:get_path_s(QueryEl, [{elem, <<"end">>}, cdata])),
+    Start = maybe_microseconds(xml:get_path_s(QueryEl, [{elem, <<"start">>}, cdata])),
+    End   = maybe_microseconds(xml:get_path_s(QueryEl, [{elem, <<"end">>}, cdata])),
     RSM   = jlib:rsm_decode(QueryEl),
     %% Filtering by contact.
     With  = xml:get_path_s(QueryEl, [{elem, <<"with">>}, cdata]),
@@ -214,7 +237,7 @@ room_process_mam_iq(From=#jid{lserver = LServer},
     end,
     %% This element's name is "limit".
     %% But it must be "max" according XEP-0313.
-    Limit = get_one_of_path_bin(QueryEl, [
+    Limit = get_one_of_path(QueryEl, [
                     [{elem, <<"set">>}, {elem, <<"max">>}, cdata],
                     [{elem, <<"set">>}, {elem, <<"limit">>}, cdata]
                    ]),
@@ -224,6 +247,7 @@ room_process_mam_iq(From=#jid{lserver = LServer},
     RoomId = mod_mam_muc_cache:room_id(LServer, RoomName),
     SRoomId = integer_to_list(RoomId),
     Filter = prepare_filter(SRoomId, Start, End, SWithNick),
+    wait_flushing(LServer),
     TotalCount = calc_count(LServer, Filter),
     Offset     = calc_offset(LServer, Filter, PageSize, TotalCount, RSM),
     ?DEBUG("RSM info: ~nTotal count: ~p~nOffset: ~p~n",
@@ -262,102 +286,20 @@ room_process_mam_iq(_, _, _) ->
 %% ----------------------------------------------------------------------
 %% Internal functions
 
-send_message(From, To, Mess) ->
-    ejabberd_sm:route(From, To, Mess).
-
-%% @doc This element will be added into "iq/query".
--spec result_set(FirstId, LastId, FirstIndexI, CountI) -> elem() when
-    FirstId :: binary() | undefined,
-    LastId  :: binary() | undefined,
-    FirstIndexI :: non_neg_integer() | undefined,
-    CountI      :: non_neg_integer().
-result_set(FirstId, LastId, FirstIndexI, CountI)
-        when ?MAYBE_BIN(FirstId), ?MAYBE_BIN(LastId) ->
-    %% <result xmlns='urn:xmpp:mam:tmp' queryid='f27' id='28482-98726-73623' />
-    FirstEl = [#xmlel{name = <<"first">>,
-                      attrs = [{<<"index">>, integer_to_binary(FirstIndexI)}],
-                      children = [#xmlcdata{content = FirstId}]
-                     }
-               || FirstId =/= undefined],
-    LastEl = [#xmlel{name = <<"last">>,
-                     children = [#xmlcdata{content = LastId}]
-                    }
-               || LastId =/= undefined],
-    CountEl = #xmlel{
-            name = <<"count">>,
-            children = [#xmlcdata{content = integer_to_binary(CountI)}]},
-    #xmlel{
-        name = <<"set">>,
-        attrs = [{<<"xmlns">>, rsm_ns_binary()}],
-        children = FirstEl ++ LastEl ++ [CountEl]}.
-
-result_query(SetEl) ->
-     #xmlel{
-        name = <<"query">>,
-        attrs = [{<<"xmlns">>, mam_ns_binary()}],
-        children = [SetEl]}.
-
-message_row_to_xml({BUID,BSeconds,BNick,BPacket}, RoomJID, QueryID) ->
+message_row_to_xml({BUID,BNick,BPacket}, RoomJID, QueryID) ->
+    UID = list_to_integer(binary_to_list(BUID)),
+    {Microseconds, _NodeId} = decode_compact_uuid(UID),
     Packet = binary_to_term(BPacket),
-    Seconds  = list_to_integer(binary_to_list(BSeconds)),
-    DateTime = calendar:now_to_universal_time(seconds_to_now(Seconds)),
+    DateTime = calendar:now_to_universal_time(microseconds_to_now(Microseconds)),
     FromJID = jlib:jid_replace_resource(RoomJID, BNick),
     wrap_message(Packet, QueryID, BUID, DateTime, FromJID).
 
-message_row_to_id({BUID,_,_,_}) ->
+message_row_to_id({BUID,_,_}) ->
     BUID.
 
 
-%% @doc Form `<forwarded/>' element, according to the XEP.
--spec wrap_message(Packet::elem(), QueryID::binary(),
-                   MessageUID::term(), DateTime::calendar:datetime(), FromJID::jid()) ->
-        Wrapper::elem().
-wrap_message(Packet, QueryID, MessageUID, DateTime, FromJID) ->
-    #xmlel{
-        name = <<"message">>,
-        attrs = [],
-        children = [result(QueryID, MessageUID,
-                           [forwarded(Packet, DateTime, FromJID)])]}.
-
--spec forwarded(elem(), calendar:datetime(), jid()) -> elem().
-forwarded(Packet, DateTime, FromJID) ->
-    #xmlel{
-        name = <<"forwarded">>,
-        attrs = [{<<"xmlns">>, <<"urn:xmpp:forward:0">>}],
-        children = [delay(DateTime, FromJID), Packet]}.
-
--spec delay(calendar:datetime(), jid()) -> elem().
-delay(DateTime, FromJID) ->
-    jlib:timestamp_to_xml(DateTime, utc, FromJID, <<>>).
-
-
-%% @doc This element will be added in each forwarded message.
-result(QueryID, MessageUID, Children) when is_list(Children) ->
-    #xmlel{
-        name = <<"result">>,
-        attrs = [{<<"xmlns">>, mam_ns_binary()},
-                 {<<"queryid">>, QueryID},
-                 {<<"id">>, MessageUID}],
-        children = Children}.
-
 %% ----------------------------------------------------------------------
 %% SQL Internal functions
-
-archive_message(LServer, SRoomId, SNick, SData) ->
-    Result =
-    ejabberd_odbc:sql_query(
-      LServer,
-      ["INSERT INTO mam_muc_message(room_id, nick_name, "
-                                    "message, added_at) "
-       "VALUES ('", SRoomId, "', '", SNick, "', '", SData, "', ",
-                integer_to_list(current_unix_timestamp()), ")"]),
-    ?DEBUG("archive_message query returns ~p", [Result]),
-    ok.
-
-last_insert_id(LServer) ->
-    {selected, [_], [{Id}]} =
-    ejabberd_odbc:sql_query(LServer, "SELECT LAST_INSERT_ID()"),
-    Id.
 
 %% #rsm_in{
 %%    max = non_neg_integer() | undefined,
@@ -447,18 +389,20 @@ prepare_filter(SRoomId, IStart, IEnd, SWithNick) ->
    ["WHERE room_id='", SRoomId, "'",
      case IStart of
         undefined -> "";
-        _         -> [" AND added_at >= ", integer_to_list(IStart)]
+        _         -> [" AND id >= ",
+                      integer_to_list(encode_compact_uuid(IStart, 0))]
      end,
      case IEnd of
         undefined -> "";
-        _         -> [" AND added_at <= ", integer_to_list(IEnd)]
+        _         -> [" AND id <= ",
+                      integer_to_list(encode_compact_uuid(IEnd, 255))]
      end,
      case SWithNick of
         undefined -> "";
         _         -> [" AND nick_name = '", SWithNick, "'"]
      end].
 
-%% Columns are `["id","added_at","nick_name","message"]'.
+%% Columns are `["id","nick_name","message"]'.
 -spec extract_messages(LServer, Filter, IOffset, IMax) ->
     [Record] when
     LServer :: server_hostname(),
@@ -472,10 +416,10 @@ extract_messages(LServer, Filter, IOffset, IMax) ->
     {selected, _ColumnNames, MessageRows} =
     ejabberd_odbc:sql_query(
       LServer,
-      ["SELECT id, added_at, nick_name, message "
+      ["SELECT id, nick_name, message "
        "FROM mam_muc_message ",
         Filter,
-       " ORDER BY added_at, id"
+       " ORDER BY id"
        " LIMIT ",
          case IOffset of
              0 -> "";
@@ -528,67 +472,6 @@ select_bool(LServer, RoomName, Field) ->
 %% ----------------------------------------------------------------------
 %% Helpers
 
-%% "maybe" means, that the function may return 'undefined'.
--spec maybe_unix_timestamp(iso8601_datetime_binary()) -> unix_timestamp();
-                          (<<>>) -> undefined.
-maybe_unix_timestamp(<<>>) -> undefined;
-maybe_unix_timestamp(ISODateTime) -> 
-    case iso8601_datetime_binary_to_timestamp(ISODateTime) of
-        undefined -> undefined;
-        Stamp -> now_to_seconds(Stamp)
-    end.
+wait_flushing(_LServer) ->
+    timer:sleep(500).
 
--spec current_unix_timestamp() -> unix_timestamp().
-current_unix_timestamp() ->
-    now_to_seconds(os:timestamp()).
-
--spec now_to_seconds(erlang:timestamp()) -> unix_timestamp().
-now_to_seconds({Mega, Secs, _}) ->
-    1000000 * Mega + Secs.
-
--spec seconds_to_now(unix_timestamp()) -> erlang:timestamp().
-seconds_to_now(Seconds) when is_integer(Seconds) ->
-    {Seconds div 1000000, Seconds rem 1000000, 0}.
-
-%% @doc Returns time in `now()' format.
--spec iso8601_datetime_binary_to_timestamp(iso8601_datetime_binary()) ->
-    erlang:timestamp().
-iso8601_datetime_binary_to_timestamp(DateTime) when is_binary(DateTime) ->
-    jlib:datetime_string_to_timestamp(binary_to_list(DateTime)).
-
-
-maybe_integer(<<>>, Def) -> Def;
-maybe_integer(Bin, _Def) when is_binary(Bin) ->
-    list_to_integer(binary_to_list(Bin)).
-
-
-get_one_of_path_bin(Elem, List) ->
-    get_one_of_path(Elem, List, <<>>).
-
-get_one_of_path(Elem, [H|T], Def) ->
-    case xml:get_path_s(Elem, H) of
-        Def -> get_one_of_path(Elem, T, Def);
-        Val  -> Val
-    end;
-get_one_of_path(_Elem, [], Def) ->
-    Def.
-
-
-replace_archived_elem(By, Id, Packet) ->
-    append_archived_elem(By, Id,
-    delete_archived_elem(By, Packet)).
-
-append_archived_elem(By, Id, Packet) ->
-    Archived = #xmlel{
-        name = <<"archived">>,
-        attrs=[{<<"by">>, By}, {<<"id">>, Id}]},
-    xml:append_subtags(Packet, [Archived]).
-
-delete_archived_elem(By, Packet=#xmlel{children=Cs}) ->
-    Packet#xmlel{children=[C || C <- Cs, not is_archived_elem_for(C, By)]}.
-
-%% @doc Return true, if the first element points on `By'.
-is_archived_elem_for(#xmlel{name = <<"archived">>, attrs=As}, By) ->
-    lists:member({<<"by">>, By}, As);
-is_archived_elem_for(_, _) ->
-    false.

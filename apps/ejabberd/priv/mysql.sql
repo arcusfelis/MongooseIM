@@ -254,7 +254,7 @@ CREATE TABLE mam_config(
   -- A - always archive;
   -- N - never archive;
   -- R - roster (only for remote_jid == "")
-  behaviour ENUM('A', 'N', 'R') NOT NULL,
+  behaviour ENUM('A', 'N', 'R') NOT NULL
 );
 CREATE INDEX i_mam_config USING HASH ON mam_config(user_id, remote_jid);
 
@@ -272,12 +272,10 @@ CREATE TABLE mam_muc_message(
   room_id INT UNSIGNED NOT NULL,
   -- A nick of the message's originator
   nick_name varchar(250) NOT NULL,
-  -- A timestamp of when the message was sent
-  added_at int NOT NULL,
   -- Term-encoded message packet
   message blob NOT NULL
 );
-CREATE INDEX i_mam_muc_message_room_name_added_at USING BTREE ON mam_muc_message(room_id, added_at);
+CREATE INDEX i_mam_muc_message_room_name_added_at USING BTREE ON mam_muc_message(room_id, id);
 
 CREATE TABLE mam_muc_room(
   id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
