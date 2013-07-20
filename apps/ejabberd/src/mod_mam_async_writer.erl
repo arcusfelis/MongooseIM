@@ -1,6 +1,8 @@
 %% @doc Stores cache using ETS-table.
 -module(mod_mam_async_writer).
--export([start_link/2,
+-export([start/1,
+         stop/1,
+         start_link/2,
          srv_name/1,
          archive_message/6,
          queue_length/1]).
@@ -30,6 +32,23 @@ encode_direction(outgoing) -> "O".
 %%====================================================================
 %% API
 %%====================================================================
+
+start(Host) ->
+    WriterProc = mod_mam_async_writer:srv_name(Host),
+    WriterChildSpec =
+    {WriterProc,
+     {mod_mam_async_writer, start_link, [WriterProc, Host]},
+     permanent,
+     5000,
+     worker,
+     [mod_mam_async_writer]},
+    supervisor:start_child(ejabberd_sup, WriterChildSpec).
+
+stop(Host) ->
+    Proc = srv_name(Host),
+    supervisor:terminate_child(ejabberd_sup, Proc),
+    supervisor:delete_child(ejabberd_sup, Proc).
+
 
 start_link(ProcName, Host) ->
     gen_server:start_link({local, ProcName}, ?MODULE, [Host], []).

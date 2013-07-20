@@ -104,11 +104,7 @@ start(Host, Opts) ->
     ejabberd_hooks:add(filter_packet, global, ?MODULE, filter_packet, 90),
     ejabberd_hooks:add(remove_user, Host, ?MODULE, remove_user, 50),
     ejabberd_users:start(Host),
-    PF = prefs_module(Host),
-    case is_function_exist(PF, start, 1) of
-        true  -> PF:start(Host);
-        false -> ok
-    end,
+    [start_module(Host, M) || M <- required_modules(Host)],
     ok.
 
 stop(Host) ->
@@ -119,26 +115,14 @@ stop(Host) ->
     ejabberd_hooks:delete(remove_user, Host, ?MODULE, remove_user, 50),
     gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, mam_ns_string()),
     mod_disco:unregister_feature(Host, mam_ns_binary()),
-    PF = prefs_module(Host),
-    case is_function_exist(PF, stop, 1) of
-        true  -> PF:stop(Host);
-        false -> ok
-    end,
+    [stop_module(Host, M) || M <- required_modules(Host)],
     ok.
 
 %% ----------------------------------------------------------------------
 %% OTP helpers
 
 
-start_supervisor(Host) ->
-    WriterProc = mod_mam_async_writer:srv_name(Host),
-    WriterChildSpec =
-    {WriterProc,
-     {mod_mam_async_writer, start_link, [WriterProc, Host]},
-     permanent,
-     5000,
-     worker,
-     [mod_mam_async_writer]},
+start_supervisor(_Host) ->
     CacheChildSpec =
     {mod_mam_cache,
      {mod_mam_cache, start_link, []},
@@ -146,14 +130,25 @@ start_supervisor(Host) ->
      5000,
      worker,
      [mod_mam_cache]},
-    supervisor:start_child(ejabberd_sup, CacheChildSpec),
-    supervisor:start_child(ejabberd_sup, WriterChildSpec).
+    supervisor:start_child(ejabberd_sup, CacheChildSpec).
 
-stop_supervisor(Host) ->
-    Proc = mod_mam_async_writer:srv_name(Host),
-    supervisor:terminate_child(ejabberd_sup, Proc),
-    supervisor:delete_child(ejabberd_sup, Proc).
+stop_supervisor(_Host) ->
+    ok.
 
+
+start_module(Host, M) ->
+    case is_function_exist(M, start, 1) of
+        true  -> M:start(Host);
+        false -> ok
+    end,
+    ok.
+
+stop_module(Host, M) ->
+    case is_function_exist(M, stop, 1) of
+        true  -> M:stop(Host);
+        false -> ok
+    end,
+    ok.
 
 %% ----------------------------------------------------------------------
 %% hooks and handlers
@@ -314,7 +309,7 @@ handle_package(Dir, ReturnId,
         case IsInteresting of
             true -> 
             Id = generate_message_id(),
-            mod_mam_async_writer:archive_message(Id, Dir, LocJID, RemJID, SrcJID, Packet),
+            archive_message(Id, Dir, LocJID, RemJID, SrcJID, Packet),
             case ReturnId of
                 true  -> integer_to_binary(Id);
                 false -> undefined
@@ -324,11 +319,20 @@ handle_package(Dir, ReturnId,
         false -> undefined
     end.
 
+required_modules(Host) ->
+    [prefs_module(Host),
+     archive_module(Host),
+     writer_module(Host)].
+
 prefs_module(Host) ->
     gen_mod:get_module_opt(Host, ?MODULE, prefs_module, mod_mam_odbc_prefs).
 
 archive_module(Host) ->
     gen_mod:get_module_opt(Host, ?MODULE, archive_module, mod_mam_odbc_arch).
+
+writer_module(Host) ->
+    gen_mod:get_module_opt(Host, ?MODULE, writer_module, mod_mam_async_writer).
+
 
 get_behaviour(DefaultBehaviour, LocJID=#jid{lserver=LServer}, RemJID=#jid{}) ->
     M = prefs_module(LServer),
@@ -396,6 +400,11 @@ lookup_messages(UserJID=#jid{lserver=LServer}, RSM, Start, End,
     AM = archive_module(LServer),
     AM:lookup_messages(UserJID, RSM, Start, End, WithJID, PageSize,
                        LimitPassed, MaxResultLimit).
+
+archive_message(Id, Dir,
+                LocJID=#jid{lserver=LServer}, RemJID, SrcJID, Packet) ->
+    M = writer_module(LServer),
+    M:archive_message(Id, Dir, LocJID, RemJID, SrcJID, Packet).
 
 %% ----------------------------------------------------------------------
 %% Helpers
