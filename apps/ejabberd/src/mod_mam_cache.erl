@@ -2,7 +2,8 @@
 -module(mod_mam_cache).
 -export([start_link/0,
          user_id/2,
-         remove_user/2]).
+         remove_user_from_db/2,
+         remove_user_from_cache/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -104,11 +105,6 @@ remove_user_from_cache(Server, User) ->
             ok;
         {error, _Reason} -> ok
     end.
-
-%% Hook.
-remove_user(User, Server) ->
-    remove_user_from_db(Server, User),
-    remove_user_from_cache(Server, User).
 
 %%====================================================================
 %% gen_server callbacks

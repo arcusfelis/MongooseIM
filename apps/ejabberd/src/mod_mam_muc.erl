@@ -136,7 +136,7 @@ stop_child(Proc) ->
 %% API
 
 %% @doc Delete all messages from the room.
-delete_archive(RoomName, LServer) ->
+delete_archive(LServer, RoomName) ->
     RoomId = mod_mam_muc_cache:room_id(LServer, RoomName),
     SRoomId = integer_to_list(RoomId),
     %% TODO: use transaction
@@ -190,7 +190,7 @@ forget_room(LServer, RoomName) ->
             Bool
     end,
     case ShouldDelete of
-        true -> delete_archive(RoomName, LServer);
+        true -> delete_archive(LServer, RoomName);
         false -> false
     end.
 

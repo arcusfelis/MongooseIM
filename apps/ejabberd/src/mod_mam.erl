@@ -18,7 +18,6 @@
 %% UID
 -import(mod_mam_utils,
         [generate_message_id/0,
-         encode_compact_uuid/2,
          decode_compact_uuid/1]).
 
 %% XML
@@ -55,16 +54,12 @@
 %% XMPP types
 -type server_hostname() :: binary().
 -type literal_username() :: binary().
--type escaped_jid() :: binary().
 -type literal_jid() :: binary().
--type escaped_resource() :: binary().
 -type elem() :: #xmlel{}.
 
 
 %% ----------------------------------------------------------------------
 %% Other types
--type filter() :: iolist().
--type escaped_message_id() :: binary().
 -type archive_behaviour() :: atom(). % roster | always | never.
 
 %% ----------------------------------------------------------------------
@@ -81,18 +76,18 @@ max_result_limit() -> 50.
 %% ----------------------------------------------------------------------
 %% API
 
-delete_archive(User, Server) ->
+delete_archive(Server, User) ->
     LUser = jlib:nodeprep(User),
     LServer = jlib:nameprep(Server),
     ?DEBUG("Remove user ~p from ~p.", [LUser, LServer]),
     remove_user_from_db(LServer, LUser),
     ok.
 
-archive_size(User, Server) ->
+archive_size(Server, User) ->
     LUser = jlib:nodeprep(User),
     LServer = jlib:nameprep(Server),
-    UserID = mod_mam_cache:user_id(LServer, LUser),
-    calc_archive_size(LServer, UserID).
+    AM = archive_module(LServer),
+    AM:archive_size(LServer, LUser).
 
 %% ----------------------------------------------------------------------
 %% gen_mod callbacks
@@ -108,7 +103,6 @@ start(Host, Opts) ->
     ejabberd_hooks:add(user_send_packet, Host, ?MODULE, user_send_packet, 90),
     ejabberd_hooks:add(filter_packet, global, ?MODULE, filter_packet, 90),
     ejabberd_hooks:add(remove_user, Host, ?MODULE, remove_user, 50),
-    ejabberd_hooks:add(remove_user, Host, mod_mam_cache, remove_user, 50),
     ejabberd_users:start(Host),
     PF = prefs_module(Host),
     case is_function_exist(PF, start, 1) of
@@ -219,24 +213,15 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
                    ]),
     PageSize = min(max_result_limit(),
                    maybe_integer(Limit, default_result_limit())),
-    Filter = prepare_filter(From, Start, End, With),
-    TotalCount = calc_count(LServer, Filter),
-    Offset     = calc_offset(LServer, Filter, PageSize, TotalCount, RSM),
-    ?DEBUG("RSM info: ~nTotal count: ~p~nOffset: ~p~n",
-              [TotalCount, Offset]),
-
-    %% If a query returns a number of stanzas greater than this limit and the
-    %% client did not specify a limit using RSM then the server should return
-    %% a policy-violation error to the client. 
-    case TotalCount - Offset > max_result_limit() andalso Limit =:= <<>> of
-        true ->
+    LimitPassed = Limit =/= <<>>,
+    case lookup_messages(From, RSM, Start, End, With, PageSize,
+                         LimitPassed, max_result_limit()) of
+    {error, 'policy-violation'} ->
         ?DEBUG("Policy violation by ~p.", [LUser]),
         ErrorEl = ?STANZA_ERRORT(<<"">>, <<"modify">>, <<"policy-violation">>,
                                  <<"en">>, <<"Too many results">>),          
         IQ#iq{type = error, sub_el = [ErrorEl]};
-
-        false ->
-        MessageRows = extract_messages(LServer, Filter, Offset, PageSize),
+    {ok, {TotalCount, Offset, MessageRows}} ->
         {FirstId, LastId} =
             case MessageRows of
                 []    -> {undefined, undefined};
@@ -296,8 +281,9 @@ filter_packet({From, To=#jid{luser=LUser, lserver=LServer}, Packet}) ->
     {From, To, Packet2}.
 
 
+%% @doc A ejabberd's callback with diferent order of arguments.
 remove_user(User, Server) ->
-    delete_archive(User, Server).
+    delete_archive(Server, User).
 
 %% ----------------------------------------------------------------------
 %% Internal functions
@@ -341,6 +327,9 @@ handle_package(Dir, ReturnId,
 prefs_module(Host) ->
     gen_mod:get_module_opt(Host, ?MODULE, prefs_module, mod_mam_odbc_prefs).
 
+archive_module(Host) ->
+    gen_mod:get_module_opt(Host, ?MODULE, archive_module, mod_mam_odbc_arch).
+
 get_behaviour(DefaultBehaviour, LocJID=#jid{lserver=LServer}, RemJID=#jid{}) ->
     M = prefs_module(LServer),
     M:get_behaviour(DefaultBehaviour, LocJID, RemJID).
@@ -366,25 +355,14 @@ get_prefs(LServer, LUser, GlobalDefaultMode) ->
 
 remove_user_from_db(LServer, LUser) ->
     wait_flushing(LServer),
-    M = prefs_module(LServer),
-    M:remove_user_from_db(LServer, LUser),
-    SUser = ejabberd_odbc:escape(LUser),
-    ejabberd_odbc:sql_query(
-      LServer,
-      ["DELETE "
-       "FROM mam_user "
-       "WHERE user_name='", SUser, "'"]),
+    PM = prefs_module(LServer),
+    AM = archive_module(LServer),
+    PM:remove_user_from_db(LServer, LUser),
+    AM:remove_user_from_db(LServer, LUser),
+    mod_mam_cache:remove_user_from_db(LServer, LUser),
+    mod_mam_cache:remove_user_from_cache(LServer, LUser),
     ok.
 
-
-calc_archive_size(LServer, UserID) ->
-    {selected, _ColumnNames, [{BSize}]} =
-    ejabberd_odbc:sql_query(
-      LServer,
-      ["SELECT COUNT(*) "
-       "FROM mam_message "
-       "WHERE user_id = '", integer_to_list(UserID), "'"]),
-    list_to_integer(binary_to_list(BSize)).
 
 message_row_to_xml({BUID,BSrcJID,BPacket}, QueryID) ->
     UID = list_to_integer(binary_to_list(BUID)),
@@ -397,156 +375,27 @@ message_row_to_xml({BUID,BSrcJID,BPacket}, QueryID) ->
 message_row_to_id({BUID,_,_}) ->
     BUID.
 
-%% Each record is a tuple of form 
-%% `{<<"13663125233">>,<<"bob@localhost">>,<<"res1">>,<<binary>>}'.
-%% Columns are `["id","from_jid","message"]'.
--spec extract_messages(LServer, Filter, IOffset, IMax) ->
-    [Record] when
-    LServer :: server_hostname(),
-    Filter  :: filter(),
-    IOffset :: non_neg_integer(),
-    IMax    :: pos_integer(),
-    Record :: tuple().
-extract_messages(_LServer, _Filter, _IOffset, 0) ->
-    [];
-extract_messages(LServer, Filter, IOffset, IMax) ->
-    {selected, _ColumnNames, MessageRows} =
-    ejabberd_odbc:sql_query(
-      LServer,
-      ["SELECT id, from_jid, message "
-       "FROM mam_message ",
-        Filter,
-       " ORDER BY id"
-       " LIMIT ",
-         case IOffset of
-             0 -> "";
-             _ -> [integer_to_list(IOffset), ", "]
-         end,
-         integer_to_list(IMax)]),
-    ?DEBUG("extract_messages query returns ~p", [MessageRows]),
-    MessageRows.
 
-%% #rsm_in{
-%%    max = non_neg_integer() | undefined,
-%%    direction = before | aft | undefined,
-%%    id = binary() | undefined,
-%%    index = non_neg_integer() | undefined}
--spec calc_offset(LServer, Filter, PageSize, TotalCount, RSM) -> Offset
+-spec lookup_messages(UserJID, RSM, Start, End, WithJID, PageSize,
+                      LimitPassed, MaxResultLimit) ->
+    {ok, {TotalCount, Offset, MessageRows}} | {error, 'policy-violation'}
     when
-    LServer  :: server_hostname(),
-    Filter   :: filter(),
+    UserJID :: #jid{},
+    RSM     :: #rsm_in{} | none,
+    Start   :: unix_timestamp() | undefined,
+    End     :: unix_timestamp() | undefined,
+    WithJID :: #jid{} | undefined,
     PageSize :: non_neg_integer(),
+    LimitPassed :: boolean(),
+    MaxResultLimit :: non_neg_integer(),
     TotalCount :: non_neg_integer(),
-    RSM      :: #rsm_in{},
-    Offset   :: non_neg_integer().
-calc_offset(_LS, _F, _PS, _TC, #rsm_in{direction = undefined, index = Index})
-    when is_integer(Index) ->
-    Index;
-%% Requesting the Last Page in a Result Set
-calc_offset(_LS, _F, PS, TC, #rsm_in{direction = before, id = <<>>}) ->
-    max(0, TC - PS);
-calc_offset(LServer, Filter, PageSize, _TC, #rsm_in{direction = before, id = ID})
-    when is_binary(ID) ->
-    SID = ejabberd_odbc:escape(ID),
-    max(0, calc_before(LServer, Filter, SID) - PageSize);
-calc_offset(LServer, Filter, _PS, _TC, #rsm_in{direction = aft, id = ID})
-    when is_binary(ID), byte_size(ID) > 0 ->
-    SID = ejabberd_odbc:escape(ID),
-    calc_index(LServer, Filter, SID);
-calc_offset(_LS, _F, _PS, _TC, _RSM) ->
-    0.
-
-%% Zero-based index of the row with UID in the result test.
-%% If the element does not exists, the ID of the next element will
-%% be returned instead.
-%% "SELECT COUNT(*) as "index" FROM mam_message WHERE id <= '",  UID
--spec calc_index(LServer, Filter, SUID) -> Count
-    when
-    LServer  :: server_hostname(),
-    Filter   :: filter(),
-    SUID     :: escaped_message_id(),
-    Count    :: non_neg_integer().
-calc_index(LServer, Filter, SUID) ->
-    {selected, _ColumnNames, [{BIndex}]} =
-    ejabberd_odbc:sql_query(
-      LServer,
-      ["SELECT COUNT(*) FROM mam_message ", Filter, " AND id <= '", SUID, "'"]),
-    list_to_integer(binary_to_list(BIndex)).
-
-%% @doc Count of elements in RSet before the passed element.
-%% The element with the passed UID can be already deleted.
-%% "SELECT COUNT(*) as "count" FROM mam_message WHERE id < '",  UID
--spec calc_before(LServer, Filter, SUID) -> Count
-    when
-    LServer  :: server_hostname(),
-    Filter   :: filter(),
-    SUID     :: escaped_message_id(),
-    Count    :: non_neg_integer().
-calc_before(LServer, Filter, SUID) ->
-    {selected, _ColumnNames, [{BIndex}]} =
-    ejabberd_odbc:sql_query(
-      LServer,
-      ["SELECT COUNT(*) FROM mam_message ", Filter, " AND id < '", SUID, "'"]),
-    list_to_integer(binary_to_list(BIndex)).
-
-
-%% @doc Get the total result set size.
-%% "SELECT COUNT(*) as "count" FROM mam_message WHERE "
--spec calc_count(LServer, Filter) -> Count
-    when
-    LServer  :: server_hostname(),
-    Filter   :: filter(),
-    Count    :: non_neg_integer().
-calc_count(LServer, Filter) ->
-    {selected, _ColumnNames, [{BCount}]} =
-    ejabberd_odbc:sql_query(
-      LServer,
-      ["SELECT COUNT(*) FROM mam_message ", Filter]),
-    list_to_integer(binary_to_list(BCount)).
-
-
-prepare_filter(#jid{lserver=LServer, luser=LUser}, Start, End, With) ->
-    UserID = mod_mam_cache:user_id(LServer, LUser),
-    {SWithJID, SWithResource} =
-    case With of
-        <<>> -> {undefined, undefined};
-        _    ->
-            WithJID = #jid{lresource = WithLResource} = jlib:binary_to_jid(With),
-            WithBareJID = jlib:jid_remove_resource(WithJID),
-            {ejabberd_odbc:escape(jlib:jid_to_binary(WithBareJID)),
-             case WithLResource of <<>> -> undefined;
-                  _ -> ejabberd_odbc:escape(WithLResource) end}
-    end,
-    prepare_filter(UserID, Start, End, SWithJID, SWithResource).
-
--spec prepare_filter(UserID, IStart, IEnd, SWithJID, SWithResource) -> filter()
-    when
-    UserID  :: non_neg_integer(),
-    IStart  :: unix_timestamp() | undefined,
-    IEnd    :: unix_timestamp() | undefined,
-    SWithJID :: escaped_jid(),
-    SWithResource :: escaped_resource().
-prepare_filter(UserID, IStart, IEnd, SWithJID, SWithResource) ->
-   ["WHERE user_id='", integer_to_list(UserID), "'",
-     case IStart of
-        undefined -> "";
-        _         -> [" AND id >= ",
-                      integer_to_list(encode_compact_uuid(IStart, 0))]
-     end,
-     case IEnd of
-        undefined -> "";
-        _         -> [" AND id <= ",
-                      integer_to_list(encode_compact_uuid(IEnd, 255))]
-     end,
-     case SWithJID of
-        undefined -> "";
-        _         -> [" AND remote_bare_jid = '", SWithJID, "'"]
-     end,
-     case SWithResource of
-        undefined -> "";
-        _         -> [" AND remote_resource = '", SWithResource, "'"]
-     end].
-
+    Offset  :: non_neg_integer(),
+    MessageRows :: list(tuple()).
+lookup_messages(UserJID=#jid{lserver=LServer}, RSM, Start, End,
+                WithJID, PageSize, LimitPassed, MaxResultLimit) ->
+    AM = archive_module(LServer),
+    AM:lookup_messages(UserJID, RSM, Start, End, WithJID, PageSize,
+                       LimitPassed, MaxResultLimit).
 
 %% ----------------------------------------------------------------------
 %% Helpers
