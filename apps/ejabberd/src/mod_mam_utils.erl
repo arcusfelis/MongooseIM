@@ -100,7 +100,7 @@ encode_compact_uuid(Microseconds, NodeId)
 
 decode_compact_uuid(Id) ->
     Microseconds = Id bsr 8,
-    NodeId = Id band 8,
+    NodeId = Id band 255,
     {Microseconds, NodeId}.
 
 

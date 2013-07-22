@@ -82,3 +82,13 @@ Each allowable portion of a JID (node identifier, domain identifier, and
 resource identifier) MUST NOT be more than 1023 bytes in length, resulting in 
 a maximum total size (including the '@' and '/' separators) of 3071 bytes.
 
+
+DDoS protection
+---------------
+
+Limiting the number of XMPP resource identifiers allowed to an account at any
+one time. This may help to prevent a rogue account from creating an unlimited
+number of sessions and therefore exhausting the resources of the server's
+session manager.
+
+http://xmpp.org/extensions/xep-0205.html
