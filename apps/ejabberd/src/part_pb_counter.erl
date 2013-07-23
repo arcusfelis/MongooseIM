@@ -1,5 +1,6 @@
 -module(part_pb_counter).
 -export([new/0,
+         merge/1,
          increment/4,
          decrement/4]).
 
@@ -19,6 +20,101 @@
 
 new() ->
     <<?VAR_ZERO, ?VAR_ZERO>>. %% clients = [], groups = []
+
+merge([X]) ->
+    X;
+merge([_|_] = Cs) ->
+    C = merge_groups([complete_decode_counter(C) || C <- Cs]),
+    complete_encode_counter(C).
+
+merge_groups([G1, G2|T]) ->
+    merge_groups([merge_groups(G1, G2)|T]);
+merge_groups([G]) ->
+    G.
+
+merge_groups([{K, IncCID2Val1, DecCID2Val1}|T1],
+             [{K, IncCID2Val2, DecCID2Val2}|T2]) ->
+    IncCID2Val = merge_values(IncCID2Val1, IncCID2Val2),
+    DecCID2Val = merge_values(DecCID2Val1, DecCID2Val2),
+    [{K, IncCID2Val, DecCID2Val}|merge_groups(T1, T2)];
+merge_groups([{K1, _, _}=H1|T1],
+             [{K2, _, _}=H2|T2]) when K1 < K2 ->
+    [H1|merge_groups(T1, [H2|T2])];
+merge_groups([H1|T1], [H2|T2]) ->
+    [H2|merge_groups([H1|T1], T2)];
+merge_groups([], L2) ->
+    L2;
+merge_groups(L1, []) ->
+    L1.
+
+merge_values([{CID, V1}|T1], [{CID, V2}|T2]) ->
+    [{CID, V1+V2}|merge_values(T1, T2)];
+merge_values([{CID1, _}=H1|T1], [{CID2, _}=H2|T2]) when CID1 < CID2 ->
+    [H1|merge_values(T1, [H2|T2])];
+merge_values([H1|T1], [H2|T2]) ->
+    [H2|merge_values([H1|T1], T2)];
+merge_values([], L2) ->
+    L2;
+merge_values(L1, []) ->
+    L1.
+
+
+complete_decode_counter(C) ->
+    {Clients, T1} = decode_var_sized_binaries(C),
+    {Groups, <<>>} = decode_var_sized_binaries(T1),
+    complete_decode_groups(Groups, Clients).
+
+complete_decode_groups(Groups, Clients) ->
+    lists:usort([complete_decode_group(G, Clients) || G <- Groups]).
+
+complete_decode_group(B, Clients) ->
+    %% Key and encoded single pb-counter.
+    {K, C} = decode_var_sized_binary(B),
+    {_, _TotalValue, T} = var_signed_integer:decode(C),
+    {IncShortCID2Val, DecShortCID2Val} =
+    decode_incremented_decremented(T),
+    {K,
+     lists:usort(expand_short_client_ids(IncShortCID2Val, Clients)),
+     lists:usort(expand_short_client_ids(DecShortCID2Val, Clients))}.
+
+
+complete_encode_counter(Groups) ->
+    {GroupDict2, Clients2} = complete_encode_groups(Groups, [], []),
+    iolist_to_binary(
+        [encode_var_sized_binaries(Clients2),
+         encode_var_sized_binaries(encode_groups(GroupDict2))]).
+
+complete_encode_groups([G|Groups], Clients, Acc) ->
+    {GG, Clients2} = complete_encode_group(G, Clients),
+    complete_encode_groups(Groups, Clients2, [GG|Acc]);
+complete_encode_groups([], Clients, Acc) ->
+    {lists:reverse(Acc), Clients}. %% Groups and Clients
+
+complete_encode_group({K, IncCID2Val, DecCID2Val}, Clients) ->
+    {IncShortCID2Val, Clients2} = apply_short_client_ids(IncCID2Val, Clients),
+    {DecShortCID2Val, Clients3} = apply_short_client_ids(DecCID2Val, Clients2),
+    Total = calc_total(IncShortCID2Val, DecShortCID2Val),
+    Values = encode_incremented_decremented(IncShortCID2Val, DecShortCID2Val),
+    EncodedPBC = [var_signed_integer:encode(Total), Values],
+    {{K, EncodedPBC}, Clients3}.
+
+apply_short_client_ids(CID2Val, Clients) ->
+    apply_short_client_ids(CID2Val, Clients, []).
+
+apply_short_client_ids([{CID, Val}|CID2Val], Clients, Acc) ->
+    {ShortCID, Clients2} = get_short_client_id(Clients, CID),
+    apply_short_client_ids(CID2Val, Clients2, [{ShortCID, Val}|Acc]);
+apply_short_client_ids([], Clients, Acc) ->
+    {lists:reverse(Acc), Clients}.
+
+
+expand_short_client_ids(ShortCID2Val, Clients) ->
+    [{expand_short_client_id(ShortCID, Clients), Val}
+     || {ShortCID, Val} <- ShortCID2Val].
+
+expand_short_client_id(ShortCID, Clients) ->
+    lists:nth(ShortCID+1, Clients).
+
 
 %% Increase a counter of the group `K' on `N'.
 %%
@@ -72,7 +168,7 @@ update_group(ShortCID, N) when N < 0 ->
 pb_increment(ShortCID, N, PBC) when N > 0 ->
     %% Decode the current precalculated value of the counter.
     {_, TotalValue, T} = var_signed_integer:decode(PBC),
-    iolist_to_binary([var_integer:encode(TotalValue+N),
+    iolist_to_binary([var_signed_integer:encode(TotalValue+N),
                       pb_increment_cycle(ShortCID, N, T)]).
 
 %% B is: `[list([IncValue, ShortCID]), optional([0, list([DecValue, ShortCID])])]'.
@@ -100,7 +196,7 @@ pb_decrement(ShortCID, N, PBC) when N > 0 ->
     %% Decode the current precalculated value of the counter.
     {_, TotalValue, T} = var_signed_integer:decode(PBC),
     {IcrIOL, T1} = skip_incremented(T),
-    iolist_to_binary([var_integer:encode(TotalValue-N),
+    iolist_to_binary([var_signed_integer:encode(TotalValue-N),
                       IcrIOL, 0, pb_decrement_cycle(ShortCID, N, T1)]).
 
 %% B is: `[list([IncValue, ShortCID]), optional([0, list([DecValue, ShortCID])])]'.
@@ -127,14 +223,70 @@ skip_incremented(B) ->
 
 skip_incremented_cycle(<<>>, Acc) ->
     {lists:reverse(Acc), <<>>};
-skip_incremented_cycle(<<?VAR_ZERO>>, Acc) ->
-    {lists:reverse(Acc), <<>>};
+skip_incremented_cycle(<<?VAR_ZERO, T/binary>>, Acc) ->
+    {lists:reverse(Acc), T};
 skip_incremented_cycle(B, Acc) ->
     {_, V, T1} = var_integer:decode(B),
     {_, CurShortCID, T2} = var_integer:decode(T1),
     Acc2 = [[var_integer:encode(V), var_integer:encode(CurShortCID)]|Acc],
     %% tail recursion.
     skip_incremented_cycle(T2, Acc2).
+
+
+encode_incremented_decremented(IncShortCID2Val, DecShortCID2Val) ->
+    case DecShortCID2Val of
+        [] -> encode_values(IncShortCID2Val);
+        [_|_] ->
+            [encode_values(IncShortCID2Val), 0, encode_values(DecShortCID2Val)]
+    end.
+
+encode_values(ShortCID2Val) ->
+    [[var_integer:encode(Val), var_integer:encode(ShortCID)]
+     || {ShortCID, Val} <- ShortCID2Val].
+
+
+decode_incremented_decremented(B) ->
+    {IncShortCID2Val, T}    = decode_incremented(B),
+    {DecShortCID2Val, <<>>} = decode_decremented(T),
+    {IncShortCID2Val, DecShortCID2Val}.
+
+decode_incremented(B) ->
+    decode_incremented_cycle(B, []).
+
+decode_incremented_cycle(<<>>, Acc) ->
+    {lists:reverse(Acc), <<>>};
+decode_incremented_cycle(<<?VAR_ZERO, T/binary>>, Acc) ->
+    {lists:reverse(Acc), T};
+decode_incremented_cycle(B, Acc) ->
+    {_, V, T1} = var_integer:decode(B),
+    {_, CurShortCID, T2} = var_integer:decode(T1),
+    Acc2 = [{CurShortCID, V}|Acc],
+    %% tail recursion.
+    decode_incremented_cycle(T2, Acc2).
+
+decode_decremented(B) ->
+    decode_decremented_cycle(B, []).
+
+decode_decremented_cycle(<<>>, Acc) ->
+    {lists:reverse(Acc), <<>>};
+decode_decremented_cycle(B, Acc) ->
+    {_, V, T1} = var_integer:decode(B),
+    {_, CurShortCID, T2} = var_integer:decode(T1),
+    Acc2 = [{CurShortCID, V}|Acc],
+    %% tail recursion.
+    decode_decremented_cycle(T2, Acc2).
+
+
+calc_total(IncShortCID2Val, DecShortCID2Val) ->
+    calc_total(IncShortCID2Val) - calc_total(DecShortCID2Val).
+
+calc_total(ShortCID2Val) ->
+    calc_total_cycle(ShortCID2Val, 0).
+
+calc_total_cycle([{_, V}|T], Sum) ->
+    calc_total_cycle(T, V+Sum);
+calc_total_cycle([], Sum) ->
+    Sum.
 
     
 decode_var_sized_binary(B) ->
