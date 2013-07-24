@@ -1,8 +1,10 @@
 -module(part_pb_counter).
 -export([new/0,
+         value/1,
          merge/1,
          increment/4,
-         decrement/4]).
+         decrement/4,
+         format/1]).
 
 -ifdef(TEST).
 -ifdef(PROPER).
@@ -27,6 +29,36 @@ merge([_|_] = Cs) ->
     C = merge_groups([complete_decode_counter(C) || C <- Cs]),
     complete_encode_counter(C).
 
+value(C) ->
+    join_precalculated_values(C).
+
+format(C) ->
+    X = [{K, IncCID2Val, DecCID2Val}
+         || {K, IncCID2Val, DecCID2Val} <- complete_decode_counter(C)],
+    io_lib:format("~w", [X]).
+
+join_precalculated_values(C) ->
+    {_Clients, T1} = decode_var_sized_binaries(C),
+    {Groups, <<>>} = decode_var_sized_binaries(T1),
+    GroupDict = decode_groups(Groups),
+    join_precalculated_group_values(GroupDict).
+
+%% @doc Summerize total values.
+%% Each group in the dict contains a precalculated total value and
+%% PB-counter. This function does not decode the counter.
+join_precalculated_group_values(GroupDict) ->
+    join_precalculated_group_values(GroupDict, 0).
+
+join_precalculated_group_values([{_Key, Data}|T], Sum) ->
+    {_, TotalValue, _} = var_signed_integer:decode(Data),
+    join_precalculated_group_values(T, Sum+TotalValue);
+join_precalculated_group_values([], Sum) ->
+    Sum.
+
+
+merge_value(V1, V2) when V1 > 0, V2 > 0 ->
+    max(V1, V2).
+
 merge_groups([G1, G2|T]) ->
     merge_groups([merge_groups(G1, G2)|T]);
 merge_groups([G]) ->
@@ -48,7 +80,7 @@ merge_groups(L1, []) ->
     L1.
 
 merge_values([{CID, V1}|T1], [{CID, V2}|T2]) ->
-    [{CID, V1+V2}|merge_values(T1, T2)];
+    [{CID, merge_value(V1, V2)}|merge_values(T1, T2)];
 merge_values([{CID1, _}=H1|T1], [{CID2, _}=H2|T2]) when CID1 < CID2 ->
     [H1|merge_values(T1, [H2|T2])];
 merge_values([H1|T1], [H2|T2]) ->
@@ -141,14 +173,14 @@ update_value(K, N, CID, C) ->
 get_short_client_id(Clients, CID) ->
     get_short_client_id(Clients, CID, 0, []).
 
-%% Clients are sorted.
+%% Clients are NOT sorted.
 get_short_client_id([CID|Clients], CID, N, Acc) ->
     {N, lists:reverse(Acc, [CID|Clients])};
-get_short_client_id([C|Clients], CID, N, Acc) when C < CID ->
+get_short_client_id([C|Clients], CID, N, Acc) ->
     get_short_client_id(Clients, CID, N+1, [C|Acc]);
-get_short_client_id(Clients, CID, N, Acc) ->
+get_short_client_id([], CID, N, Acc) ->
     %% Create a new entry.
-    {N, lists:reverse(Acc, [CID|Clients])}.
+    {N, lists:reverse(Acc, [CID])}.
 
 with_group(F, K, [{K, Group}|GroupDict]) ->
     [{K, F(Group)}|GroupDict];
@@ -333,15 +365,44 @@ encode_test_() ->
     ,?_assertEqual(<<?VAR_SIGNED_ZERO>>, var_signed_integer:encode(0))
     ].
 
+counter() ->
+    ?LET(GroupDict, list(group()), lists:ukeysort(1, GroupDict)).
+
+group() ->
+    ?SUCHTHAT({Key, IncCID2Val, DecCID2Val},
+              {key(), pairs(), pairs()},
+              IncCID2Val =/= [] orelse DecCID2Val =/= []).
+
+pairs() ->
+    ?LET(Pairs, list(pair()), lists:ukeysort(1, Pairs)).
+
+pair() ->
+    {client_id(), value()}.
+
+client_id() ->
+    binary().
+
+value() ->
+    pos_integer().
+
+key() ->
+     binary().
+
+prop_inverse() ->
+    ?FORALL(X, counter(),
+            equals(X, complete_decode_counter(complete_encode_counter(X)))).
+                      
 
 -ifdef(PROPER).
 
-run_property_testing_test() ->
-    EunitLeader = erlang:group_leader(),
-    erlang:group_leader(whereis(user), self()),
-    Res = proper:module(?MODULE, [{constraint_tries, 500}]),
-    erlang:group_leader(EunitLeader, self()),
-    ?assertEqual([], Res). 
+run_property_testing_test_() ->
+    {timeout, 20, fun() ->
+        EunitLeader = erlang:group_leader(),
+        erlang:group_leader(whereis(user), self()),
+        Res = proper:module(?MODULE, [{constraint_tries, 500}]),
+        erlang:group_leader(EunitLeader, self()),
+        ?assertEqual([], Res)
+    end}.
 
 -endif.
 -endif.

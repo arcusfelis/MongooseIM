@@ -33,7 +33,7 @@ update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs) ->
        [encode_config_row(SUserID, "N", ejabberd_odbc:escape(JID))
         || JID <- NeverJIDs]],
     %% Run as a transaction
-    {atomic, [{updated, _}, {updated, 1}]} =
+    {atomic, [{updated, _}, {updated, _}]} =
         sql_transaction_map(LServer, [DelQuery, InsQuery]),
     ok.
 
