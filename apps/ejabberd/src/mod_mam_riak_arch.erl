@@ -13,6 +13,13 @@
 -include_lib("ejabberd/include/jlib.hrl").
 -include_lib("exml/include/exml.hrl").
 
+%-define(MEASURE_TIME(Tag, Operation), measure_time((Tag), (fun() -> (Operation) end))). 
+-define(MEASURE_TIME(_, Operation), Operation). 
+measure_time(Tag, F) ->
+    {Microseconds, Out} = timer:tc(F),
+    io:format("~p ~p~n", [Tag, Microseconds]),
+    Out.
+
 -type unix_timestamp() :: non_neg_integer().
 
 start(Host) ->
@@ -88,14 +95,15 @@ archive_message(Id, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
     BUserIDBareRemJID = remote_jid_message_id(Id, BBareRemJID),
     F = fun(Conn) ->
         %% Request a Riak client's ID from the server.
-        {ok, ClientID} = riakc_pb_socket:get_client_id(Conn),
+        {ok, ClientID} = ?MEASURE_TIME(get_client_id,
+            riakc_pb_socket:get_client_id(Conn)),
         %% Save message body.
         Obj = riakc_obj:new(<<"mam_messages">>, BID, Data),
-        ok = riakc_pb_socket:put(Conn, Obj),
+        ok = ?MEASURE_TIME(put_message, riakc_pb_socket:put(Conn, Obj)),
         %% Increment total message count in archive.
-        ok = riakc_pb_socket:counter_incr(Conn, <<"mam_usr_msg_cnt">>, BUserID, 1),
-        ok = riakc_pb_socket:counter_incr(Conn, <<"mam_usr_msg_cnt">>, BUserIDRemJID, 1),
-        ok = riakc_pb_socket:counter_incr(Conn, <<"mam_usr_msg_cnt">>, BUserIDBareRemJID, 1),
+        part_counter_incr(Conn, ClientID, BUserID, BHourID, 1),
+        part_counter_incr(Conn, ClientID, BUserIDRemJID, BHourID, 1),
+        part_counter_incr(Conn, ClientID, BUserIDBareRemJID, BHourID, 1),
         %% Write offset into index.
         update_hour_index(Conn, BHourID, BShortMessID),
         update_hour_index(Conn, BRemJIDHourID, BShortMessID),
@@ -105,8 +113,11 @@ archive_message(Id, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
     with_connection(LocLServer, F),
     ok.
 
+
 with_connection(LocLServer, F) ->
-    riak_pool:with_connection(mam_cluster, F).
+    ?MEASURE_TIME(with_connection, 
+        riak_pool:with_connection(mam_cluster, F)).
+
 
 id_to_binary(Id) ->
     <<Id:64/big>>.
@@ -131,19 +142,44 @@ short_message_id(Id) ->
     <<Offset:32/big, NodeID>>.
 
 %% Add this message into a list of messages with the same hour.
-update_hour_index(Conn, BHourID, BShortMessID) ->
-    case riakc_pb_socket:get(Conn, <<"mam_hour_idx">>, BHourID) of
+update_hour_index(Conn, BHourID, BShortMessID)
+    when is_binary(BHourID), is_binary(BShortMessID) ->
+    ?MEASURE_TIME(update_hour_index, 
+    case ?MEASURE_TIME(update_hour_index_get,
+                       riakc_pb_socket:get(Conn, <<"mam_hour_idx">>, BHourID)) of
         {ok, Obj} ->
             Value = merge_short_message_ids([BShortMessID|riakc_obj:get_values(Obj)]),
             Obj2 = riakc_obj:update_value(Obj, Value),
             Obj3 = fix_metadata(Obj2),
-            ok = riakc_pb_socket:put(Conn, Obj3);
+            ok = ?MEASURE_TIME(update_hour_index_put,
+                               riakc_pb_socket:put(Conn, Obj3));
         {error, notfound} ->
             ?DEBUG("Index ~p not found, create new one.", [BHourID]),
             Obj = riakc_obj:new(<<"mam_hour_idx">>, BHourID, BShortMessID),
-            ok = riakc_pb_socket:put(Conn, Obj)
-    end.
+            ok = ?MEASURE_TIME(update_hour_index_put_new,
+                               riakc_pb_socket:put(Conn, Obj))
+    end).
 
+part_counter_incr(Conn, ClientID, Key, BHourID, N)
+    when is_binary(Key), is_binary(BHourID) ->
+    ?MEASURE_TIME(part_counter_incr, 
+    case ?MEASURE_TIME(part_counter_incr_get,
+                       riakc_pb_socket:get(Conn, <<"mam_usr_msg_cnt">>, Key)) of
+        {ok, Obj} ->
+            MergedValue = part_pb_counter:merge(riakc_obj:get_values(Obj)),
+            Value = part_pb_counter:increment(BHourID, N, ClientID, MergedValue),
+            Obj2 = riakc_obj:update_value(Obj, Value),
+            Obj3 = fix_metadata(Obj2),
+            ok = ?MEASURE_TIME(part_counter_incr_put,
+                               riakc_pb_socket:put(Conn, Obj3));
+        {error, notfound} ->
+            NewValue = part_pb_counter:new(),
+            Value = part_pb_counter:increment(BHourID, N, ClientID, NewValue),
+            ?DEBUG("Index ~p not found, create new one.", [Key]),
+            Obj = riakc_obj:new(<<"mam_usr_msg_cnt">>, Key, Value),
+            ok = ?MEASURE_TIME(part_counter_incr_put_new,
+                               riakc_pb_socket:put(Conn, Obj))
+    end).
 
 %% @doc Resolve metadatas' conflict.
 fix_metadata(Obj) ->
@@ -153,8 +189,9 @@ fix_metadata(Obj) ->
     end.
 
 %% @doc Naive merge of metadata proplists.
-merge_metadatas(Metas) ->
-    lists:ukeysort(1, lists:merge(Metas)).
+-spec merge_metadatas(list(Meta)) -> Meta when Meta :: dict().
+merge_metadatas([Meta|_]) ->
+    Meta.
 
 merge_short_message_ids(GroupedIDS) ->
     IDS = lists:usort([ID || IDS <- GroupedIDS, <<ID:40>> <= IDS]),
@@ -164,7 +201,7 @@ remote_jid_hour_id(BHourID, BJID) ->
     <<BHourID/binary, BJID/binary>>.
 
 remote_jid_message_id(Id, BJID) ->
-    <<Id:62/big, BJID/binary>>.
+    <<Id:64/big, BJID/binary>>.
 
 
 %% @doc Ensure, that `UpdateProps' are set in required position.
