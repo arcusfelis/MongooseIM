@@ -54,6 +54,20 @@ init_folsom(Host) ->
     %% Called from `ejabberd_router:do_route/3'.
     folsom_metrics:new_histogram(route_time),
 
+    folsom_metrics:new_histogram(part_counter_incr),
+    folsom_metrics:new_histogram(part_counter_incr_get),
+    folsom_metrics:new_histogram(part_counter_incr_put),
+    folsom_metrics:new_histogram(part_counter_incr_put_new),
+    
+    folsom_metrics:new_histogram(update_hour_index),
+    folsom_metrics:new_histogram(update_hour_index_get),
+    folsom_metrics:new_histogram(update_hour_index_put),
+    folsom_metrics:new_histogram(update_hour_index_put_new),
+
+    folsom_metrics:new_histogram(put_message),
+    folsom_metrics:new_histogram(get_client_id),
+    folsom_metrics:new_histogram(with_connection),
+
     folsom_metrics:new_gauge({Host, modMamMessageQueueLength}),
     folsom_metrics:tag_metric({Host, modMamMessageQueueLength}, Host),
     folsom_metrics:new_gauge({Host, odbcQueryQueueLength}),

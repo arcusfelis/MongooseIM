@@ -13,12 +13,26 @@
 -include_lib("ejabberd/include/jlib.hrl").
 -include_lib("exml/include/exml.hrl").
 
-%-define(MEASURE_TIME(Tag, Operation), measure_time((Tag), (fun() -> (Operation) end))). 
--define(MEASURE_TIME(_, Operation), Operation). 
+-ifdef(MEASURE_TIME_TIMER).
+-define(MEASURE_TIME(Tag, Operation), measure_time((Tag), (fun() -> (Operation) end))). 
 measure_time(Tag, F) ->
     {Microseconds, Out} = timer:tc(F),
     io:format("~p ~p~n", [Tag, Microseconds]),
     Out.
+-else.
+-ifdef(MEASURE_TIME_FOLSOM).
+-define(MEASURE_TIME(Tag, Operation), measure_time((Tag), (fun() -> (Operation) end))). 
+measure_time(Tag, F) ->
+    case folsom_metrics:metric_exists(Tag) of
+        true ->
+            folsom_metrics:histogram_timed_update(Tag, F);
+        false ->
+            F()
+    end.
+-else.
+-define(MEASURE_TIME(_, Operation), Operation). 
+-endif. % MEASURE_TIME_FOLSOM
+-endif. % MEASURE_TIME_TIMER
 
 -type unix_timestamp() :: non_neg_integer().
 
