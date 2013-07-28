@@ -13,11 +13,21 @@
 -include_lib("ejabberd/include/jlib.hrl").
 -include_lib("exml/include/exml.hrl").
 
+-record(index_meta, {
+    offset,
+    total_count,
+    last_hour_keys,
+    matched_count
+}).
+
 message_bucket() ->
     <<"mam_m">>.
 
 message_count_bucket() ->
     <<"mam_c">>.
+
+index_info_bucket() ->
+    <<"mam_i">>.
 
 message_count_by_bare_remote_jid_bucket() ->
     <<"mam_cc">>.
@@ -25,11 +35,14 @@ message_count_by_bare_remote_jid_bucket() ->
 message_count_by_full_remote_jid_bucket() ->
     <<"mam_ccc">>.
 
-user_id_bare_remote_jid_bucket() ->
-    "b".
+user_id_bare_remote_jid_index() ->
+    {binary_index, "b"}.
 
-user_id_full_remote_jid_bucket() ->
-    "f".
+user_id_full_remote_jid_index() ->
+    {binary_index, "f"}.
+
+key_index() ->
+    <<"$key">>.
 
 -define(MEASURE_TIME_TIMER, 1).
 -ifdef(MEASURE_TIME_TIMER).
@@ -88,9 +101,30 @@ archive_size(LServer, LUser) ->
     Offset  :: non_neg_integer(),
     MessageRows :: list(tuple()).
 %% Row is `{<<"13663125233">>,<<"bob@localhost">>,<<"res1">>,<<binary>>}'.
-lookup_messages(UserJID=#jid{lserver=LServer},
+lookup_messages(UserJID=#jid{lserver=LocLServer, lserver=LocLUser},
                 RSM, Start, End, WithJID,
                 PageSize, LimitPassed, MaxResultLimit) ->
+    UserID = mod_mam_cache:user_id(LocLServer, LocLUser),
+    BUserID = user_id_to_binary(UserID),
+    SecIndex = choose_index(WithJID),
+    BWithJID = maybe_jid_to_opt_binary(WithJID),
+    InfoKey = index_info_key(BUserID, BWithJID),
+    MessIdxKeyMaker = mess_index_key_maker(BUserID, BWithJID),
+    F = fun(Conn) ->
+            case riakc_pb_socket:get(Conn, index_info_bucket(), InfoKey)) of
+                {error, notfound} ->
+%                   MessIdxKeyMaker({lower, Start}),
+%                   MessIdxKeyMaker({upper, End}),
+                    MessIdxKeyMaker({lower, undefined}),
+                    MessIdxKeyMaker({upper, undefined}),
+                    ok;
+                {ok, Info} ->
+                    index_info_max(Info),
+                    MessIdxKeyMaker({upper, undefined}),
+                    ok
+            end
+        end,
+    with_connection(LocLServer, F),
 %   Filter = prepare_filter(UserJID, Start, End, WithJID),
 %   TotalCount = calc_count(LServer, Filter),
 %   Offset     = calc_offset(LServer, Filter, PageSize, TotalCount, RSM),
@@ -108,8 +142,48 @@ lookup_messages(UserJID=#jid{lserver=LServer},
     {ok, {0, 0, []}}.
 
 
+
+choose_index(undefined) ->
+    key_index();
+choose_index(#jid{lresource = <<>>}) ->
+    user_id_bare_remote_jid_index();
+choose_index(#jid{}) ->
+    user_id_full_remote_jid_index().
+
+
+index_info_key(BUserID, undefined) when is_binary(BUserID) ->
+    <<BUserID/binary>>;
+index_info_key(BUserID, BWithJID) when is_binary(BUserID), is_binary(BWithJID) ->
+    <<BUserID/binary, BWithJID/binary>>.
+
+mess_index_key_maker(BUserID, undefined) when is_binary(BUserID) ->
+    fun(TimestampBound) ->
+        BMessID = timestamp_bound_to_binary(TimestampBound),
+        message_key(BUserID, BMessID)
+    end;
+mess_index_key_maker(BUserID, BWithJID)
+    when is_binary(BUserID), is_binary(BWithJID) ->
+    fun(TimestampBound) ->
+        BMessID = timestamp_bound_to_binary(TimestampBound),
+        user_remote_jid_message_id(BUserID, BMessID, BWithJID)
+    end.
+
+timestamp_bound_to_binary({lower, undefined}) ->
+    mess_id_to_binary(mod_mam_utils:encode_compact_uuid(0, 0));
+timestamp_bound_to_binary({lower, Microseconds}) ->
+    mess_id_to_binary(mod_mam_utils:encode_compact_uuid(Microseconds, 0));
+timestamp_bound_to_binary({upper, undefined}) ->
+    mess_id_to_binary(mod_mam_utils:generate_message_id() + 10000);
+timestamp_bound_to_binary({upper, Microseconds}) ->
+    mess_id_to_binary(mod_mam_utils:encode_compact_uuid(Microseconds, 255)).
+
 remove_user_from_db(LServer, LUser) ->
     ok.
+
+maybe_jid_to_opt_binary(_, undefined) ->
+    undefined;
+maybe_jid_to_opt_binary(LServer, JID) ->
+    jid_to_opt_binary(LServer, JID).
 
 %% Reordered version.
 %% Allows sorting by `LServer'.
@@ -137,7 +211,7 @@ archive_message(MessID, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
     BUserIDFullRemJIDMessID = user_remote_jid_message_id(BUserID, BMessID, BFullRemJID),
     BUserIDBareRemJIDMessID = user_remote_jid_message_id(BUserID, BMessID, BBareRemJID),
     Key = message_key(BUserID, BMessID),
-    Data = term_to_binary(Packet, [compressed]),
+    Data = term_to_binary({SrcJID, Packet}, [compressed]),
     F = fun(Conn) ->
         %% Save message body.
         Obj = riakc_obj:new(message_bucket(), Key, Data),
@@ -151,8 +225,8 @@ archive_message(MessID, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
 
 set_index(Obj, BUserIDFullRemJIDMessID, BUserIDBareRemJIDMessID) ->
     MD = riakc_obj:get_metadata(Obj),
-    Is = [{{binary_index, user_id_full_remote_jid_bucket()}, [BUserIDFullRemJIDMessID]},
-          {{binary_index, user_id_bare_remote_jid_bucket()}, [BUserIDBareRemJIDMessID]}],
+    Is = [{user_id_full_remote_jid_index(), [BUserIDFullRemJIDMessID]},
+          {user_id_bare_remote_jid_index(), [BUserIDBareRemJIDMessID]}],
     MD1 = riakc_obj:set_secondary_index(MD, Is),
     riakc_obj:update_metadata(Obj, MD1).
 
@@ -262,7 +336,7 @@ message_key(BUserID, BMessID)
 
 user_remote_jid_message_id(BUserID, BMessID, BJID)
     when is_binary(BUserID), is_binary(BMessID), is_binary(BJID) ->
-    <<BUserID/binary, BJID/binary, BMessID/binary>>.
+    <<BUserID/binary, BJID/binary, 0, BMessID/binary>>.
 
 
 %% @doc Ensure, that `UpdateProps' are set in required position.
@@ -287,4 +361,7 @@ compare_props(Ps1, Ps2) ->
 update_props(BucketProps, UpdateProps) ->
     Keys = [K || {K,_} <- UpdateProps],
     UpdateProps ++ lists:foldl(fun proplists:delete/2, BucketProps, Keys).
+
+
+get_index_info() ->
 
