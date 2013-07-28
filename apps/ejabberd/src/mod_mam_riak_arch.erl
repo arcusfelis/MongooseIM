@@ -12,6 +12,7 @@
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
 -include_lib("exml/include/exml.hrl").
+-include_lib("riakc/include/riakc.hrl").
 
 -record(index_meta, {
     offset,
@@ -101,26 +102,55 @@ archive_size(LServer, LUser) ->
     Offset  :: non_neg_integer(),
     MessageRows :: list(tuple()).
 %% Row is `{<<"13663125233">>,<<"bob@localhost">>,<<"res1">>,<<binary>>}'.
-lookup_messages(UserJID=#jid{lserver=LocLServer, lserver=LocLUser},
+%% `#rsm_in{direction = before | aft, index=int(), id = binary()}'
+%% `#rsm_in.id' is not inclusive.
+%% `#rsm_in.index' is zero-based.
+%% `Start', `End' and `WithJID' are filters, they are applied BEFORE paging.
+paginate(Keys, none, PageSize) ->
+    {0, lists:sublist(Keys, PageSize)};
+paginate(Keys, #rsm_in{direction = before, index = Index}, PageSize)
+    when is_integer(Index) ->
+    todo;
+%% Requesting the Last Page in a Result Set
+paginate(Keys, #rsm_in{direction = before, id = <<>>}, PageSize) ->
+    TotalCount = length(Keys),
+    KeysBefore = max(0, TotalCount - PageSize),
+    {KeysBefore, lists:sublist(Keys, KeysBefore + 1, PageSize)};
+paginate(Keys, #rsm_in{direction = aft, id = Id}, PageSize)
+    when byte_size(Id) > 0 ->
+    split_keys(Id, Keys);
+paginate(Keys, _, PageSize) ->
+    paginate(Keys, none, PageSize).
+
+%% @doc Keys are sorted.
+split_keys(Id, Keys) ->
+    ok.
+
+
+lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
                 RSM, Start, End, WithJID,
                 PageSize, LimitPassed, MaxResultLimit) ->
     UserID = mod_mam_cache:user_id(LocLServer, LocLUser),
     BUserID = user_id_to_binary(UserID),
     SecIndex = choose_index(WithJID),
-    BWithJID = maybe_jid_to_opt_binary(WithJID),
+    BWithJID = maybe_jid_to_opt_binary(LocLServer, WithJID),
     InfoKey = index_info_key(BUserID, BWithJID),
     MessIdxKeyMaker = mess_index_key_maker(BUserID, BWithJID),
     F = fun(Conn) ->
-            case riakc_pb_socket:get(Conn, index_info_bucket(), InfoKey)) of
+            case riakc_pb_socket:get(Conn, index_info_bucket(), InfoKey) of
                 {error, notfound} ->
 %                   MessIdxKeyMaker({lower, Start}),
 %                   MessIdxKeyMaker({upper, End}),
-                    MessIdxKeyMaker({lower, undefined}),
-                    MessIdxKeyMaker({upper, undefined}),
+                    LBound = MessIdxKeyMaker({lower, Start}),
+                    UBound = MessIdxKeyMaker({upper, End}),
+                    {ok, ?INDEX_RESULTS{keys=Keys}} =
+                    riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
+                    TotalCount = length(Keys),
+                    {KeysBefore, MatchedKeys} = paginate(Keys, RSM, PageSize),
                     ok;
                 {ok, Info} ->
-                    index_info_max(Info),
-                    MessIdxKeyMaker({upper, undefined}),
+%                   index_info_max(Info),
+%                   MessIdxKeyMaker({upper, undefined}),
                     ok
             end
         end,
@@ -169,11 +199,11 @@ mess_index_key_maker(BUserID, BWithJID)
     end.
 
 timestamp_bound_to_binary({lower, undefined}) ->
-    mess_id_to_binary(mod_mam_utils:encode_compact_uuid(0, 0));
+    <<>>; %% any(binary()) >= <<>>
 timestamp_bound_to_binary({lower, Microseconds}) ->
     mess_id_to_binary(mod_mam_utils:encode_compact_uuid(Microseconds, 0));
 timestamp_bound_to_binary({upper, undefined}) ->
-    mess_id_to_binary(mod_mam_utils:generate_message_id() + 10000);
+    <<-1:64>>; %% set all bits.
 timestamp_bound_to_binary({upper, Microseconds}) ->
     mess_id_to_binary(mod_mam_utils:encode_compact_uuid(Microseconds, 255)).
 
@@ -249,8 +279,17 @@ hour_id(MessID, UserID) ->
 hour(Ms) ->
     Ms div microseconds_in_hour().
 
+hour_to_microseconds(Hour) when is_integer(Hour) ->
+    Hour * microseconds_in_hour().
+
 microseconds_in_hour() ->
     3600000000.
+
+hour_lower_bound(Hour) ->
+    hour_to_microseconds(Hour).
+
+hour_upper_bound(Hour) ->
+    hour_to_microseconds(Hour+1) - 1.
 
 short_message_id(Id) ->
     {Microseconds, NodeID} = mod_mam_utils:decode_compact_uuid(Id),
@@ -363,5 +402,31 @@ update_props(BucketProps, UpdateProps) ->
     UpdateProps ++ lists:foldl(fun proplists:delete/2, BucketProps, Keys).
 
 
-get_index_info() ->
+ii_last_hour([_|T]) ->
+    ii_last_hour(T);
+ii_last_hour([{Hour, _}]) ->
+    Hour;
+ii_last_hour([]) ->
+    undefined.
+
+%% @doc Calc amount of entries before the passed hour (non inclusive).
+ii_calc_before(Hour, Info) ->
+    ii_calc_before(Hour, Info, 0).
+
+ii_calc_before(Hour, [{Hour, _}|_], Acc) ->
+    Acc;
+ii_calc_before(Hour, [{_, Cnt}|T], Acc) ->
+    ii_calc_before(Hour, T, Acc + Cnt);
+ii_calc_before(Hour, _, Acc) ->
+    %% There is no information about this hour.
+    undefined.
+
+%% @doc Return how many entries are send or received within the passed hour.
+ii_calc_volume(Hour, [{Hour, Cnt}|_]) ->
+    Cnt;
+ii_calc_volume(Hour, [_|T]) ->
+    ii_calc_volume(Hour, T);
+ii_calc_volume(_, _) ->
+    %% There is no information about this hour.
+    undefined.
 
