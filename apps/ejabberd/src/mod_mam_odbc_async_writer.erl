@@ -1,8 +1,11 @@
-%% @doc Stores cache using ETS-table.
--module(mod_mam_muc_async_writer).
--export([start_link/2,
+%% @doc Collect messages and flush them into the database.
+-module(mod_mam_odbc_async_writer).
+-export([start/1,
+         stop/1,
+         start_link/2,
          srv_name/1,
-         archive_message/5,
+         archive_message/6,
+         wait_flushing/1,
          queue_length/1]).
 
 %% gen_server callbacks
@@ -19,14 +22,36 @@
     host,
     conn,
     acc=[],
+    subscribers=[],
     flush_interval_tref}).
 
+%% @see srv_name/1
 srv_name() ->
-    ejabberd_mod_mam_muc_writer.
+    ejabberd_mod_mam_writer.
+
+encode_direction(incoming) -> "I";
+encode_direction(outgoing) -> "O".
 
 %%====================================================================
 %% API
 %%====================================================================
+
+start(Host) ->
+    WriterProc = srv_name(Host),
+    WriterChildSpec =
+    {WriterProc,
+     {mod_mam_odbc_async_writer, start_link, [WriterProc, Host]},
+     permanent,
+     5000,
+     worker,
+     [mod_mam_odbc_async_writer]},
+    supervisor:start_child(ejabberd_sup, WriterChildSpec).
+
+stop(Host) ->
+    Proc = srv_name(Host),
+    supervisor:terminate_child(ejabberd_sup, Proc),
+    supervisor:delete_child(ejabberd_sup, Proc).
+
 
 start_link(ProcName, Host) ->
     gen_server:start_link({local, ProcName}, ?MODULE, [Host], []).
@@ -35,13 +60,23 @@ srv_name(Host) ->
     gen_mod:get_module_proc(Host, srv_name()).
 
 
-archive_message(Host, RoomName, Id, FromNick, Packet) ->
-    RoomId = mod_mam_muc_cache:room_id(Host, RoomName),
-    SRoomId = integer_to_list(RoomId),
-    SFromNick = ejabberd_odbc:escape(FromNick),
-    SData = ejabberd_odbc:escape(term_to_binary(Packet, [compressed])),
-    SID = integer_to_list(Id),
-    Msg = {archive_message, SID, SRoomId, SFromNick, SData},
+archive_message(Id, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
+                RemJID=#jid{lresource=RemLResource}, SrcJID, Packet) ->
+    UserID = mod_mam_cache:user_id(LocLServer, LocLUser),
+    SUserID = integer_to_list(UserID),
+    SBareRemJID = esc_jid(jlib:jid_tolower(jlib:jid_remove_resource(RemJID))),
+    SSrcJID = esc_jid(SrcJID),
+    SDir = encode_direction(Dir),
+    SRemLResource = ejabberd_odbc:escape(RemLResource),
+    Data = term_to_binary(Packet, [compressed]),
+    SData = ejabberd_odbc:escape(Data),
+    SId = integer_to_list(Id),
+    archive_message(LocLServer, SId, SUserID, SBareRemJID,
+                    SRemLResource, SDir, SSrcJID, SData).
+
+
+archive_message(Host, SId, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData) ->
+    Msg = {archive_message, SId, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData},
     gen_server:cast(srv_name(Host), Msg).
 
 %% For folsom.
@@ -54,28 +89,35 @@ queue_length(Host) ->
         {ok, Len}
     end.
 
+wait_flushing(Host) ->
+    gen_server:call(srv_name(Host), wait_flushing).
+
 %%====================================================================
 %% Internal functions
 %%====================================================================
 
 run_flush(State=#state{acc=[]}) ->
     State;
-run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc}) ->
+run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc,
+                       subscribers=Subs}) ->
     TRef =/= undefined andalso erlang:cancel_timer(TRef),
     ?DEBUG("Flushed ~p entries.", [length(Acc)]),
     Result =
     ejabberd_odbc:sql_query(
       Conn,
-      ["INSERT INTO mam_muc_message(id, room_id, nick_name, message) "
+      ["INSERT INTO mam_message(id, user_id, remote_bare_jid, "
+                                "remote_resource, direction, "
+                                "from_jid, message) "
        "VALUES ", tuples(Acc)]),
-    % [SID, SRoomId, SFromNick, SData]
+    % [SId, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData]
     case Result of
         {updated, _Count} -> ok;
         {error, Reason} ->
             ?ERROR_MSG("archive_message query failed with reason ~p", [Reason]),
             ok
     end,
-    State#state{acc=[], flush_interval_tref=undefined}.
+    [gen_server:reply(Sub, ok) || Sub <- Subs],
+    State#state{acc=[], subscribers=[], flush_interval_tref=undefined}.
 
 join([H|T]) ->
     [H, [", " ++ X || X <- T]].
@@ -85,6 +127,9 @@ tuples(Rows) ->
 
 tuple([H|T]) ->
     ["('", H, "'", [[", '", X, "'"] || X <- T], ")"].
+
+esc_jid(JID) ->
+    ejabberd_odbc:escape(jlib:jid_to_binary(JID)).
 
 %%====================================================================
 %% gen_server callbacks
@@ -111,8 +156,10 @@ init([Host]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call(_, _From, State) ->
-    {reply, ok, State}.
+handle_call(wait_flushing, _From, State=#state{acc=[]}) ->
+    {reply, ok, State};
+handle_call(wait_flushing, From, State=#state{subscribers=Subs}) ->
+    {noreply, State#state{subscribers=[From|Subs]}}.
 
 
 %%--------------------------------------------------------------------
@@ -122,11 +169,11 @@ handle_call(_, _From, State) ->
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
 
-handle_cast({archive_message, SID, SRoomId, SFromNick, SData},
+handle_cast({archive_message, SId, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData},
             State=#state{acc=Acc, flush_interval_tref=TRef, flush_interval=Int,
                          max_packet_size=Max}) ->
-    ?DEBUG("Schedule to write ~p.", [SID]),
-    Row = [SID, SRoomId, SFromNick, SData],
+    ?DEBUG("Schedule to write ~p.", [SId]),
+    Row = [SId, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData],
     TRef2 = case {Acc, TRef} of
             {[], undefined} -> erlang:send_after(Int, self(), flush);
             {_, _} -> TRef

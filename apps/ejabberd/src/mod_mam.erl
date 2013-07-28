@@ -34,7 +34,8 @@
 %% Other
 -import(mod_mam_utils,
         [maybe_integer/2,
-         is_function_exist/3]).
+         is_function_exist/3,
+         mess_id_to_external_binary/1]).
 
 %% Ejabberd
 -import(mod_mam_utils,
@@ -95,7 +96,7 @@ archive_size(Server, User) ->
 start(Host, Opts) ->
     ?DEBUG("mod_mam starting", []),
     start_supervisor(Host),
-    %% Only parallel is recommended hare.
+    %% `parallel' is the only one recommended here.
     IQDisc = gen_mod:get_opt(iqdisc, Opts, parallel), %% Type
     mod_disco:register_feature(Host, mam_ns_binary()),
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host, mam_ns_binary(),
@@ -220,8 +221,8 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
         {FirstId, LastId} =
             case MessageRows of
                 []    -> {undefined, undefined};
-                [_|_] -> {message_row_to_id(hd(MessageRows)),
-                          message_row_to_id(lists:last(MessageRows))}
+                [_|_] -> {message_row_to_ext_id(hd(MessageRows)),
+                          message_row_to_ext_id(lists:last(MessageRows))}
             end,
         [send_message(To, From, message_row_to_xml(M, QueryID))
          || M <- MessageRows],
@@ -268,7 +269,7 @@ filter_packet({From, To=#jid{luser=LUser, lserver=LServer}, Packet}) ->
         case handle_package(incoming, true, To, From, From, Packet) of
             undefined -> Packet;
             Id -> 
-                ?DEBUG("Archived ~p", [Id]),
+                ?DEBUG("Archived incoming ~p", [Id]),
                 BareTo = jlib:jid_to_binary(jlib:jid_remove_resource(To)),
                 replace_archived_elem(BareTo, Id, Packet)
         end
@@ -311,7 +312,7 @@ handle_package(Dir, ReturnId,
             Id = generate_message_id(),
             archive_message(Id, Dir, LocJID, RemJID, SrcJID, Packet),
             case ReturnId of
-                true  -> integer_to_binary(Id);
+                true  -> mess_id_to_external_binary(Id);
                 false -> undefined
             end;
             false -> undefined
@@ -331,7 +332,7 @@ archive_module(Host) ->
     gen_mod:get_module_opt(Host, ?MODULE, archive_module, mod_mam_odbc_arch).
 
 writer_module(Host) ->
-    gen_mod:get_module_opt(Host, ?MODULE, writer_module, mod_mam_async_writer).
+    gen_mod:get_module_opt(Host, ?MODULE, writer_module, mod_mam_odbc_async_writer).
 
 
 get_behaviour(DefaultBehaviour, LocJID=#jid{lserver=LServer}, RemJID=#jid{}) ->
@@ -368,16 +369,18 @@ remove_user_from_db(LServer, LUser) ->
     ok.
 
 
-message_row_to_xml({BUID,BSrcJID,BPacket}, QueryID) ->
-    UID = list_to_integer(binary_to_list(BUID)),
-    {Microseconds, _NodeId} = decode_compact_uuid(UID),
+message_row_to_xml({BMessID,BSrcJID,BPacket}, QueryID) ->
+    MessID = list_to_integer(binary_to_list(BMessID)),
+    {Microseconds, _NodeId} = decode_compact_uuid(MessID),
     Packet = binary_to_term(BPacket),
     SrcJID = jlib:binary_to_jid(BSrcJID),
     DateTime = calendar:now_to_universal_time(microseconds_to_now(Microseconds)),
-    wrap_message(Packet, QueryID, BUID, DateTime, SrcJID).
+    BExtMessID = mess_id_to_external_binary(MessID),
+    wrap_message(Packet, QueryID, BExtMessID, DateTime, SrcJID).
 
-message_row_to_id({BUID,_,_}) ->
-    BUID.
+message_row_to_ext_id({BMessID,_,_}) ->
+    MessID = list_to_integer(binary_to_list(BMessID)),
+    mess_id_to_external_binary(MessID).
 
 
 -spec lookup_messages(UserJID, RSM, Start, End, WithJID, PageSize,
@@ -410,9 +413,8 @@ archive_message(Id, Dir,
 %% Helpers
 
 
-%% TODO: it is too simple, can add a separate process per node,
-%% that will wait that all nodes flush.
-%% Also, this process can monitor DB and protect against overloads.
-wait_flushing(_LServer) ->
-    timer:sleep(500).
+%% TODO: While it is too easy to use a `timer:sleep/1' here, it will cause delays.
+wait_flushing(LServer) ->
+    M = writer_module(LServer),
+    M:wait_flushing(LServer).
 

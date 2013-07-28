@@ -231,7 +231,7 @@ handle_info(update_metrics, State=#state{host=Host}) ->
     Workers = ejabberd_odbc_sup:get_pids(Host),
     Lengths = [message_queue_len(Pid) || Pid <- Workers],
     folsom_metrics:notify({{Host, odbcQueryQueueLength}, lists:sum(Lengths)}),
-    case mod_mam_async_writer:queue_length(Host) of
+    case mod_mam_odbc_async_writer:queue_length(Host) of
     {ok, MamWriterQLen} ->
         folsom_metrics:notify({{Host, modMamMessageQueueLength}, MamWriterQLen});
     {error, _Reason} ->
