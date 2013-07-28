@@ -5,6 +5,7 @@
          start_link/2,
          srv_name/1,
          archive_message/6,
+         wait_flushing/1,
          queue_length/1]).
 
 %% gen_server callbacks
@@ -21,8 +22,10 @@
     host,
     conn,
     acc=[],
+    subscribers=[],
     flush_interval_tref}).
 
+%% @see srv_name/1
 srv_name() ->
     ejabberd_mod_mam_writer.
 
@@ -34,14 +37,14 @@ encode_direction(outgoing) -> "O".
 %%====================================================================
 
 start(Host) ->
-    WriterProc = mod_mam_async_writer:srv_name(Host),
+    WriterProc = srv_name(Host),
     WriterChildSpec =
     {WriterProc,
-     {mod_mam_async_writer, start_link, [WriterProc, Host]},
+     {mod_mam_odbc_async_writer, start_link, [WriterProc, Host]},
      permanent,
      5000,
      worker,
-     [mod_mam_async_writer]},
+     [mod_mam_odbc_async_writer]},
     supervisor:start_child(ejabberd_sup, WriterChildSpec).
 
 stop(Host) ->
@@ -86,13 +89,17 @@ queue_length(Host) ->
         {ok, Len}
     end.
 
+wait_flushing(Host) ->
+    gen_server:call(srv_name(Host), wait_flushing).
+
 %%====================================================================
 %% Internal functions
 %%====================================================================
 
 run_flush(State=#state{acc=[]}) ->
     State;
-run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc}) ->
+run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc,
+                       subscribers=Subs}) ->
     TRef =/= undefined andalso erlang:cancel_timer(TRef),
     ?DEBUG("Flushed ~p entries.", [length(Acc)]),
     Result =
@@ -109,7 +116,8 @@ run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc}) ->
             ?ERROR_MSG("archive_message query failed with reason ~p", [Reason]),
             ok
     end,
-    State#state{acc=[], flush_interval_tref=undefined}.
+    [gen_server:reply(Sub, ok) || Sub <- Subs],
+    State#state{acc=[], subscribers=[], flush_interval_tref=undefined}.
 
 join([H|T]) ->
     [H, [", " ++ X || X <- T]].
@@ -148,8 +156,10 @@ init([Host]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call(_, _From, State) ->
-    {reply, ok, State}.
+handle_call(wait_flushing, _From, State=#state{acc=[]}) ->
+    {reply, ok, State};
+handle_call(wait_flushing, From, State=#state{subscribers=Subs}) ->
+    {noreply, State#state{subscribers=[From|Subs]}}.
 
 
 %%--------------------------------------------------------------------

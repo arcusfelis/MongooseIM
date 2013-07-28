@@ -5,7 +5,8 @@
 
 %% UID
 -import(mod_mam_utils,
-        [encode_compact_uuid/2]).
+        [encode_compact_uuid/2,
+         external_binary_to_mess_id/1]).
 
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
@@ -223,9 +224,14 @@ calc_offset(_LS, _F, PS, TC, #rsm_in{direction = before, id = <<>>}) ->
     max(0, TC - PS);
 calc_offset(LServer, F, PS, _TC, #rsm_in{direction = before, id = ID})
     when is_binary(ID) ->
-    max(0, calc_before(LServer, F, ID) - PS);
+    SID = ext_to_sec_mess_id_bin(ID),
+    max(0, calc_before(LServer, F, SID) - PS);
 calc_offset(LServer, F, _PS, _TC, #rsm_in{direction = aft, id = ID})
     when is_binary(ID), byte_size(ID) > 0 ->
-    calc_index(LServer, F, ID);
+    SID = ext_to_sec_mess_id_bin(ID),
+    calc_index(LServer, F, SID);
 calc_offset(_LS, _F, _PS, _TC, _RSM) ->
     0.
+
+ext_to_sec_mess_id_bin(BExtMessID) ->
+    integer_to_list(external_binary_to_mess_id(BExtMessID)).

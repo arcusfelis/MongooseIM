@@ -18,11 +18,13 @@
         [maybe_microseconds/1,
          microseconds_to_now/1]).
 
-%% UID
+%% MessID
 -import(mod_mam_utils,
         [generate_message_id/0,
          encode_compact_uuid/2,
-         decode_compact_uuid/1]).
+         decode_compact_uuid/1,
+         mess_id_to_external_binary/1,
+         external_binary_to_mess_id/1]).
 
 %% XML
 -import(mod_mam_utils,
@@ -100,9 +102,6 @@ stop(Host) ->
 
 %% ----------------------------------------------------------------------
 %% OTP helpers
-
-sup_name() ->
-    ejabberd_mod_mam_muc_sup.
 
 start_supervisor(Host) ->
     WriterProc = mod_mam_muc_async_writer:srv_name(Host),
@@ -204,7 +203,7 @@ filter_room_packet(Packet, FromNick, _FromJID,
     Id = generate_message_id(),
     mod_mam_muc_async_writer:archive_message(LServer, RoomName, Id, FromNick, Packet),
     BareTo = jlib:jid_to_binary(To),
-    replace_archived_elem(BareTo, integer_to_binary(Id), Packet)
+    replace_archived_elem(BareTo, mess_id_to_external_binary(Id), Packet)
     end.
 
 %% `process_mam_iq/3' is simular.
@@ -266,8 +265,8 @@ room_process_mam_iq(From=#jid{lserver = LServer},
         {FirstId, LastId} =
             case MessageRows of
                 []    -> {undefined, undefined};
-                [_|_] -> {message_row_to_id(hd(MessageRows)),
-                          message_row_to_id(lists:last(MessageRows))}
+                [_|_] -> {message_row_to_ext_id(hd(MessageRows)),
+                          message_row_to_ext_id(lists:last(MessageRows))}
             end,
         [send_message(To, From, message_row_to_xml(M, To, QueryID))
          || M <- MessageRows],
@@ -286,16 +285,18 @@ room_process_mam_iq(_, _, _) ->
 %% ----------------------------------------------------------------------
 %% Internal functions
 
-message_row_to_xml({BUID,BNick,BPacket}, RoomJID, QueryID) ->
-    UID = list_to_integer(binary_to_list(BUID)),
-    {Microseconds, _NodeId} = decode_compact_uuid(UID),
+message_row_to_xml({BMessID,BNick,BPacket}, RoomJID, QueryID) ->
+    MessID = list_to_integer(binary_to_list(BMessID)),
+    {Microseconds, _NodeId} = decode_compact_uuid(MessID),
     Packet = binary_to_term(BPacket),
     DateTime = calendar:now_to_universal_time(microseconds_to_now(Microseconds)),
     FromJID = jlib:jid_replace_resource(RoomJID, BNick),
-    wrap_message(Packet, QueryID, BUID, DateTime, FromJID).
+    BExtMessID = mess_id_to_external_binary(MessID),
+    wrap_message(Packet, QueryID, BExtMessID, DateTime, FromJID).
 
-message_row_to_id({BUID,_,_}) ->
-    BUID.
+message_row_to_ext_id({BMessID,_,_}) ->
+    MessID = list_to_integer(binary_to_list(BMessID)),
+    mess_id_to_external_binary(MessID).
 
 
 %% ----------------------------------------------------------------------
@@ -322,46 +323,49 @@ calc_offset(_LS, _F, PS, TC, #rsm_in{direction = before, id = <<>>}) ->
     max(0, TC - PS);
 calc_offset(LServer, Filter, PageSize, _TC, #rsm_in{direction = before, id = ID})
     when is_binary(ID) ->
-    SID = ejabberd_odbc:escape(ID),
+    SID = ext_to_sec_mess_id_bin(ID),
     max(0, calc_before(LServer, Filter, SID) - PageSize);
 calc_offset(LServer, Filter, _PS, _TC, #rsm_in{direction = aft, id = ID})
     when is_binary(ID), byte_size(ID) > 0 ->
-    SID = ejabberd_odbc:escape(ID),
+    SID = ext_to_sec_mess_id_bin(ID),
     calc_index(LServer, Filter, SID);
 calc_offset(_LS, _F, _PS, _TC, _RSM) ->
     0.
 
-%% Zero-based index of the row with UID in the result test.
+ext_to_sec_mess_id_bin(BExtMessID) ->
+    integer_to_list(external_binary_to_mess_id(BExtMessID)).
+
+%% Zero-based index of the row with MessID in the result test.
 %% If the element does not exists, the ID of the next element will
 %% be returned instead.
-%% "SELECT COUNT(*) as "index" FROM mam_muc_message WHERE id <= '",  UID
--spec calc_index(LServer, Filter, SUID) -> Count
+%% "SELECT COUNT(*) as "index" FROM mam_muc_message WHERE id <= '",  MessID
+-spec calc_index(LServer, Filter, SMessID) -> Count
     when
     LServer  :: server_hostname(),
     Filter   :: filter(),
-    SUID     :: escaped_message_id(),
+    SMessID     :: escaped_message_id(),
     Count    :: non_neg_integer().
-calc_index(LServer, Filter, SUID) ->
+calc_index(LServer, Filter, SMessID) ->
     {selected, _ColumnNames, [{BIndex}]} =
     ejabberd_odbc:sql_query(
       LServer,
-      ["SELECT COUNT(*) FROM mam_muc_message ", Filter, " AND id <= '", SUID, "'"]),
+      ["SELECT COUNT(*) FROM mam_muc_message ", Filter, " AND id <= '", SMessID, "'"]),
     list_to_integer(binary_to_list(BIndex)).
 
 %% @doc Count of elements in RSet before the passed element.
-%% The element with the passed UID can be already deleted.
-%% "SELECT COUNT(*) as "count" FROM mam_muc_message WHERE id < '",  UID
--spec calc_before(LServer, Filter, SUID) -> Count
+%% The element with the passed MessID can be already deleted.
+%% "SELECT COUNT(*) as "count" FROM mam_muc_message WHERE id < '",  MessID
+-spec calc_before(LServer, Filter, SMessID) -> Count
     when
     LServer  :: server_hostname(),
     Filter   :: filter(),
-    SUID     :: escaped_message_id(),
+    SMessID     :: escaped_message_id(),
     Count    :: non_neg_integer().
-calc_before(LServer, Filter, SUID) ->
+calc_before(LServer, Filter, SMessID) ->
     {selected, _ColumnNames, [{BIndex}]} =
     ejabberd_odbc:sql_query(
       LServer,
-      ["SELECT COUNT(*) FROM mam_muc_message ", Filter, " AND id < '", SUID, "'"]),
+      ["SELECT COUNT(*) FROM mam_muc_message ", Filter, " AND id < '", SMessID, "'"]),
     list_to_integer(binary_to_list(BIndex)).
 
 
@@ -473,5 +477,5 @@ select_bool(LServer, RoomName, Field) ->
 %% Helpers
 
 wait_flushing(_LServer) ->
-    timer:sleep(500).
+    timer:sleep(1000).
 

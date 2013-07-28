@@ -7,7 +7,9 @@
 %% UID
 -export([generate_message_id/0,
          encode_compact_uuid/2,
-         decode_compact_uuid/1]).
+         decode_compact_uuid/1,
+         mess_id_to_external_binary/1,
+         external_binary_to_mess_id/1]).
 
 %% XML
 -export([is_archived_elem_for/2,
@@ -103,6 +105,14 @@ decode_compact_uuid(Id) ->
     NodeId = Id band 8,
     {Microseconds, NodeId}.
 
+
+%% @doc Encode a message ID to pass it to the user.
+mess_id_to_external_binary(MessID) when is_integer(MessID) ->
+    list_to_binary(integer_to_list(MessID, 32)).
+
+%% @doc Decode a message ID received from the user.
+external_binary_to_mess_id(BExtMessID) when is_binary(BExtMessID) ->
+    list_to_integer(binary_to_list(BExtMessID), 32).
 
 %% -----------------------------------------------------------------------
 %% XML
