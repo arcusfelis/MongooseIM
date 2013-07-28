@@ -95,7 +95,7 @@ archive_size(Server, User) ->
 start(Host, Opts) ->
     ?DEBUG("mod_mam starting", []),
     start_supervisor(Host),
-    %% Only parallel is recommended hare.
+    %% `parallel' is the only one recommended here.
     IQDisc = gen_mod:get_opt(iqdisc, Opts, parallel), %% Type
     mod_disco:register_feature(Host, mam_ns_binary()),
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host, mam_ns_binary(),
@@ -410,9 +410,7 @@ archive_message(Id, Dir,
 %% Helpers
 
 
-%% TODO: it is too simple, can add a separate process per node,
-%% that will wait that all nodes flush.
-%% Also, this process can monitor DB and protect against overloads.
+%% TODO: While it is too easy to use a `timer:sleep/1' here, it will cause delays.
 wait_flushing(_LServer) ->
     timer:sleep(500).
 
