@@ -1,6 +1,7 @@
 -module(mod_mam_riak_arch).
 -export([start/1,
          archive_message/6,
+         wait_flushing/1,
          archive_size/2,
          lookup_messages/8,
          remove_user_from_db/2]).
@@ -8,6 +9,10 @@
 %% UID
 -import(mod_mam_utils,
         [encode_compact_uuid/2]).
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
 
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
@@ -104,28 +109,98 @@ archive_size(LServer, LUser) ->
 %% Row is `{<<"13663125233">>,<<"bob@localhost">>,<<"res1">>,<<binary>>}'.
 %% `#rsm_in{direction = before | aft, index=int(), id = binary()}'
 %% `#rsm_in.id' is not inclusive.
-%% `#rsm_in.index' is zero-based.
+%% `#rsm_in.index' is zero-based offset.
 %% `Start', `End' and `WithJID' are filters, they are applied BEFORE paging.
 paginate(Keys, none, PageSize) ->
     {0, lists:sublist(Keys, PageSize)};
-paginate(Keys, #rsm_in{direction = before, index = Index}, PageSize)
-    when is_integer(Index) ->
-    todo;
+%% Skip first KeysBeforeCnt keys.
+paginate(Keys, #rsm_in{direction = undefined, index = KeysBeforeCnt}, PageSize)
+    when is_integer(KeysBeforeCnt), KeysBeforeCnt >= 0 ->
+    {KeysBeforeCnt, lists:sublist(Keys, KeysBeforeCnt + 1, PageSize)};
 %% Requesting the Last Page in a Result Set
-paginate(Keys, #rsm_in{direction = before, id = <<>>}, PageSize) ->
+paginate(Keys, #rsm_in{direction = before, id = undefined}, PageSize) ->
     TotalCount = length(Keys),
-    KeysBefore = max(0, TotalCount - PageSize),
-    {KeysBefore, lists:sublist(Keys, KeysBefore + 1, PageSize)};
-paginate(Keys, #rsm_in{direction = aft, id = Id}, PageSize)
-    when byte_size(Id) > 0 ->
-    split_keys(Id, Keys);
+    KeysBeforeCnt = max(0, TotalCount - PageSize),
+    {KeysBeforeCnt, lists:sublist(Keys, KeysBeforeCnt + 1, PageSize)};
+paginate(Keys, #rsm_in{direction = before, id = Key}, PageSize) ->
+    {_, KeysBefore, _KeysAfter} = split_keys(Key, Keys),
+    %% Limit keys.
+    KeysBeforeCnt = max(0, length(KeysBefore) - PageSize),
+    {KeysBeforeCnt, lists:sublist(KeysBefore, KeysBeforeCnt + 1, PageSize)};
+paginate(Keys, #rsm_in{direction = aft, id = Key}, PageSize) ->
+    {IsDelimExists, KeysBefore, KeysAfter} = split_keys(Key, Keys),
+    KeysBeforeCnt = before_count(IsDelimExists, KeysBefore),
+    {KeysBeforeCnt, lists:sublist(KeysAfter, PageSize)};
 paginate(Keys, _, PageSize) ->
     paginate(Keys, none, PageSize).
 
-%% @doc Keys are sorted.
-split_keys(Id, Keys) ->
-    ok.
+-ifdef(TEST).
 
+paginate_test_() ->
+    [{"Zero offset",
+      ?_assertEqual({0, [1,2,3]},
+                    paginate([1,2,3, 4,5,6, 7,8,9],
+                             #rsm_in{index = 0}, 3))},
+     {"Before key=7 (6,5,4..)",
+      ?_assertEqual({3, [4,5,6]},
+                    paginate([1,2,3, 4,5,6, 7,8,9, 10,12,13],
+                             #rsm_in{direction = before, id = 7}, 3))},
+     {"After key=3 (4,5,6..)",
+      ?_assertEqual({3, [4,5,6]},
+                    paginate([1,2,3, 4,5,6, 7,8,9, 10,12,13],
+                             #rsm_in{direction = aft, id = 3}, 3))},
+     {"Offset 3",
+      ?_assertEqual({3, [4,5,6]},
+                    paginate([1,2,3, 4,5,6, 7,8,9, 10,12,13],
+                             #rsm_in{index = 3}, 3))},
+     {"Last Page",
+      ?_assertEqual({6, [7,8,9]},
+                    paginate([1,2,3, 4,5,6, 7,8,9],
+                             #rsm_in{direction = before}, 3))}
+    ].
+
+-endif.
+
+fix_rsm(_BUserID, none) ->
+    none;
+fix_rsm(_BUserID, RSM=#rsm_in{id = undefined}) ->
+    RSM;
+fix_rsm(_BUserID, RSM=#rsm_in{id = <<>>}) ->
+    RSM#rsm_in{id = undefined};
+fix_rsm(BUserID, RSM=#rsm_in{id = BExtMessID}) when is_binary(BExtMessID) ->
+    MessID = mod_mam_utils:external_binary_to_mess_id(BExtMessID),
+    BMessID = mess_id_to_binary(MessID),
+    Key = message_key(BUserID, BMessID),
+    RSM#rsm_in{id = Key}.
+
+before_count(IsDelimExists, KeysBefore) ->
+    case IsDelimExists of true -> 1; false -> 0 end + length(KeysBefore).
+
+%% @doc Slit the sorted key using a delimiter.
+-spec split_keys(DelimKey, Keys) -> {IsDelimExists, KeysBefore, KeysAfter}
+    when DelimKey :: Key,
+         Keys :: list(Key),
+         IsDelimExists :: boolean(),
+         KeysBefore :: Keys,
+         KeysAfter :: Keys.
+split_keys(DelimKey, Keys) ->
+    split_keys(DelimKey, Keys, []).
+
+split_keys(DelimKey, [DelimKey|Keys], Acc) ->
+    {true, lists:reverse(Acc), Keys};
+split_keys(DelimKey, [Key|Keys], Acc) when Key < DelimKey ->
+    split_keys(DelimKey, Keys, [Key|Acc]);
+split_keys(_, Keys, Acc) ->
+    %% `DelimKey' does not exist.
+    {false, lists:reverse(Acc), Keys}.
+
+-ifdef(TEST).
+
+split_keys_test_() ->
+    [?_assertEqual({true, [1,2,3], [5,6,7]}, split_keys(4, [1,2,3,4,5,6,7]))
+    ].
+
+-endif.
 
 lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
                 RSM, Start, End, WithJID,
@@ -146,15 +221,24 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
                     {ok, ?INDEX_RESULTS{keys=Keys}} =
                     riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
                     TotalCount = length(Keys),
-                    {KeysBefore, MatchedKeys} = paginate(Keys, RSM, PageSize),
-                    ok;
+                    {Offset, MatchedKeys} = paginate(Keys, fix_rsm(BUserID, RSM), PageSize),
+                    case TotalCount - Offset > MaxResultLimit andalso not LimitPassed of
+                        true ->
+                            {error, 'policy-violation'};
+
+                        false ->
+                            FullMatchedKeys = [{message_bucket(), K} || K <- MatchedKeys],
+                            {ok, Values} = to_values(Conn, FullMatchedKeys),
+                            MessageRows = deserialize_values(Values),
+                            {ok, {TotalCount, Offset, lists:usort(MessageRows)}}
+                    end;
                 {ok, Info} ->
 %                   index_info_max(Info),
 %                   MessIdxKeyMaker({upper, undefined}),
-                    ok
+                    {ok, {0, 0, []}}
             end
         end,
-    with_connection(LocLServer, F),
+    with_connection(LocLServer, F).
 %   Filter = prepare_filter(UserJID, Start, End, WithJID),
 %   TotalCount = calc_count(LServer, Filter),
 %   Offset     = calc_offset(LServer, Filter, PageSize, TotalCount, RSM),
@@ -169,9 +253,9 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
 %           MessageRows = extract_messages(LServer, Filter, Offset, PageSize),
 %           {ok, {TotalCount, Offset, MessageRows}}
 %   end.
-    {ok, {0, 0, []}}.
 
-
+deserialize_values(Values) ->
+    [binary_to_term(Value) || Value <- Values].
 
 choose_index(undefined) ->
     key_index();
@@ -231,6 +315,9 @@ jid_to_opt_binary(_, #jid{lserver=LServer, luser=LUser, lresource=LResource}) ->
     <<LServer/binary, $@, LUser/binary, $/, LResource/binary>>.
 
 
+wait_flushing(LServer) ->
+    ok.
+
 archive_message(MessID, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
                 RemJID=#jid{lresource=RemLResource}, SrcJID, Packet) ->
     UserID = mod_mam_cache:user_id(LocLServer, LocLUser),
@@ -241,10 +328,10 @@ archive_message(MessID, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
     BUserIDFullRemJIDMessID = user_remote_jid_message_id(BUserID, BMessID, BFullRemJID),
     BUserIDBareRemJIDMessID = user_remote_jid_message_id(BUserID, BMessID, BBareRemJID),
     Key = message_key(BUserID, BMessID),
-    Data = term_to_binary({SrcJID, Packet}, [compressed]),
+    Value = term_to_binary({MessID, SrcJID, Packet}, [compressed]),
     F = fun(Conn) ->
         %% Save message body.
-        Obj = riakc_obj:new(message_bucket(), Key, Data),
+        Obj = riakc_obj:new(message_bucket(), Key, Value),
         Obj1 = set_index(Obj, BUserIDFullRemJIDMessID, BUserIDBareRemJIDMessID),
         %% TODO: handle `{error, Reason}'. Should we reinsert again later?
         ok = ?MEASURE_TIME(put_message, riakc_pb_socket:put(Conn, Obj1)),
@@ -429,4 +516,18 @@ ii_calc_volume(Hour, [_|T]) ->
 ii_calc_volume(_, _) ->
     %% There is no information about this hour.
     undefined.
+
+
+to_values(Conn, Keys) ->
+    Ops = [{map, {modfun, riak_kv_mapreduce, map_object_value}, undefined, true}],
+    case riakc_pb_socket:mapred(Conn, Keys, Ops) of
+        {ok, []} ->
+            {ok, []};
+        {ok, [{0, Values}]} ->
+            {ok, Values};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+
 

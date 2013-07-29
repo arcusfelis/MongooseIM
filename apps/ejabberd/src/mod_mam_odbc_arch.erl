@@ -60,8 +60,18 @@ lookup_messages(UserJID=#jid{lserver=LServer},
 
         false ->
             MessageRows = extract_messages(LServer, Filter, Offset, PageSize),
-            {ok, {TotalCount, Offset, MessageRows}}
+            {ok, {TotalCount, Offset, rows_to_uniform_format(MessageRows)}}
     end.
+
+
+rows_to_uniform_format(MessageRows) ->
+    [row_to_uniform_format(Row) || Row <- MessageRows].
+
+row_to_uniform_format({BMessID,BSrcJID,BPacket}) ->
+    MessID = list_to_integer(binary_to_list(BMessID)),
+    SrcJID = jlib:binary_to_jid(BSrcJID),
+    Packet = binary_to_term(BPacket),
+    {MessID, SrcJID, Packet}.
 
 
 remove_user_from_db(LServer, LUser) ->
@@ -159,17 +169,17 @@ calc_count(LServer, Filter) ->
     Start   :: unix_timestamp() | undefined,
     End     :: unix_timestamp() | undefined,
     WithJID :: #jid{} | undefined.
-prepare_filter(#jid{lserver=LServer, luser=LUser}, Start, End, With) ->
+prepare_filter(#jid{lserver=LServer, luser=LUser}, Start, End, WithJID) ->
     UserID = mod_mam_cache:user_id(LServer, LUser),
     {SWithJID, SWithResource} =
-    case With of
-        <<>> -> {undefined, undefined};
-        _    ->
-            WithJID = #jid{lresource = WithLResource} = jlib:binary_to_jid(With),
+    case WithJID of
+        undefined -> {undefined, undefined};
+        #jid{lresource = <<>>} ->
+            {secure_escaped_jid(WithJID), undefined};
+        #jid{lresource = WithLResource} ->
             WithBareJID = jlib:jid_remove_resource(WithJID),
-            {ejabberd_odbc:escape(jlib:jid_to_binary(WithBareJID)),
-             case WithLResource of <<>> -> undefined;
-                  _ -> ejabberd_odbc:escape(WithLResource) end}
+            {secure_escaped_jid(WithBareJID),
+             ejabberd_odbc:escape(WithLResource)}
     end,
     prepare_filter(UserID, Start, End, SWithJID, SWithResource).
 
@@ -235,3 +245,7 @@ calc_offset(_LS, _F, _PS, _TC, _RSM) ->
 
 ext_to_sec_mess_id_bin(BExtMessID) ->
     integer_to_list(external_binary_to_mess_id(BExtMessID)).
+
+
+secure_escaped_jid(JID) ->
+    ejabberd_odbc:escape(jlib:binary_to_jid(JID)).

@@ -200,7 +200,7 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
     End   = maybe_microseconds(xml:get_path_s(QueryEl, [{elem, <<"end">>}, cdata])),
     RSM   = jlib:rsm_decode(QueryEl),
     %% Filtering by contact.
-    With  = xml:get_path_s(QueryEl, [{elem, <<"with">>}, cdata]),
+    With  = maybe_jid(xml:get_path_s(QueryEl, [{elem, <<"with">>}, cdata])),
     %% This element's name is "limit".
     %% But it must be "max" according XEP-0313.
     Limit = get_one_of_path(QueryEl, [
@@ -369,17 +369,13 @@ remove_user_from_db(LServer, LUser) ->
     ok.
 
 
-message_row_to_xml({BMessID,BSrcJID,BPacket}, QueryID) ->
-    MessID = list_to_integer(binary_to_list(BMessID)),
+message_row_to_xml({MessID,SrcJID,Packet}, QueryID) ->
     {Microseconds, _NodeId} = decode_compact_uuid(MessID),
-    Packet = binary_to_term(BPacket),
-    SrcJID = jlib:binary_to_jid(BSrcJID),
     DateTime = calendar:now_to_universal_time(microseconds_to_now(Microseconds)),
     BExtMessID = mess_id_to_external_binary(MessID),
     wrap_message(Packet, QueryID, BExtMessID, DateTime, SrcJID).
 
-message_row_to_ext_id({BMessID,_,_}) ->
-    MessID = list_to_integer(binary_to_list(BMessID)),
+message_row_to_ext_id({MessID,_,_}) ->
     mess_id_to_external_binary(MessID).
 
 
@@ -418,3 +414,7 @@ wait_flushing(LServer) ->
     M = writer_module(LServer),
     M:wait_flushing(LServer).
 
+maybe_jid(<<>>) ->
+    undefined;
+maybe_jid(JID) when is_binary(JID) ->
+    jlib:binary_to_jid(JID).
