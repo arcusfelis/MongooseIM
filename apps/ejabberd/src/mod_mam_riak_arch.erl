@@ -19,12 +19,6 @@
 -include_lib("exml/include/exml.hrl").
 -include_lib("riakc/include/riakc.hrl").
 
--record(index_meta, {
-    offset,
-    total_count,
-    last_hour_keys,
-    matched_count
-}).
 
 message_bucket() ->
     <<"mam_m">>.
@@ -211,31 +205,123 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
     BWithJID = maybe_jid_to_opt_binary(LocLServer, WithJID),
     InfoKey = index_info_key(BUserID, BWithJID),
     MessIdxKeyMaker = mess_index_key_maker(BUserID, BWithJID),
-    F = fun(Conn) ->
-            case riakc_pb_socket:get(Conn, index_info_bucket(), InfoKey) of
-                {error, notfound} ->
-%                   MessIdxKeyMaker({lower, Start}),
-%                   MessIdxKeyMaker({upper, End}),
-                    LBound = MessIdxKeyMaker({lower, Start}),
-                    UBound = MessIdxKeyMaker({upper, End}),
-                    {ok, ?INDEX_RESULTS{keys=Keys}} =
-                    riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
-                    TotalCount = length(Keys),
-                    {Offset, MatchedKeys} = paginate(Keys, fix_rsm(BUserID, RSM), PageSize),
-                    case TotalCount - Offset > MaxResultLimit andalso not LimitPassed of
-                        true ->
-                            {error, 'policy-violation'};
+    Now = mod_mam_utils:now_to_microseconds(now()),
 
-                        false ->
-                            FullMatchedKeys = [{message_bucket(), K} || K <- MatchedKeys],
-                            {ok, Values} = to_values(Conn, FullMatchedKeys),
-                            MessageRows = deserialize_values(Values),
-                            {ok, {TotalCount, Offset, lists:usort(MessageRows)}}
-                    end;
-                {ok, Info} ->
-%                   index_info_max(Info),
-%                   MessIdxKeyMaker({upper, undefined}),
-                    {ok, {0, 0, []}}
+    QueryAllF = fun(Conn) ->
+        LBound = MessIdxKeyMaker({lower, Start}),
+        UBound = MessIdxKeyMaker({upper, End}),
+        {ok, ?INDEX_RESULTS{keys=Keys}} =
+        riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
+        TotalCount = length(Keys),
+        {Offset, MatchedKeys} = paginate(Keys, fix_rsm(BUserID, RSM), PageSize),
+        case TotalCount - Offset > MaxResultLimit andalso not LimitPassed of
+            true ->
+                {error, 'policy-violation'};
+
+            false ->
+                FullMatchedKeys = [{message_bucket(), K} || K <- MatchedKeys],
+                {ok, Values} = to_values(Conn, FullMatchedKeys),
+                MessageRows = deserialize_values(Values),
+                {ok, {TotalCount, Offset, lists:usort(MessageRows)}}
+        end
+    end,
+
+    AnalyseInfoIndexF = fun(Conn, Info, Index) ->
+        %% It is true, if there is an hour, that begins with
+        %% the first message of the record set.
+        IsEmptyHourOffset = case Start of
+            undefined -> false;
+            _ -> ii_calc_volume(hour(Start), Info) =:= 0
+            end,
+        %% Count of messages between the hour beginning and `Start'.
+        HourOffset = case IsEmptyHourOffset of
+            true -> 0;
+            _ ->
+                S = MessIdxKeyMaker({lower, hour_to_microseconds(Start)}),
+                E = MessIdxKeyMaker({upper, Start}),
+                get_entry_count_between(Conn, SecIndex, S, E)
+            end,
+        %% Skip unused part of the index (it is not a part of RSet).
+        Info2 = case Start of
+            undefined -> Info;
+            _ -> ii_from_hour(hour(Start), Info)
+            end,
+        %% Skip `HourOffset'.
+        %% `Info3' is a beginning of the RSet.
+        Info3 = ii_skip_hour_offset(HourOffset, Info2),
+        LBoundHour = ii_first_hour(Info3),
+        LBound = MessIdxKeyMaker({lower, hour_lower_bound(LBoundHour)}),
+        %% First hour to be requested from Riak.
+        %% `Index2' is a hour offset.
+        {Index2, Info4} = ii_skip_n(Index+PageSize, Info3),
+%       Skipped = Index - Index2,
+        case ii_is_empty(Info4) of
+            %% We will select recent entries.
+            true ->
+                UBound = MessIdxKeyMaker({upper, undefined}),
+                {ok, ?INDEX_RESULTS{keys=Keys}} =
+                riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
+                MatchedKeys = lists:sublist(Keys, PageSize),
+                FullMatchedKeys = [{message_bucket(), K} || K <- MatchedKeys],
+                {ok, Values} = to_values(Conn, FullMatchedKeys),
+                TotalCount = length(Keys) + Index,
+                Offset = Index,
+                MessageRows = deserialize_values(Values),
+                {ok, {TotalCount, Offset, MessageRows}};
+            false ->
+                %% Last hour to get.
+                UBoundHour = ii_first_hour(Info4),
+                UBound = MessIdxKeyMaker({upper, hour_upper_bound(UBoundHour)}),
+                %% Values from `Info5' will be never matched.
+                Info5 = ii_skip_hour_offset(Index2, Info4),
+                %% Get actual recent data.
+                LastKnownHour = ii_last_hour(Info5),
+                S1 = MessIdxKeyMaker({lower, LastKnownHour+1}),
+                E1 = MessIdxKeyMaker({upper, undefined}),
+                RecentCnt = get_entry_count_between(Conn, SecIndex, S1, E1),
+                %% Request values.
+                {ok, ?INDEX_RESULTS{keys=Keys}} =
+                riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
+                MatchedKeys = lists:sublist(Keys, PageSize),
+                FullMatchedKeys = [{message_bucket(), K} || K <- MatchedKeys],
+                {ok, Values} = to_values(Conn, FullMatchedKeys),
+                TotalCount = length(Keys) + Index + RecentCnt,
+                Offset = Index,
+                MessageRows = deserialize_values(Values),
+                {ok, {TotalCount, Offset, MessageRows}}
+        end
+    end,
+
+    AnalyseInfoF = fun(Conn, Info) ->
+        case RSM of
+            #rsm_in{index = Index} when is_integer(Index), Index >= 0 ->
+                case ii_calc_volume(hour(Start), Info) of
+                    %% Only recent messages match.
+                    undefined -> QueryAllF(Conn);
+                    _ -> AnalyseInfoIndexF(Conn, Info, Index)
+                end;
+            _ ->
+                QueryAllF(Conn)
+        end
+    end,
+
+    F = fun(Conn) ->
+            IgnoreInfo = case {Start, End} of
+                {undefined, undefined} -> false; %% unknown range
+                {undefined, _}         -> false;
+                {Start,     undefined} -> (Now - Start) < 2; %% looking for recent entries
+                {Start,     End}       -> (End - Start) < 2  %% A small range
+            end,
+            case IgnoreInfo of
+                true ->
+                    QueryAllF(Conn);
+                false ->
+                    case riakc_pb_socket:get(Conn, index_info_bucket(), InfoKey) of
+                        {error, notfound} ->
+                            QueryAllF(Conn);
+                        {ok, Info} ->
+                            AnalyseInfoF(Conn, Info)
+                    end
             end
         end,
     with_connection(LocLServer, F).
@@ -489,12 +575,17 @@ update_props(BucketProps, UpdateProps) ->
     UpdateProps ++ lists:foldl(fun proplists:delete/2, BucketProps, Keys).
 
 
+%% `[]' is not allowed.
 ii_last_hour([_|T]) ->
     ii_last_hour(T);
 ii_last_hour([{Hour, _}]) ->
-    Hour;
-ii_last_hour([]) ->
-    undefined.
+    Hour.
+
+%% `[]' is not allowed.
+ii_first_hour([_|T]) ->
+    ii_first_hour(T);
+ii_first_hour([{Hour, _}]) ->
+    Hour.
 
 %% @doc Calc amount of entries before the passed hour (non inclusive).
 ii_calc_before(Hour, Info) ->
@@ -504,21 +595,44 @@ ii_calc_before(Hour, [{Hour, _}|_], Acc) ->
     Acc;
 ii_calc_before(Hour, [{_, Cnt}|T], Acc) ->
     ii_calc_before(Hour, T, Acc + Cnt);
-ii_calc_before(Hour, _, Acc) ->
+ii_calc_before(_, _, _) ->
     %% There is no information about this hour.
     undefined.
 
+ii_from_hour(Hour, [{CurHour, _}|_]=Info) when Hour >= CurHour ->
+    Info;
+ii_from_hour(Hour, [{_, _}|T]) ->
+    ii_from_hour(Hour, T);
+ii_from_hour(_, []) ->
+    [].
+
 %% @doc Return how many entries are send or received within the passed hour.
+%% Info is sortered by `Hour'.
 ii_calc_volume(Hour, [{Hour, Cnt}|_]) ->
     Cnt;
-ii_calc_volume(Hour, [_|T]) ->
+ii_calc_volume(Hour, [{CurHour, _}|T]) when Hour < CurHour ->
     ii_calc_volume(Hour, T);
-ii_calc_volume(_, _) ->
+ii_calc_volume(Hour, [_|_]) ->
+    %% The information about this hour is skipped.
+    %% There are information after this hour.
+    0;
+ii_calc_volume(_, []) ->
     %% There is no information about this hour.
     undefined.
+
+ii_skip_n(N, [{Hour, Cnt}|T]) when N >= Cnt ->
+    ii_skip_n(N - Cnt, T);
+ii_skip_n(N, T) ->
+    {N, T}.
+
+ii_skip_hour_offset(HourOffset, [{Hour, Cnt}|T]) when Cnt > HourOffset ->
+    [{Hour, Cnt - HourOffset}|T].
+
+ii_is_empty(X) -> X == [].
 
 
 to_values(Conn, Keys) ->
+    [assert_valid_key(Key) || Key <- Keys],
     Ops = [{map, {modfun, riak_kv_mapreduce, map_object_value}, undefined, true}],
     case riakc_pb_socket:mapred(Conn, Keys, Ops) of
         {ok, []} ->
@@ -529,5 +643,307 @@ to_values(Conn, Keys) ->
             {error, Reason}
     end.
 
+assert_valid_key({Bucket, Key}) when is_binary(Bucket), is_binary(Key) ->
+    ok.
+
+%% TODO: use map-reduce here
+get_entry_count_between(Conn, SecIndex, LBound, UBound) ->
+    {ok, ?INDEX_RESULTS{keys=Keys}} =
+    riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
+    length(Keys).
 
 
+-ifdef(TEST).
+
+meck_test_() ->
+    {setup, 
+     fun load_mock/0,
+     fun unload_mock/1,
+     [{timeout, 60, [fun long_case/0]}]}.
+
+load_mock() ->
+    SM = riakc_pb_socket, %% webscale is here!
+    Tab = ets:new(riak_store, [public, ordered_set]),
+    IdxTab = ets:new(riak_index, [public, ordered_set]),
+    meck:new(SM),
+    meck:expect(SM, get_index_range, fun
+        (Conn, Bucket, <<"$key">>, LBound, UBound) ->
+            %% fun({{Key, _} = FullKey, _Obj})
+            %%     when FullKey >= {Bucket, LBound}
+            %%          FullKey =< {Bucket, UBound} -> Key end
+            MS = [{
+                    {'$1', '_'},
+                    [{'>=', '$1', {{Bucket, LBound}}},
+                     {'=<', '$1', {{Bucket, UBound}}}],
+                    [{element, 2, '$1'}]
+                  }],
+            Keys = ets:select(Tab, MS),
+            {ok, ?INDEX_RESULTS{keys=Keys}};
+        (Conn, Bucket, Index, LBound, UBound) ->
+            %% fun({SecIndexKey, {Key, _}})
+            %%     when SecIndexKey >= {Index, Bucket, LBound}
+            %%          SecIndexKey =< {Index, Bucket, UBound} -> Key end
+            MS = [{
+                    {'$1', '$2'},
+                    [{'>=', '$1', {{Index, Bucket, LBound}}},
+                     {'=<', '$1', {{Index, Bucket, UBound}}}],
+                    [{element, 2, '$2'}]
+                  }],
+            Keys = ets:select(IdxTab, MS),
+            {ok, ?INDEX_RESULTS{keys=Keys}}
+        end),
+    meck:expect(SM, mapred, fun(Conn, Keys, Ops) ->
+        case Ops of
+        %% Get values
+        %% see `to_values/2'
+        [{map, {modfun, riak_kv_mapreduce, map_object_value}, undefined, true}] ->
+            case [proplists:get_value(value, Obj)
+                 || Key <- Keys,
+                    {Key, Obj} <- ets:lookup(Tab, Key)] of
+                []     -> {ok, []};
+                Values -> {ok, [{0, Values}]}
+            end
+        end
+        end),
+    meck:expect(SM, get_bucket, fun(Conn, Bucket) ->
+        {ok, []}
+        end),
+    meck:expect(SM, set_bucket, fun(Conn, Bucket, Opts) ->
+        ok
+        end),
+    meck:expect(SM, put, fun(Conn, Obj) ->
+        Key    = proplists:get_value(key, Obj),
+        Bucket = proplists:get_value(bucket, Obj),
+        Md     = proplists:get_value(metadata, Obj),
+        Is     = proplists:get_value(secondary_index, Md, []),
+        ets:insert(Tab, {{Bucket, Key}, Obj}),
+        ets:insert(IdxTab, [{I, Bucket, Key} || I <- Is]),
+        ok
+        end),
+    meck:expect(SM, get, fun(Conn, Bucket, Key) ->
+        case ets:lookup(Tab, {Bucket, Key}) of
+            [{_,Obj}] -> {ok, Obj};
+            []        -> {error, notfound}
+        end
+        end),
+    OM = riakc_obj,
+    meck:new(OM),
+    meck:expect(OM, new, fun(Bucket, Key, Value) ->
+        [{bucket, Bucket}, {key, Key}, {value, Value}]
+        end),
+    meck:expect(OM, get_metadata, fun(Obj) ->
+        proplists:get_value(metadata, Obj, [])
+        end),
+    meck:expect(OM, get_metadatas, fun(Obj) ->
+        [proplists:get_value(metadata, Obj, [])]
+        end),
+    meck:expect(OM, update_metadata, fun(Obj, Md) ->
+        [{metadata, Md}|Obj]
+        end),
+    meck:expect(OM, get_value, fun(Obj) ->
+        proplists:get_value(value, Obj)
+        end),
+    meck:expect(OM, get_values, fun(Obj) ->
+        [proplists:get_value(value, Obj)]
+        end),
+    meck:expect(OM, update_value, fun(Obj, Value) ->
+        [{value, Value}|Obj]
+        end),
+    meck:expect(OM, set_secondary_index, fun(Md, Is) ->
+        Idx = proplists:get_value(secondary_index, Md, []),
+        [{secondary_index, Is ++ Idx}|Md]
+        end),
+    CM = mod_mam_cache,
+    meck:new(CM),
+    meck:expect(CM, user_id, fun(LServer, LUser) ->
+            user_id(LUser)
+        end),
+    PM = riak_pool,
+    meck:new(PM),
+    meck:expect(PM, with_connection, fun(mam_cluster, F) ->
+            F(conn)
+        end),
+    ok.
+
+unload_mock(_) ->
+    meck:unload(riakc_pb_socket),
+    meck:unload(riakc_obj),
+    ok.
+
+long_case() ->
+    %% Alice to Cat
+    Log1Id = fun(Time) ->
+        Date = iolist_to_binary("2000-07-21T" ++ Time ++ "Z"),
+        id(Date)
+        end,
+    Log2Id = fun(Time) ->
+        Date = iolist_to_binary("2000-07-22T" ++ Time ++ "Z"),
+        id(Date)
+        end,
+    A2C = fun(Time, Text) ->
+        Packet = message(iolist_to_binary(Text)),
+        ?MODULE:archive_message(Log1Id(Time), outgoing, alice(), cat(), alice(),
+                                Packet)
+        end,
+    %% Cat to Alice
+    C2A = fun(Time, Text) ->
+        Packet = message(iolist_to_binary(Text)),
+        ?MODULE:archive_message(Log1Id(Time), incoming, alice(), cat(), cat(),
+                                Packet)
+        end,
+    %% Alice to Mad Tea Party
+    A2P = fun(Time, Text) ->
+        Date = iolist_to_binary("2000-07-22T" ++ Time ++ "Z"),
+        Packet = message(iolist_to_binary(Text)),
+        ?MODULE:archive_message(id(Date), outgoing, alice(), party(), alice(),
+                                Packet)
+        end,
+    %% March Hare - M, Hatter - H and Dormouse - D
+    PM2A = fun(Time, Text) ->
+        Date = iolist_to_binary("2000-07-21T" ++ Time ++ "Z"),
+        Packet = message(iolist_to_binary(Text)),
+        ?MODULE:archive_message(id(Date), incoming, alice(),
+                                march_hare_at_party(), march_hare_at_party(),
+                                Packet)
+        end,
+    PH2A = fun(Time, Text) ->
+        Date = iolist_to_binary("2000-07-21T" ++ Time ++ "Z"),
+        Packet = message(iolist_to_binary(Text)),
+        ?MODULE:archive_message(id(Date), incoming, alice(),
+                                hatter_at_party(), hatter_at_party(),
+                                Packet)
+        end,
+    PD2A = fun(Time, Text) ->
+        Date = iolist_to_binary("2000-07-21T" ++ Time ++ "Z"),
+        Packet = message(iolist_to_binary(Text)),
+        ?MODULE:archive_message(id(Date), incoming, alice(),
+                                dormouse_at_party(), dormouse_at_party(),
+                                Packet)
+        end,
+    %% Credits to http://wiki.answers.com/Q/What_are_some_dialogues_said_by_Alice_in_Alice%27s_Adventures_in_Wonderland
+    Log1 = fun(A, C) ->
+    %% Alice sends a message to Cheshire Cat.
+    A("01:50:00", "Cheshire Puss, would you tell me, please, which way I ought to go from here?"),
+    C("01:50:05", "That depends a good deal on where you want to get to."),
+    A("01:50:15", "I don't much care where-"),
+    C("01:50:16", "Then it doesn't matter which way you go."),
+    A("01:50:17", "-so long as I get somewhere."),
+    C("01:50:20", "Oh, you're sure to do that, if you only walk long enough."),
+    A("01:50:25", "What sort of people live about here?"),
+    C("01:50:30", "In THAT direction lives a Hatter: and in THAT direction lives"
+                  " a March Hare. Visit either you like: they're both mad."),
+    A("01:50:40", "But I don't want to go among mad people."),
+    C("01:50:45", "Oh, you can't help that, we're all mad here. I'm mad. You're mad."),
+    A("01:50:50", "How do you know I'm mad?"),
+    C("01:50:55", "You must be, or you wouldn't have come here."),
+    ok
+    end,
+    Log2 = fun(A, M, H, D) ->
+    %% March Hare - M, Hatter - H and Dormouse - D
+    M("06:49:00", "No room! No room!"),
+    H("06:49:01", "No room! No room!"),
+    D("06:49:02", "No room! No room!"),
+    A("06:49:05", "There's PLENTY of room!"),
+    M("06:49:10", "Have some wine."),
+    A("06:49:15", "I don't see any wine."),
+    M("06:49:20", "There isn't any."),
+    A("06:49:25", "Then it wasn't very civil of you to offer it."),
+    M("06:49:30", "It wasn't very civil of you to sit down without being invited."),
+    A("06:49:36", "I didn't know it was your table, it's laid for a great many more than three."),
+    H("06:49:45", "Your hair wants cutting."),
+    A("06:49:50", "You should learn not to make personal remarks, it's very rude."),
+    H("06:50:05", "Why is a raven like a writing-desk?"),
+    A("06:50:10", "I believe I can guess that."),
+    M("06:50:25", "Do you mean that you think you can find out the answer to it?"),
+    A("06:50:28", "Exactly so."),
+    M("06:50:33", "Then you should say what you mean."),
+    A("06:50:40", "I do, at least--at least I mean what I say--that's the same thing, you know."),
+    H("06:50:50", "Not the same thing a bit! You might just as well say that "
+                  "\"I see what I eat\" is the same thing as \"I eat what I see\"!"),
+    M("06:51:00", "You might just as well say that \"I like what I get\" "
+                  "is the same thing as \"I get what I like\"!"),
+    D("06:51:10", "You might just as well say that \"I breathe when I sleep\" "
+                  "is the same thing as \"I sleep when I breathe\"!"),
+    H("06:51:15", "It IS the same thing with you. "),
+    ok
+    end,
+    Log1(A2C, C2A),
+    Log2(A2P, PM2A, PH2A, PD2A),
+    
+    %% lookup_messages(UserJID, RSM, Start, End, WithJID,
+    %%                 PageSize, LimitPassed, MaxResultLimit) ->
+    %% {ok, {TotalCount, Offset, MessageRows}}
+    %% First 5.
+    
+    assert_keys(34, 0,
+                [join_date_time("2000-07-21", Time)
+                 || Time <- ["01:50:00", "01:50:05", "01:50:15",
+                             "01:50:16", "01:50:17"]],
+                lookup_messages(alice(),
+                    none, undefined, undefined, undefined,
+                    5, true, 5)),
+    ok.
+
+assert_keys(ExpectedTotalCount, ExpectedOffset, DateTimes,
+            {ok, {TotalCount, Offset, MessageRows}}) ->
+    
+    ?assertEqual(ExpectedTotalCount, TotalCount),
+    ?assertEqual(ExpectedOffset, Offset),
+    ?assertEqual(DateTimes,
+        [mess_id_to_iso_date_time(MessID) || {MessID, _, _} <- MessageRows]).
+
+join_date_time(Date, Time) ->
+    Date ++ "T" ++ Time.
+
+mess_id_to_iso_date_time(MessID) ->
+    {Microseconds, _} = mod_mam_utils:decode_compact_uuid(MessID),
+    TimeStamp = mod_mam_utils:microseconds_to_now(Microseconds),
+    {{Year, Month, Day}, {Hour, Minute, Second}} =
+    calendar:now_to_universal_time(TimeStamp),
+    lists:flatten(
+      io_lib:format("~4..0w-~2..0w-~2..0wT~2..0w:~2..0w:~2..0w",
+                    [Year, Month, Day, Hour, Minute, Second])).
+
+
+alice() ->
+    #jid{luser = <<"alice">>, lserver = <<"wonderland">>, lresource = <<>>,
+          user = <<"alice">>,  server = <<"wonderland">>,  resource = <<>>}.
+
+cat() ->
+    #jid{luser = <<"cat">>, lserver = <<"wonderland">>, lresource = <<>>,
+          user = <<"cat">>,  server = <<"wonderland">>,  resource = <<>>}.
+
+party() ->
+    #jid{luser = <<"party">>, lserver = <<"wonderland">>, lresource = <<>>,
+          user = <<"party">>,  server = <<"wonderland">>,  resource = <<>>}.
+
+
+march_hare_at_party() ->
+    #jid{luser = <<"party">>, lserver = <<"wonderland">>, lresource = <<"march_hare">>,
+          user = <<"party">>,  server = <<"wonderland">>,  resource = <<"march_hare">>}.
+
+hatter_at_party() ->
+    #jid{luser = <<"party">>, lserver = <<"wonderland">>, lresource = <<"hatter">>,
+          user = <<"party">>,  server = <<"wonderland">>,  resource = <<"hatter">>}.
+dormouse_at_party() ->
+    #jid{luser = <<"party">>, lserver = <<"wonderland">>, lresource = <<"dormouse">>,
+          user = <<"party">>,  server = <<"wonderland">>,  resource = <<"dormouse">>}.
+
+user_id(<<"alice">>) -> 1.
+
+message(Text) when is_binary(Text) ->
+    #xmlel{
+        name = <<"message">>,
+        children = [
+            #xmlel{
+                name = <<"body">>,
+                children = #xmlcdata{content = Text}
+            }]
+    }.
+
+id(Date) ->
+    Microseconds = mod_mam_utils:maybe_microseconds(Date),
+    encode_compact_uuid(Microseconds, 1).
+
+
+-endif.
