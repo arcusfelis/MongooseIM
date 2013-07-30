@@ -196,6 +196,10 @@ split_keys_test_() ->
 
 -endif.
 
+collect_index_info_threshold(Host) ->
+    gen_mod:get_module_opt(Host, mod_mam, collect_index_info_threshold, 100).
+
+
 lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
                 RSM, Start, End, WithJID,
                 PageSize, LimitPassed, MaxResultLimit) ->
@@ -206,6 +210,22 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
     InfoKey = index_info_key(BUserID, BWithJID),
     MessIdxKeyMaker = mess_index_key_maker(BUserID, BWithJID),
     Now = mod_mam_utils:now_to_microseconds(now()),
+
+    RequestErlierEntriesF = fun(_, undefined) -> []; (Conn, Start) ->
+        %% Get entries before the passed date.
+        LBound = MessIdxKeyMaker({lower, undefined}),
+        UBound = MessIdxKeyMaker({upper, Start}),
+        {ok, ?INDEX_RESULTS{keys=Keys}} =
+        riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
+        Keys
+        end,
+
+    BuildInfoF = fun(Conn, Start, End, Keys) ->
+        KeysFromStart = RequestErlierEntriesF(Conn, Start) ++ Keys,
+        Info = ii_new(KeysFromStart),
+        InfoObj = riakc_obj:new(message_bucket(), InfoKey, Info),
+        riakc_pb_socket:put(Conn, InfoObj)
+        end,
 
     QueryAllF = fun(Conn) ->
         LBound = MessIdxKeyMaker({lower, Start}),
@@ -219,6 +239,12 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
                 {error, 'policy-violation'};
 
             false ->
+                case TotalCount >= collect_index_info_threshold(LocLServer) of
+                    true ->
+                        BuildInfoF(Conn, Start, End, Keys);
+                    false ->
+                        ok
+                end,
                 FullMatchedKeys = [{message_bucket(), K} || K <- MatchedKeys],
                 {ok, Values} = to_values(Conn, FullMatchedKeys),
                 MessageRows = deserialize_values(Values),
@@ -316,7 +342,7 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
                 true ->
                     QueryAllF(Conn);
                 false ->
-                    case riakc_pb_socket:get(Conn, index_info_bucket(), InfoKey) of
+                    case get_actual_info(Conn, InfoKey, Now, SecIndex, MessIdxKeyMaker) of
                         {error, notfound} ->
                             QueryAllF(Conn);
                         {ok, Info} ->
@@ -325,6 +351,41 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
             end
         end,
     with_connection(LocLServer, F).
+
+get_actual_info(Conn, InfoKey, Now, SecIndex, MessIdxKeyMaker) ->
+    case riakc_pb_socket:get(Conn, index_info_bucket(), InfoKey) of
+        {error, notfound} ->
+            {error, notfound};
+        {ok, InfoObj} ->
+            Info = binary_to_term(riakc_obj:get_value(InfoObj)),
+            Last = last_modified(InfoObj),
+            case hour(Last) =:= hour(Now) of
+                %% Info is actual.
+                true -> {ok, Info};
+                false ->
+                    Info2 = update_info(Conn, Last, Now, Info, SecIndex, MessIdxKeyMaker),
+                    InfoObj2 = riakc_obj:update_value(term_to_binary(Info2), InfoObj),
+                    riakc_pb_socket:put(Conn, InfoObj2),
+                    {ok, Info2}
+            end
+    end.
+
+%% @doc Request new entries from the server.
+%% `Last' and `Now' are microseconds.
+update_info(Conn, Last, Now, Info, SecIndex, MessIdxKeyMaker) ->
+    LBound = MessIdxKeyMaker({lower, hour_upper_bound(hour(Last))}),
+    UBound = MessIdxKeyMaker({upper, hour_upper_bound(hour(Now) - 1)}),
+    {ok, ?INDEX_RESULTS{keys=Keys}} =
+    riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
+    ii_add_keys(Keys, Info).
+    
+
+%% @doc Return mtime of the object in microseconds.
+last_modified(Obj) ->
+    MD = riakc_obj:get_metadata(Obj),
+    TimeStamp = proplists:get_value(<<"X-Riak-Last-Modified">>, MD),
+    mod_mam_utils:now_to_microseconds(TimeStamp).
+
 %   Filter = prepare_filter(UserJID, Start, End, WithJID),
 %   TotalCount = calc_count(LServer, Filter),
 %   Offset     = calc_offset(LServer, Filter, PageSize, TotalCount, RSM),
@@ -339,6 +400,7 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
 %           MessageRows = extract_messages(LServer, Filter, Offset, PageSize),
 %           {ok, {TotalCount, Offset, MessageRows}}
 %   end.
+    
 
 deserialize_values(Values) ->
     [binary_to_term(Value) || Value <- Values].
@@ -551,6 +613,16 @@ user_remote_jid_message_id(BUserID, BMessID, BJID)
     <<BUserID/binary, BJID/binary, 0, BMessID/binary>>.
 
 
+key_to_microseconds(Key) when is_binary(Key) ->
+    {Microseconds, _} = mod_mam_utils:decode_compact_uuid(key_to_mess_id(Key)),
+    Microseconds.
+
+key_to_mess_id(Key) ->
+    %% Get 8 bytes.
+    <<MessID:64/big>> = binary:part(Key, byte_size(Key), -8),
+    MessID.
+
+
 %% @doc Ensure, that `UpdateProps' are set in required position.
 update_bucket(Conn, BucketName, UpdateProps) ->
     case riakc_pb_socket:get_bucket(Conn, BucketName) of
@@ -576,15 +648,13 @@ update_props(BucketProps, UpdateProps) ->
 
 
 %% `[]' is not allowed.
-ii_last_hour([_|T]) ->
+ii_last_hour([_|[_|_]=T]) ->
     ii_last_hour(T);
 ii_last_hour([{Hour, _}]) ->
     Hour.
 
 %% `[]' is not allowed.
-ii_first_hour([_|T]) ->
-    ii_first_hour(T);
-ii_first_hour([{Hour, _}]) ->
+ii_first_hour([{Hour,_}|_]) ->
     Hour.
 
 %% @doc Calc amount of entries before the passed hour (non inclusive).
@@ -612,7 +682,7 @@ ii_calc_volume(Hour, [{Hour, Cnt}|_]) ->
     Cnt;
 ii_calc_volume(Hour, [{CurHour, _}|T]) when Hour < CurHour ->
     ii_calc_volume(Hour, T);
-ii_calc_volume(Hour, [_|_]) ->
+ii_calc_volume(_, [_|_]) ->
     %% The information about this hour is skipped.
     %% There are information after this hour.
     0;
@@ -620,7 +690,7 @@ ii_calc_volume(_, []) ->
     %% There is no information about this hour.
     undefined.
 
-ii_skip_n(N, [{Hour, Cnt}|T]) when N >= Cnt ->
+ii_skip_n(N, [{_, Cnt}|T]) when N >= Cnt ->
     ii_skip_n(N - Cnt, T);
 ii_skip_n(N, T) ->
     {N, T}.
@@ -629,6 +699,24 @@ ii_skip_hour_offset(HourOffset, [{Hour, Cnt}|T]) when Cnt > HourOffset ->
     [{Hour, Cnt - HourOffset}|T].
 
 ii_is_empty(X) -> X == [].
+
+ii_add_keys(Keys, Info) ->
+    %% Sorted.
+    Info ++ ii_new(Keys).
+
+ii_new(Keys) ->
+    frequency([hour(key_to_microseconds(Key)) || Key <- Keys]).
+
+%% Returns `[{Hour, MessageCount}]'.
+frequency([H|T]) ->
+    frequency_1([H|T], H, 1);
+frequency([]) ->
+    [].
+    
+frequency_1([H|T], H, N) ->
+    frequency_1(T, H, N+1);
+frequency_1(T, H, N) ->
+    [{H, N}|frequency(T)].
 
 
 to_values(Conn, Keys) ->
@@ -656,12 +744,23 @@ get_entry_count_between(Conn, SecIndex, LBound, UBound) ->
 -ifdef(TEST).
 
 meck_test_() ->
-    {setup, 
-     fun load_mock/0,
-     fun unload_mock/1,
-     [{timeout, 60, [fun long_case/0]}]}.
+    [{"Without index info.",
+      {setup, 
+       fun() -> load_mock(100), load_data() end,
+       fun(_) -> unload_mock() end,
+       [{timeout, 60, [{spawn, fun long_case/0}]}]}},
+     {"With index info.",
+      {setup, 
+       fun() -> load_mock(0), load_data() end,
+       fun(_) -> unload_mock() end,
+       [{timeout, 60, [{spawn, fun long_case/0}]}]}}].
 
-load_mock() ->
+load_mock(IndexInfoThreshold) ->
+    GM = gen_mod,
+    meck:new(GM),
+    meck:expect(GM, get_module_opt, fun(_, mod_mam, collect_index_info_threshold, _) ->
+        IndexInfoThreshold
+        end),
     SM = riakc_pb_socket, %% webscale is here!
     Tab = ets:new(riak_store, [public, ordered_set]),
     IdxTab = ets:new(riak_index, [public, ordered_set]),
@@ -714,7 +813,7 @@ load_mock() ->
     meck:expect(SM, put, fun(Conn, Obj) ->
         Key    = proplists:get_value(key, Obj),
         Bucket = proplists:get_value(bucket, Obj),
-        Md     = proplists:get_value(metadata, Obj),
+        Md     = proplists:get_value(metadata, Obj, []),
         Is     = proplists:get_value(secondary_index, Md, []),
         ets:insert(Tab, {{Bucket, Key}, Obj}),
         ets:insert(IdxTab, [{I, Bucket, Key} || I <- Is]),
@@ -729,7 +828,8 @@ load_mock() ->
     OM = riakc_obj,
     meck:new(OM),
     meck:expect(OM, new, fun(Bucket, Key, Value) ->
-        [{bucket, Bucket}, {key, Key}, {value, Value}]
+        Md = [{<<"X-Riak-Last-Modified">>, now()}],
+        [{bucket, Bucket}, {key, Key}, {value, Value}, {metadata, Md}]
         end),
     meck:expect(OM, get_metadata, fun(Obj) ->
         proplists:get_value(metadata, Obj, [])
@@ -753,24 +853,27 @@ load_mock() ->
         Idx = proplists:get_value(secondary_index, Md, []),
         [{secondary_index, Is ++ Idx}|Md]
         end),
-    CM = mod_mam_cache,
-    meck:new(CM),
-    meck:expect(CM, user_id, fun(LServer, LUser) ->
-            user_id(LUser)
-        end),
     PM = riak_pool,
     meck:new(PM),
     meck:expect(PM, with_connection, fun(mam_cluster, F) ->
             F(conn)
         end),
+    CM = mod_mam_cache,
+    meck:new(CM),
+    meck:expect(CM, user_id, fun(LServer, LUser) ->
+            user_id(LUser)
+        end),
     ok.
 
-unload_mock(_) ->
+unload_mock() ->
+    meck:unload(gen_mod),
     meck:unload(riakc_pb_socket),
     meck:unload(riakc_obj),
+    meck:unload(riak_pool),
+    meck:unload(mod_mam_cache),
     ok.
 
-long_case() ->
+load_data() ->
     %% Alice to Cat
     Log1Id = fun(Time) ->
         Date = iolist_to_binary("2000-07-21T" ++ Time ++ "Z"),
@@ -793,30 +896,26 @@ long_case() ->
         end,
     %% Alice to Mad Tea Party
     A2P = fun(Time, Text) ->
-        Date = iolist_to_binary("2000-07-22T" ++ Time ++ "Z"),
         Packet = message(iolist_to_binary(Text)),
-        ?MODULE:archive_message(id(Date), outgoing, alice(), party(), alice(),
+        ?MODULE:archive_message(Log2Id(Time), outgoing, alice(), party(), alice(),
                                 Packet)
         end,
     %% March Hare - M, Hatter - H and Dormouse - D
     PM2A = fun(Time, Text) ->
-        Date = iolist_to_binary("2000-07-21T" ++ Time ++ "Z"),
         Packet = message(iolist_to_binary(Text)),
-        ?MODULE:archive_message(id(Date), incoming, alice(),
+        ?MODULE:archive_message(Log2Id(Time), incoming, alice(),
                                 march_hare_at_party(), march_hare_at_party(),
                                 Packet)
         end,
     PH2A = fun(Time, Text) ->
-        Date = iolist_to_binary("2000-07-21T" ++ Time ++ "Z"),
         Packet = message(iolist_to_binary(Text)),
-        ?MODULE:archive_message(id(Date), incoming, alice(),
+        ?MODULE:archive_message(Log2Id(Time), incoming, alice(),
                                 hatter_at_party(), hatter_at_party(),
                                 Packet)
         end,
     PD2A = fun(Time, Text) ->
-        Date = iolist_to_binary("2000-07-21T" ++ Time ++ "Z"),
         Packet = message(iolist_to_binary(Text)),
-        ?MODULE:archive_message(id(Date), incoming, alice(),
+        ?MODULE:archive_message(Log2Id(Time), incoming, alice(),
                                 dormouse_at_party(), dormouse_at_party(),
                                 Packet)
         end,
@@ -869,18 +968,40 @@ long_case() ->
     end,
     Log1(A2C, C2A),
     Log2(A2P, PM2A, PH2A, PD2A),
-    
+    ok.
+
+long_case() ->
     %% lookup_messages(UserJID, RSM, Start, End, WithJID,
     %%                 PageSize, LimitPassed, MaxResultLimit) ->
     %% {ok, {TotalCount, Offset, MessageRows}}
-    %% First 5.
     
+    %% First 5.
     assert_keys(34, 0,
                 [join_date_time("2000-07-21", Time)
                  || Time <- ["01:50:00", "01:50:05", "01:50:15",
                              "01:50:16", "01:50:17"]],
                 lookup_messages(alice(),
                     none, undefined, undefined, undefined,
+                    5, true, 5)),
+
+    %% Last 5.
+    assert_keys(34, 29,
+                [join_date_time("2000-07-22", Time)
+                 || Time <- ["06:50:40", "06:50:50", "06:51:00",
+                             "06:51:10", "06:51:15"]],
+                lookup_messages(alice(),
+                    #rsm_in{direction = before},
+                    undefined, undefined, undefined,
+                    5, true, 5)),
+
+    %% Index 3.
+    assert_keys(34, 3,
+                [join_date_time("2000-07-21", Time)
+                 || Time <- ["01:50:16", "01:50:17", "01:50:20",
+                             "01:50:25", "01:50:30"]],
+                lookup_messages(alice(),
+                    #rsm_in{index = 3},
+                    undefined, undefined, undefined,
                     5, true, 5)),
     ok.
 
