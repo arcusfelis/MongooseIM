@@ -10,6 +10,9 @@
 -import(mod_mam_utils,
         [encode_compact_uuid/2]).
 
+
+-type message_row() :: tuple().
+
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -endif.
@@ -196,8 +199,8 @@ split_keys_test_() ->
 
 -endif.
 
-collect_index_info_threshold(Host) ->
-    gen_mod:get_module_opt(Host, mod_mam, collect_index_info_threshold, 100).
+index_info_creation_threshold(Host) ->
+    gen_mod:get_module_opt(Host, mod_mam, index_info_creation_threshold, 100).
 
 
 lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
@@ -215,23 +218,22 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
         %% Get entries before the passed date.
         LBound = MessIdxKeyMaker({lower, undefined}),
         UBound = MessIdxKeyMaker({upper, Start}),
-        {ok, ?INDEX_RESULTS{keys=Keys}} =
-        riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
-        Keys
+        get_key_range(Conn, SecIndex, LBound, UBound)
         end,
 
     BuildInfoF = fun(Conn, Start, End, Keys) ->
+        %% Ignore `End'. Recent records can be added later.
         KeysFromStart = RequestErlierEntriesF(Conn, Start) ++ Keys,
         Info = ii_new(KeysFromStart),
-        InfoObj = riakc_obj:new(message_bucket(), InfoKey, Info),
+        Value = term_to_binary(Info),
+        InfoObj = riakc_obj:new(index_info_bucket(), InfoKey, Value),
         riakc_pb_socket:put(Conn, InfoObj)
         end,
 
     QueryAllF = fun(Conn) ->
         LBound = MessIdxKeyMaker({lower, Start}),
         UBound = MessIdxKeyMaker({upper, End}),
-        {ok, ?INDEX_RESULTS{keys=Keys}} =
-        riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
+        Keys = get_key_range(Conn, SecIndex, LBound, UBound),
         TotalCount = length(Keys),
         {Offset, MatchedKeys} = paginate(Keys, fix_rsm(BUserID, RSM), PageSize),
         case TotalCount - Offset > MaxResultLimit andalso not LimitPassed of
@@ -239,27 +241,26 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
                 {error, 'policy-violation'};
 
             false ->
-                case TotalCount >= collect_index_info_threshold(LocLServer) of
+                case TotalCount >= index_info_creation_threshold(LocLServer) of
                     true ->
                         BuildInfoF(Conn, Start, End, Keys);
                     false ->
                         ok
                 end,
-                FullMatchedKeys = [{message_bucket(), K} || K <- MatchedKeys],
-                {ok, Values} = to_values(Conn, FullMatchedKeys),
-                MessageRows = deserialize_values(Values),
-                {ok, {TotalCount, Offset, lists:usort(MessageRows)}}
+                MessageRows = get_message_rows(Conn, MatchedKeys),
+                {ok, {TotalCount, Offset, MessageRows}}
         end
     end,
 
-    AnalyseInfoIndexF = fun(Conn, Info, Index) ->
+
+    AnalyseInfoIndexF = fun(Conn, Info, Offset) ->
         %% It is true, if there is an hour, that begins with
         %% the first message of the record set.
         IsEmptyHourOffset = case Start of
             undefined -> false;
             _ -> ii_calc_volume(hour(Start), Info) =:= 0
             end,
-        %% Count of messages between the hour beginning and `Start'.
+        %% Count of messages from the hour beginning to `Start'.
         HourOffset = case IsEmptyHourOffset of
             true -> 0;
             _ ->
@@ -268,52 +269,64 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
                 get_entry_count_between(Conn, SecIndex, S, E)
             end,
         %% Skip unused part of the index (it is not a part of RSet).
-        Info2 = case Start of
-            undefined -> Info;
-            _ -> ii_from_hour(hour(Start), Info)
+        Info2 = case is_defined(Start) of
+            true -> Info;
+            _    -> ii_from_hour(hour(Start), Info)
             end,
         %% Skip `HourOffset'.
         %% `Info3' is a beginning of the RSet.
         Info3 = ii_skip_hour_offset(HourOffset, Info2),
         LBoundHour = ii_first_hour(Info3),
         LBound = MessIdxKeyMaker({lower, hour_lower_bound(LBoundHour)}),
-        %% First hour to be requested from Riak.
-        %% `Index2' is a hour offset.
-        {Index2, Info4} = ii_skip_n(Index+PageSize, Info3),
-%       Skipped = Index - Index2,
-        case ii_is_empty(Info4) of
-            %% We will select recent entries.
-            true ->
-                UBound = MessIdxKeyMaker({upper, undefined}),
-                {ok, ?INDEX_RESULTS{keys=Keys}} =
-                riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
-                MatchedKeys = lists:sublist(Keys, PageSize),
-                FullMatchedKeys = [{message_bucket(), K} || K <- MatchedKeys],
-                {ok, Values} = to_values(Conn, FullMatchedKeys),
-                TotalCount = length(Keys) + Index,
-                Offset = Index,
-                MessageRows = deserialize_values(Values),
-                {ok, {TotalCount, Offset, MessageRows}};
+        %% Looking for the erliest hour, that should be loaded from Riak.
+        %% `Left' is how many records are left to fill a full page.
+        {Left, Info4} = case is_defined(End) of
+            true  -> ii_skip_n_with_border(Offset+PageSize, hour(End), Info3);
+            false -> ii_skip_n(Offset+PageSize, Info3)
+            end,
+%       Skipped = Offset - Left,
+        Strategy = case ii_is_empty(Info4) of
+            true  -> get_whole_range;
             false ->
-                %% Last hour to get.
+                case is_defined(End) andalso ii_first_hour(Info4) >= hour(End) of
+                    true  -> handle_border;
+                    false -> handle_page_limit
+                end
+            end,
+        case Strategy of
+            %% We will select recent entries only.
+            get_whole_range ->
+                UBound = MessIdxKeyMaker({upper, End}),
+                Keys = get_key_range(Conn, SecIndex, LBound, UBound),
+                MatchedKeys = lists:sublist(Keys, PageSize),
+                TotalCount = length(Keys) + Offset,
+                MessageRows = get_message_rows(Conn, MatchedKeys),
+                {ok, {TotalCount, Offset, MessageRows}};
+            handle_border ->
+                UBound = MessIdxKeyMaker({upper, End}),
+                %% Request values.
+                Keys = get_key_range(Conn, SecIndex, LBound, UBound),
+                MatchedKeys = lists:sublist(Keys, PageSize),
+                TotalCount = length(Keys) + Offset,
+                MessageRows = get_message_rows(Conn, MatchedKeys),
+                {ok, {TotalCount, Offset, MessageRows}};
+            %% Not all index was traversed, stop here.
+            handle_page_limit ->
+                %% Last hour in the range to get.
                 UBoundHour = ii_first_hour(Info4),
                 UBound = MessIdxKeyMaker({upper, hour_upper_bound(UBoundHour)}),
                 %% Values from `Info5' will be never matched.
-                Info5 = ii_skip_hour_offset(Index2, Info4),
+                Info5 = ii_skip_hour_offset(Left, Info4),
                 %% Get actual recent data.
                 LastKnownHour = ii_last_hour(Info5),
-                S1 = MessIdxKeyMaker({lower, LastKnownHour+1}),
-                E1 = MessIdxKeyMaker({upper, undefined}),
+                S1 = MessIdxKeyMaker({lower, hour_lower_bound(LastKnownHour+1)}),
+                E1 = MessIdxKeyMaker({upper, End}),
                 RecentCnt = get_entry_count_between(Conn, SecIndex, S1, E1),
                 %% Request values.
-                {ok, ?INDEX_RESULTS{keys=Keys}} =
-                riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
+                Keys = get_key_range(Conn, SecIndex, LBound, UBound),
                 MatchedKeys = lists:sublist(Keys, PageSize),
-                FullMatchedKeys = [{message_bucket(), K} || K <- MatchedKeys],
-                {ok, Values} = to_values(Conn, FullMatchedKeys),
-                TotalCount = length(Keys) + Index + RecentCnt,
-                Offset = Index,
-                MessageRows = deserialize_values(Values),
+                TotalCount = length(Keys) + Offset + RecentCnt,
+                MessageRows = get_message_rows(Conn, MatchedKeys),
                 {ok, {TotalCount, Offset, MessageRows}}
         end
     end,
@@ -321,25 +334,27 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
     AnalyseInfoF = fun(Conn, Info) ->
         case RSM of
             #rsm_in{index = Index} when is_integer(Index), Index >= 0 ->
-                case ii_calc_volume(hour(Start), Info) of
-                    %% Only recent messages match.
-                    undefined -> QueryAllF(Conn);
-                    _ -> AnalyseInfoIndexF(Conn, Info, Index)
+                case is_defined(Start) andalso ii_is_recorded(hour(Start), Info) of
+                    true -> AnalyseInfoIndexF(Conn, Info, Index);
+                    %% Match only recent messages.
+                    false -> QueryAllF(Conn)
                 end;
+            %% Last page.
+            #rsm_in{direction = before, id = undefined} ->
+                QueryAllF(Conn);
+            #rsm_in{direction = before, id = Id} ->
+                QueryAllF(Conn);
+            #rsm_in{direction = aft, id = Id} ->
+                QueryAllF(Conn);
             _ ->
                 QueryAllF(Conn)
         end
     end,
 
     F = fun(Conn) ->
-            IgnoreInfo = case {Start, End} of
-                {undefined, undefined} -> false; %% unknown range
-                {undefined, _}         -> false;
-                {Start,     undefined} -> (Now - Start) < 2; %% looking for recent entries
-                {Start,     End}       -> (End - Start) < 2  %% A small range
-            end,
-            case IgnoreInfo of
+            case is_short_range(Now, Start, End) of
                 true ->
+                    %% ignore index info.
                     QueryAllF(Conn);
                 false ->
                     case get_actual_info(Conn, InfoKey, Now, SecIndex, MessIdxKeyMaker) of
@@ -511,7 +526,7 @@ hour_id(MessID, UserID) ->
     <<UserID:64/big, (hour(Microseconds)):24/big>>.
 
 %% Transforms `{{2013,7,21},{15,43,36}} => {{2013,7,21},{15,0,0}}'.
-hour(Ms) ->
+hour(Ms) when is_integer(Ms) ->
     Ms div microseconds_in_hour().
 
 hour_to_microseconds(Hour) when is_integer(Hour) ->
@@ -646,6 +661,7 @@ update_props(BucketProps, UpdateProps) ->
     Keys = [K || {K,_} <- UpdateProps],
     UpdateProps ++ lists:foldl(fun proplists:delete/2, BucketProps, Keys).
 
+is_defined(X) -> X =/= undefined.
 
 %% `[]' is not allowed.
 ii_last_hour([_|[_|_]=T]) ->
@@ -690,9 +706,22 @@ ii_calc_volume(_, []) ->
     %% There is no information about this hour.
     undefined.
 
+ii_is_recorded(Hour, Info) ->
+    %% Tip: if no information exists after specified hour,
+    %%      `ii_calc_volume' returns `undefined'.
+    is_defined(ii_calc_volume(hour(Hour), Info)).
+                
+
 ii_skip_n(N, [{_, Cnt}|T]) when N >= Cnt ->
     ii_skip_n(N - Cnt, T);
 ii_skip_n(N, T) ->
+    {N, T}.
+
+ii_skip_n_with_border(N, BorderHour, [{Hour, Cnt}|_]=T) when Hour >= BorderHour ->
+    {N, T}; %% out of the border
+ii_skip_n_with_border(N, BorderHour, [{_, Cnt}|T]) when N >= Cnt ->
+    ii_skip_n_with_border(N - Cnt, BorderHour, T);
+ii_skip_n_with_border(N, _, T) ->
     {N, T}.
 
 ii_skip_hour_offset(HourOffset, [{Hour, Cnt}|T]) when Cnt > HourOffset ->
@@ -724,21 +753,34 @@ to_values(Conn, Keys) ->
     Ops = [{map, {modfun, riak_kv_mapreduce, map_object_value}, undefined, true}],
     case riakc_pb_socket:mapred(Conn, Keys, Ops) of
         {ok, []} ->
-            {ok, []};
+            [];
         {ok, [{0, Values}]} ->
-            {ok, Values};
-        {error, Reason} ->
-            {error, Reason}
+            Values
     end.
 
 assert_valid_key({Bucket, Key}) when is_binary(Bucket), is_binary(Key) ->
     ok.
 
+%% @doc Count entries (bounds are inclusive).
 %% TODO: use map-reduce here
 get_entry_count_between(Conn, SecIndex, LBound, UBound) ->
     {ok, ?INDEX_RESULTS{keys=Keys}} =
     riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
     length(Keys).
+
+get_key_range(Conn, SecIndex, LBound, UBound)
+    when is_binary(LBound), is_binary(UBound) ->
+    {ok, ?INDEX_RESULTS{keys=Keys}} =
+    riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
+    Keys = [K || K <- Keys, LBound =< K, K =< UBound],
+    Keys.
+
+-spec get_message_rows(term(), [binary()]) -> list(message_row()).
+get_message_rows(Conn, Keys) ->
+    FullKeys = [{message_bucket(), K} || K <- Keys],
+    Values = to_values(Conn, FullKeys),
+    MessageRows = deserialize_values(Values),
+    lists:usort(MessageRows).
 
 
 -ifdef(TEST).
@@ -748,17 +790,17 @@ meck_test_() ->
       {setup, 
        fun() -> load_mock(100), load_data() end,
        fun(_) -> unload_mock() end,
-       [{timeout, 60, [{spawn, fun long_case/0}]}]}},
+       {timeout, 60, {spawn, {generator, fun long_case/0 }}}}},
      {"With index info.",
       {setup, 
        fun() -> load_mock(0), load_data() end,
        fun(_) -> unload_mock() end,
-       [{timeout, 60, [{spawn, fun long_case/0}]}]}}].
+       {timeout, 60, {spawn, {generator, fun long_case/0}}}}}].
 
 load_mock(IndexInfoThreshold) ->
     GM = gen_mod,
     meck:new(GM),
-    meck:expect(GM, get_module_opt, fun(_, mod_mam, collect_index_info_threshold, _) ->
+    meck:expect(GM, get_module_opt, fun(_, mod_mam, index_info_creation_threshold, _) ->
         IndexInfoThreshold
         end),
     SM = riakc_pb_socket, %% webscale is here!
@@ -975,16 +1017,17 @@ long_case() ->
     %%                 PageSize, LimitPassed, MaxResultLimit) ->
     %% {ok, {TotalCount, Offset, MessageRows}}
     
-    %% First 5.
+    [
+    {"First 5.",
     assert_keys(34, 0,
                 [join_date_time("2000-07-21", Time)
                  || Time <- ["01:50:00", "01:50:05", "01:50:15",
                              "01:50:16", "01:50:17"]],
                 lookup_messages(alice(),
                     none, undefined, undefined, undefined,
-                    5, true, 5)),
+                    5, true, 5))},
 
-    %% Last 5.
+    {"Last 5.",
     assert_keys(34, 29,
                 [join_date_time("2000-07-22", Time)
                  || Time <- ["06:50:40", "06:50:50", "06:51:00",
@@ -992,9 +1035,9 @@ long_case() ->
                 lookup_messages(alice(),
                     #rsm_in{direction = before},
                     undefined, undefined, undefined,
-                    5, true, 5)),
+                    5, true, 5))},
 
-    %% Index 3.
+    {"Index 3.",
     assert_keys(34, 3,
                 [join_date_time("2000-07-21", Time)
                  || Time <- ["01:50:16", "01:50:17", "01:50:20",
@@ -1002,19 +1045,40 @@ long_case() ->
                 lookup_messages(alice(),
                     #rsm_in{index = 3},
                     undefined, undefined, undefined,
-                    5, true, 5)),
-    ok.
+                    5, true, 5))},
+
+    {"Last 5 from the range.",
+    assert_keys(6, 1,
+                [join_date_time("2000-07-22", Time)
+
+                 || Time <- ["06:49:50", "06:50:05", "06:50:10",
+                             "06:50:25", "06:50:28"]],
+                lookup_messages(alice(),
+                    #rsm_in{direction = before},
+                    to_microseconds("2000-07-22", "06:49:45"),
+                    to_microseconds("2000-07-22", "06:50:28"), undefined,
+                    5, true, 5))}].
+
+
+to_microseconds(Date, Time) ->
+    %% Reuse the library function.
+    assert_defined(mod_mam_utils:maybe_microseconds(
+        list_to_binary(join_date_time_z(Date, Time)))).
+    
+assert_defined(X) when X =/= undefined -> X.
 
 assert_keys(ExpectedTotalCount, ExpectedOffset, DateTimes,
             {ok, {TotalCount, Offset, MessageRows}}) ->
-    
-    ?assertEqual(ExpectedTotalCount, TotalCount),
-    ?assertEqual(ExpectedOffset, Offset),
-    ?assertEqual(DateTimes,
-        [mess_id_to_iso_date_time(MessID) || {MessID, _, _} <- MessageRows]).
+    [?_assertEqual(ExpectedTotalCount, TotalCount),
+     ?_assertEqual(ExpectedOffset, Offset),
+     ?_assertEqual(DateTimes,
+        [mess_id_to_iso_date_time(MessID) || {MessID, _, _} <- MessageRows])].
 
 join_date_time(Date, Time) ->
     Date ++ "T" ++ Time.
+
+join_date_time_z(Date, Time) ->
+    Date ++ "T" ++ Time ++ "Z".
 
 mess_id_to_iso_date_time(MessID) ->
     {Microseconds, _} = mod_mam_utils:decode_compact_uuid(MessID),
@@ -1068,3 +1132,13 @@ id(Date) ->
 
 
 -endif.
+
+is_short_range(Now, Start, End) ->
+    case calc_range(Now, Start, End) of
+        undefined -> false;
+        Range -> Range < 2
+    end.
+
+calc_range(_,   undefined, _)     -> undefined;
+calc_range(Now, Start, undefined) -> Now - Start; 
+calc_range(_,   Start, End)       -> End - Start.
