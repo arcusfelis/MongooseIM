@@ -254,41 +254,46 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
 
 
     AnalyseInfoIndexF = fun(Conn, Info, Offset) ->
-        %% It is true, if there is an hour, that begins with
+        %% It is true, when there is an hour, that begins with
         %% the first message of the record set.
         IsEmptyHourOffset = case Start of
-            undefined -> false;
+            undefined -> true;
             _ -> ii_calc_volume(hour(Start), Info) =:= 0
             end,
         %% Count of messages from the hour beginning to `Start'.
         HourOffset = case IsEmptyHourOffset of
             true -> 0;
-            _ ->
+            false ->
                 S = MessIdxKeyMaker({lower, hour_to_microseconds(Start)}),
                 E = MessIdxKeyMaker({upper, Start}),
                 get_entry_count_between(Conn, SecIndex, S, E)
             end,
         %% Skip unused part of the index (it is not a part of RSet).
         Info2 = case is_defined(Start) of
-            true -> Info;
-            _    -> ii_from_hour(hour(Start), Info)
+            false -> Info;
+            true  -> ii_from_hour(hour(Start), Info)
             end,
         %% Skip `HourOffset'.
         %% `Info3' is a beginning of the RSet.
         Info3 = ii_skip_hour_offset(HourOffset, Info2),
-        LBoundHour = ii_first_hour(Info3),
-        LBound = MessIdxKeyMaker({lower, hour_lower_bound(LBoundHour)}),
         %% Looking for the erliest hour, that should be loaded from Riak.
+        %% `LeftOffset' is how many etries left to skip.
+        {LeftOffset, Info4} = case is_defined(End) of
+            true  -> ii_skip_n_with_border(Offset, hour(End), Info3);
+            false -> ii_skip_n(Offset, Info3)
+            end,
+        LBoundHour = ii_first_hour(Info4),
+        LBound = MessIdxKeyMaker({lower, hour_lower_bound(LBoundHour)}),
         %% `Left' is how many records are left to fill a full page.
-        {Left, Info4} = case is_defined(End) of
-            true  -> ii_skip_n_with_border(Offset+PageSize, hour(End), Info3);
-            false -> ii_skip_n(Offset+PageSize, Info3)
+        {Left, Info5} = case is_defined(End) of
+            true  -> ii_skip_n_with_border(LeftOffset+PageSize, hour(End), Info4);
+            false -> ii_skip_n(LeftOffset+PageSize, Info4)
             end,
 %       Skipped = Offset - Left,
-        Strategy = case ii_is_empty(Info4) of
+        Strategy = case ii_is_empty(Info5) of
             true  -> get_whole_range;
             false ->
-                case is_defined(End) andalso ii_first_hour(Info4) >= hour(End) of
+                case is_defined(End) andalso ii_first_hour(Info5) >= hour(End) of
                     true  -> handle_border;
                     false -> handle_page_limit
                 end
@@ -298,34 +303,41 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
             get_whole_range ->
                 UBound = MessIdxKeyMaker({upper, End}),
                 Keys = get_key_range(Conn, SecIndex, LBound, UBound),
-                MatchedKeys = lists:sublist(Keys, PageSize),
-                TotalCount = length(Keys) + Offset,
+                %% Tip: `LeftOffset' is zero-based, but `sublist' expects offset from `1'.
+                MatchedKeys = lists:sublist(Keys, LeftOffset+1, PageSize),
+                TotalCount = length(Keys) + Offset - LeftOffset,
                 MessageRows = get_message_rows(Conn, MatchedKeys),
                 {ok, {TotalCount, Offset, MessageRows}};
             handle_border ->
                 UBound = MessIdxKeyMaker({upper, End}),
                 %% Request values.
                 Keys = get_key_range(Conn, SecIndex, LBound, UBound),
-                MatchedKeys = lists:sublist(Keys, PageSize),
-                TotalCount = length(Keys) + Offset,
+                MatchedKeys = lists:sublist(Keys, LeftOffset+1, PageSize),
+                TotalCount = length(Keys) + Offset - LeftOffset,
                 MessageRows = get_message_rows(Conn, MatchedKeys),
                 {ok, {TotalCount, Offset, MessageRows}};
-            %% Not all index was traversed, stop here.
+            %% Not all index info was traversed, stop here.
             handle_page_limit ->
-                %% Last hour in the range to get.
-                UBoundHour = ii_first_hour(Info4),
+                %% `UBoundHour' is a last hour in the range to get.
+                UBoundHour = ii_first_hour(Info5),
                 UBound = MessIdxKeyMaker({upper, hour_upper_bound(UBoundHour)}),
-                %% Values from `Info5' will be never matched.
-                Info5 = ii_skip_hour_offset(Left, Info4),
                 %% Get actual recent data.
                 LastKnownHour = ii_last_hour(Info5),
+                %% Values from `InfoX' will be never matched.
+%               InfoX = ii_skip_hour_offset(Left, Info5),
+                %% Values from `Info6' will not be extracted.
+                Info6 = ii_tail(Info5),
+                LeftInIndex = case is_defined(End) of
+                    true  -> ii_calc_before(hour(End), Info6);
+                    false -> ii_total(Info6)
+                    end,
                 S1 = MessIdxKeyMaker({lower, hour_lower_bound(LastKnownHour+1)}),
                 E1 = MessIdxKeyMaker({upper, End}),
                 RecentCnt = get_entry_count_between(Conn, SecIndex, S1, E1),
                 %% Request values.
                 Keys = get_key_range(Conn, SecIndex, LBound, UBound),
-                MatchedKeys = lists:sublist(Keys, PageSize),
-                TotalCount = length(Keys) + Offset + RecentCnt,
+                MatchedKeys = lists:sublist(Keys, LeftOffset+1, PageSize),
+                TotalCount = length(Keys) + Offset - LeftOffset + LeftInIndex + RecentCnt,
                 MessageRows = get_message_rows(Conn, MatchedKeys),
                 {ok, {TotalCount, Offset, MessageRows}}
         end
@@ -334,10 +346,12 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
     AnalyseInfoF = fun(Conn, Info) ->
         case RSM of
             #rsm_in{index = Index} when is_integer(Index), Index >= 0 ->
-                case is_defined(Start) andalso ii_is_recorded(hour(Start), Info) of
-                    true -> AnalyseInfoIndexF(Conn, Info, Index);
+                %% If `Start' is not recorded, that requested result
+                %% set contains new messages only
+                case is_defined(Start) andalso not ii_is_recorded(hour(Start), Info) of
                     %% Match only recent messages.
-                    false -> QueryAllF(Conn)
+                    true -> QueryAllF(Conn);
+                    false -> AnalyseInfoIndexF(Conn, Info, Index)
                 end;
             %% Last page.
             #rsm_in{direction = before, id = undefined} ->
@@ -677,7 +691,7 @@ ii_first_hour([{Hour,_}|_]) ->
 ii_calc_before(Hour, Info) ->
     ii_calc_before(Hour, Info, 0).
 
-ii_calc_before(Hour, [{Hour, _}|_], Acc) ->
+ii_calc_before(Hour, [{CurHour, _}|_], Acc) when CurHour >= Hour ->
     Acc;
 ii_calc_before(Hour, [{_, Cnt}|T], Acc) ->
     ii_calc_before(Hour, T, Acc + Cnt);
@@ -685,7 +699,7 @@ ii_calc_before(_, _, _) ->
     %% There is no information about this hour.
     undefined.
 
-ii_from_hour(Hour, [{CurHour, _}|_]=Info) when Hour >= CurHour ->
+ii_from_hour(Hour, [{CurHour, _}|_]=Info) when CurHour >= Hour ->
     Info;
 ii_from_hour(Hour, [{_, _}|T]) ->
     ii_from_hour(Hour, T);
@@ -705,6 +719,15 @@ ii_calc_volume(_, [_|_]) ->
 ii_calc_volume(_, []) ->
     %% There is no information about this hour.
     undefined.
+
+ii_total(Info) ->
+    ii_total(Info, 0).
+
+ii_total([{_, Cnt}|T], Acc) ->
+    ii_total(T, Acc + Cnt);
+ii_total([], Acc) ->
+    Acc.
+    
 
 ii_is_recorded(Hour, Info) ->
     %% Tip: if no information exists after specified hour,
@@ -727,6 +750,8 @@ ii_skip_n_with_border(N, _, T) ->
 ii_skip_hour_offset(HourOffset, [{Hour, Cnt}|T]) when Cnt > HourOffset ->
     [{Hour, Cnt - HourOffset}|T].
 
+ii_tail([_|T]) -> T.
+
 ii_is_empty(X) -> X == [].
 
 ii_add_keys(Keys, Info) ->
@@ -738,7 +763,7 @@ ii_new(Keys) ->
 
 %% Returns `[{Hour, MessageCount}]'.
 frequency([H|T]) ->
-    frequency_1([H|T], H, 1);
+    frequency_1(T, H, 1);
 frequency([]) ->
     [].
     
@@ -746,6 +771,9 @@ frequency_1([H|T], H, N) ->
     frequency_1(T, H, N+1);
 frequency_1(T, H, N) ->
     [{H, N}|frequency(T)].
+
+frequency_test_() ->
+    [?_assertEqual([{a, 2}, {b, 3}], frequency([a, a, b, b, b]))].
 
 
 to_values(Conn, Keys) ->
