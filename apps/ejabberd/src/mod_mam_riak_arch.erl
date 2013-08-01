@@ -377,6 +377,20 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
                     Offset = TotalCount - length(MatchedKeys),
                     {ok, {TotalCount, Offset, MessageRows}}
                 end;
+            upper_bounded ->
+                Digest2 = dig_before_hour(hour(End), Digest),
+                case dig_total(Digest2) < PageSize of
+                true -> QueryAllF(Conn); %% It is a small range
+                false -> 
+                    Keys = get_minimum_key_range_before(
+                        Conn, MessIdxKeyMaker, SecIndex, End, PageSize, Digest2),
+                    LastHourCnt = filter_and_count_recent_keys(Keys, Digest2),
+                    TotalCount = dig_total(Digest2) + LastHourCnt,
+                    MatchedKeys = sublist_r(Keys, PageSize),
+                    MessageRows = get_message_rows(Conn, MatchedKeys),
+                    Offset = TotalCount - length(MatchedKeys),
+                    {ok, {TotalCount, Offset, MessageRows}}
+                end;
             _ -> QueryAllF(Conn)
         end
     end,
@@ -768,10 +782,15 @@ dig_after_hour(Hour, [{CurHour, _}|T]) when CurHour =< Hour ->
 dig_after_hour(_, T) ->
     T.
 
+dig_to_hour(Hour, [{CurHour, _}=H|T]) when CurHour =< Hour ->
+    [H|dig_to_hour(Hour, T)];
+dig_to_hour(_, _) ->
+    [].
+
 %% @doc Returns entries for hours lower than `Hour'.
 dig_before_hour(Hour, [{CurHour, _}=H|T]) when CurHour < Hour ->
     [H|dig_before_hour(Hour, T)];
-dig_before_hour(_, []) ->
+dig_before_hour(_, _) ->
     [].
 
 %% @doc Return how many entries are send or received within the passed hour.
@@ -1217,6 +1236,18 @@ long_case() ->
                     undefined, undefined,
                     5, true, 5))},
 
+    %% upper_bounded
+    {"Last 5 from both conversations with an upper bound.",
+    %% lower_bounded
+    assert_keys(28, 23,
+                [join_date_time("2000-07-22", Time)
+                 || Time <- ["06:49:50", "06:50:05", "06:50:10",
+                             "06:50:25", "06:50:28"]],
+                lookup_messages(alice(),
+                    #rsm_in{direction = before}, undefined,
+                    to_microseconds("2000-07-22", "06:50:29"), undefined,
+                    5, true, 5))},
+
     {"Index 3.",
     assert_keys(34, 3,
                 [join_date_time("2000-07-21", Time)
@@ -1314,6 +1345,12 @@ id(Date) ->
 sublist_r_test_() ->
     [?_assertEqual([4,5], sublist_r([1,2,3,4,5], 2)),
      ?_assertEqual([1,2,3,4,5], sublist_r([1,2,3,4,5], 5))].
+
+dig_before_hour_test_() ->
+    [?_assertEqual([{2, 10}, {3, 15}], dig_before_hour(5, [{2, 10}, {3, 15}])),
+     ?_assertEqual([], dig_before_hour(5, [{5, 10}])),
+     ?_assertEqual([], dig_before_hour(5, [{6, 10}]))
+    ].
 
 dig_position_test_() ->
     Digest = [{3, 25}, {6, 15}],
