@@ -242,7 +242,7 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
         HourOffset = case IsEmptyHourOffset of
             true -> 0;
             false ->
-                S = MessIdxKeyMaker({lower, hour_to_microseconds(hour(Start))}),
+                S = MessIdxKeyMaker({lower, hour_lower_bound(hour(Start))}),
                 E = MessIdxKeyMaker({upper, Start}),
                 get_entry_count_between(Conn, SecIndex, S, E)
             end,
@@ -358,6 +358,7 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
                 {ok, {TotalCount, Offset, MessageRows}};
             lower_bounded ->
                 %% Contains records, that will be in RSet for sure
+                %% Digest2 does not contain hour(Start).
                 Digest2 = dig_after_hour(hour(Start), Digest),
                 case dig_total(Digest2) < PageSize of
                 true -> QueryAllF(Conn); %% It is a small range
@@ -903,7 +904,7 @@ get_entry_count_between(Conn, SecIndex, LBound, UBound) ->
 
 get_hour_entry_count_after(Conn, MessIdxKeyMaker, SecIndex, Start) ->
     LBound = MessIdxKeyMaker({lower, Start}),
-    UBound = MessIdxKeyMaker({upper, hour_to_microseconds(hour(Start))}),
+    UBound = MessIdxKeyMaker({upper, hour_upper_bound(hour(Start))}),
     get_entry_count_between(Conn, SecIndex, LBound, UBound).
 
 get_key_range(Conn, SecIndex, LBound, UBound)
@@ -920,7 +921,7 @@ get_minimum_key_range_before(Conn, MessIdxKeyMaker, SecIndex, Before, PageSize, 
         true -> dig_first_hour(Digest);
         false -> dig_last_hour(MinDigest)
     end,
-    LBound = MessIdxKeyMaker({lower, hour_to_microseconds(ExpectedFirstHour)}),
+    LBound = MessIdxKeyMaker({lower, hour_lower_bound(ExpectedFirstHour)}),
     UBound = MessIdxKeyMaker({upper, Before}),
     get_key_range(Conn, SecIndex, LBound, UBound).
     
@@ -1201,6 +1202,18 @@ long_case() ->
                 lookup_messages(alice(),
                     #rsm_in{direction = before},
                     to_microseconds("2000-07-22", "06:49:45"),
+                    undefined, undefined,
+                    5, true, 5))},
+
+    {"Last 5 from both conversations with a lower bound.",
+    %% lower_bounded
+    assert_keys(24, 19,
+                [join_date_time("2000-07-22", Time)
+                 || Time <- ["06:50:40", "06:50:50", "06:51:00",
+                             "06:51:10", "06:51:15"]],
+                lookup_messages(alice(),
+                    #rsm_in{direction = before},
+                    to_microseconds("2000-07-21", "01:50:50"),
                     undefined, undefined,
                     5, true, 5))},
 
