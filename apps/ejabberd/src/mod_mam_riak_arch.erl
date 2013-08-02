@@ -289,7 +289,8 @@ analyse_digest(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
             analyse_digest_last_page(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
                                      Start, End, PageSize, Digest);
         #rsm_in{direction = before, id = Id} ->
-            QueryAllF();
+            analyse_digest_before(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
+                                  Start, End, PageSize, Id, Digest);
         #rsm_in{direction = aft, id = Id} ->
             QueryAllF();
         _ ->
@@ -363,19 +364,13 @@ analyse_digest_index(Conn, SecIndex, MessIdxKeyMaker,
             %% `UBoundHour' is a last hour in the range to get.
             UBoundHour = dig_first_hour(Digest5),
             UBound = MessIdxKeyMaker({upper, hour_upper_bound(UBoundHour)}),
-            %% Get actual recent data.
-            LastKnownHour = dig_last_hour(Digest5),
-            %% Values from `DigestX' will be never matched.
-%               DigestX = dig_skip_hour_offset(Left, Digest5),
             %% Values from `Digest6' will not be extracted.
             Digest6 = dig_tail(Digest5),
             DigestLeft = case is_defined(End) of
                 true  -> dig_calc_before(hour(End), Digest6);
                 false -> dig_total(Digest6)
                 end,
-            S1 = MessIdxKeyMaker({lower, hour_lower_bound(LastKnownHour+1)}),
-            E1 = MessIdxKeyMaker({upper, End}),
-            RecentCnt = get_entry_count_between(Conn, SecIndex, S1, E1),
+            RecentCnt = get_recent_entry_count(Conn, SecIndex, MessIdxKeyMaker, End, Digest),
             %% Request values.
             Keys = get_key_range(Conn, SecIndex, LBound, UBound),
             MatchedKeys = lists:sublist(Keys, LeftOffset+1, PageSize),
@@ -383,14 +378,39 @@ analyse_digest_index(Conn, SecIndex, MessIdxKeyMaker,
             return_matched_keys(TotalCount, Offset, MatchedKeys)
     end.
 
-analyse_digest_last_page(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
-                         Start, End, PageSize, Digest) ->
-    %% Get actual recent data.
+
+%% Is the key `BeforeKey' before, `after' or inside of the result set?
+key_position(MessIdxKeyMaker, BeforeKey, Start, End, Digest) ->
+    StartKey = MessIdxKeyMaker({lower, Start}),
+    EndKey = MessIdxKeyMaker({upper, End}),
+    MinKey = dig_minimum_key(MessIdxKeyMaker, Digest),
+    MaxKey = dig_maximum_key(MessIdxKeyMaker, Digest),
+    LBoundKey = max(MinKey, StartKey),
+    UBoundKey = min(MaxKey, EndKey),
+    if BeforeKey =< LBoundKey -> before;
+       BeforeKey > UBoundKey -> 'after';
+       true -> inside
+    end.
+
+
+get_recent_entry_count(Conn, SecIndex, MessIdxKeyMaker, End, Digest) ->
+    LastKnownHour = dig_last_hour(Digest),
+    S1 = MessIdxKeyMaker({lower, hour_lower_bound(LastKnownHour+1)}),
+    E1 = MessIdxKeyMaker({upper, End}),
+    get_entry_count_between(Conn, SecIndex, S1, E1).
+    
+
+
+analyse_digest_before(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
+                      Start, End, PageSize, BeforeKey, Digest) ->
+    KeyPos = key_position(MessIdxKeyMaker, BeforeKey, Start, End, Digest),
+    QueryAllF().
+
+choose_strategy(Start, End, Digest) ->
     %% Where the lower bound is located: before, inside or after the index digest.
     StartPos = dig_position_start(Start, Digest),
     EndPos = dig_position_end(End, Digest),
     %% There are impossible cases due to `Start =< End'.
-    Strategy =
     case {StartPos, EndPos} of
         {before,   before} -> empty;
         {before,   inside} -> upper_bounded; % digest only
@@ -401,7 +421,11 @@ analyse_digest_last_page(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
       % {'after',  before} -> impossible;
       % {'after',  inside} -> impossible;
         {'after', 'after'} -> recent_only
-    end,
+    end.
+
+analyse_digest_last_page(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
+                         Start, End, PageSize, Digest) ->
+    Strategy = choose_strategy(Start, End, Digest),
     case Strategy of
         empty -> return_empty();
         recent_only -> QueryAllF();
@@ -793,6 +817,12 @@ dig_total([{_, Cnt}|T], Acc) ->
     dig_total(T, Acc + Cnt);
 dig_total([], Acc) ->
     Acc.
+
+dig_minimum_key(MessIdxKeyMaker, Digest) ->
+    MessIdxKeyMaker({lower, hour_lower_bound(dig_first_hour(Digest))}).
+
+dig_maximum_key(MessIdxKeyMaker, Digest) ->
+    MessIdxKeyMaker({upper, hour_lower_bound(dig_last_hour(Digest))}).
 
 %% @doc Return length of the key list ignoring keys from digest.
 %% Note: Digest must be older, than keys.
