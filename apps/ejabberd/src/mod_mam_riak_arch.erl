@@ -10,7 +10,6 @@
 -import(mod_mam_utils,
         [encode_compact_uuid/2]).
 
-
 -type message_row() :: tuple().
 
 -ifdef(TEST).
@@ -476,18 +475,36 @@ get_actual_digest(Conn, DigestKey, Now, SecIndex, MessIdxKeyMaker) ->
         {error, notfound} ->
             {error, notfound};
         {ok, DigestObj} ->
-            Digest = binary_to_term(riakc_obj:get_value(DigestObj)),
-            Last = last_modified(DigestObj),
+            DigestObj2 = merge_siblings(DigestObj),
+            Digest2 = binary_to_term(riakc_obj:get_value(DigestObj2)),
+            Last = last_modified(DigestObj2),
             case hour(Last) =:= hour(Now) of
                 %% Digest is actual.
-                true -> {ok, Digest};
+                true ->
+                    %% Write the merged version.
+                    has_siblings(DigestObj) andalso riakc_pb_socket:put(Conn, DigestObj2),
+                    {ok, Digest2};
                 false ->
-                    Digest2 = update_digest(Conn, Last, Now, Digest, SecIndex, MessIdxKeyMaker),
-                    DigestObj2 = riakc_obj:update_value(term_to_binary(Digest2), DigestObj),
-                    riakc_pb_socket:put(Conn, DigestObj2),
-                    {ok, Digest2}
+                    Digest3 = update_digest(Conn, Last, Now, Digest2, SecIndex, MessIdxKeyMaker),
+                    DigestObj3 = riakc_obj:update_value(term_to_binary(Digest3), DigestObj2),
+                    riakc_pb_socket:put(Conn, DigestObj3),
+                    {ok, Digest3}
             end
     end.
+
+has_siblings(Obj) ->
+    length(riakc_obj:get_values(Obj)) > 1.
+
+merge_siblings(DigestObj) ->
+    case has_siblings(DigestObj) of
+        true ->
+            DigestObj2 = fix_metadata(DigestObj),
+            %% TODO: write me
+            riakc_obj:update_value(error(todo), DigestObj2);
+        false ->
+            DigestObj
+    end.
+            
 
 %% @doc Request new entries from the server.
 %% `Last' and `Now' are microseconds.
@@ -552,11 +569,11 @@ mess_index_key_maker(BUserID, BWithJID)
 timestamp_bound_to_binary({lower, undefined}) ->
     <<>>; %% any(binary()) >= <<>>
 timestamp_bound_to_binary({lower, Microseconds}) ->
-    mess_id_to_binary(mod_mam_utils:encode_compact_uuid(Microseconds, 0));
+    mess_id_to_binary(encode_compact_uuid(Microseconds, 0));
 timestamp_bound_to_binary({upper, undefined}) ->
     <<-1:64>>; %% set all bits.
 timestamp_bound_to_binary({upper, Microseconds}) ->
-    mess_id_to_binary(mod_mam_utils:encode_compact_uuid(Microseconds, 255)).
+    mess_id_to_binary(encode_compact_uuid(Microseconds, 255)).
 
 remove_user_from_db(LServer, LUser) ->
     ok.
@@ -645,58 +662,6 @@ hour_lower_bound(Hour) ->
 hour_upper_bound(Hour) ->
     hour_to_microseconds(Hour+1) - 1.
 
-short_message_id(Id) ->
-    {Microseconds, NodeID} = mod_mam_utils:decode_compact_uuid(Id),
-    Offset = Microseconds rem microseconds_in_hour(),
-    <<Offset:32/big, NodeID>>.
-
-%% Add this message into a list of messages with the same hour.
-update_hour_index(Conn, BHourID, BShortMessID)
-    when is_binary(BHourID), is_binary(BShortMessID) ->
-    ?MEASURE_TIME(update_hour_index, 
-    case ?MEASURE_TIME(update_hour_index_get,
-                       riakc_pb_socket:get(Conn, <<"mam_hour_idx">>, BHourID)) of
-        {ok, Obj} ->
-            Value = merge_short_message_ids([BShortMessID|riakc_obj:get_values(Obj)]),
-            Obj2 = riakc_obj:update_value(Obj, Value),
-            Obj3 = fix_metadata(Obj2),
-            ok = ?MEASURE_TIME(update_hour_index_put,
-                               riakc_pb_socket:put(Conn, Obj3));
-        {error, notfound} ->
-            ?DEBUG("Index ~p not found, create new one.", [BHourID]),
-            Obj = riakc_obj:new(<<"mam_hour_idx">>, BHourID, BShortMessID),
-            ok = ?MEASURE_TIME(update_hour_index_put_new,
-                               riakc_pb_socket:put(Conn, Obj))
-    end).
-
-part_counter_incr(Conn, ClientID, Key, BHourID, N)
-    when is_binary(Key), is_binary(BHourID) ->
-    ?MEASURE_TIME(part_counter_incr, 
-    case ?MEASURE_TIME(part_counter_incr_get,
-                       riakc_pb_socket:get(Conn, <<"mam_usr_msg_cnt">>, Key)) of
-        {ok, Obj} ->
-            Values = riakc_obj:get_values(Obj),
-            case Values of
-                [_,_|_] -> %% length(Values) > 1
-                    ?DEBUG("Merge ~p siblings.", [length(Values)]);
-                _ ->
-                    ok
-            end,
-            MergedValue = part_pb_counter:merge(Values),
-            Value = part_pb_counter:increment(BHourID, N, ClientID, MergedValue),
-            Obj2 = riakc_obj:update_value(Obj, Value),
-            Obj3 = fix_metadata(Obj2),
-            ok = ?MEASURE_TIME(part_counter_incr_put,
-                               riakc_pb_socket:put(Conn, Obj3));
-        {error, notfound} ->
-            NewValue = part_pb_counter:new(),
-            Value = part_pb_counter:increment(BHourID, N, ClientID, NewValue),
-            ?DEBUG("Index ~p not found, create new one.", [Key]),
-            Obj = riakc_obj:new(<<"mam_usr_msg_cnt">>, Key, Value),
-            ok = ?MEASURE_TIME(part_counter_incr_put_new,
-                               riakc_pb_socket:put(Conn, Obj))
-    end).
-
 %% @doc Resolve metadatas' conflict.
 fix_metadata(Obj) ->
     case riakc_obj:get_metadatas(Obj) of
@@ -709,19 +674,6 @@ fix_metadata(Obj) ->
 merge_metadatas([Meta|_]) ->
     Meta.
 
-merge_short_message_ids(GroupedIDs) ->
-    case GroupedIDs of
-        [_,_,_|_] -> %% length(GroupedIDs) > 2
-            ?DEBUG("Merge ~p siblings.", [length(GroupedIDs)-1]);
-        _ ->
-            ok
-    end,
-    SortedLists = ([[ID || <<ID:40>> <= IDs] || IDs <- GroupedIDs]),
-    IDs = lists:merge(SortedLists),
-    << <<ID:40>> || ID <- IDs>>.
-
-remote_jid_hour_id(BHourID, BJID) ->
-    <<BHourID/binary, BJID/binary>>.
 
 message_key(BUserID, BMessID)
     when is_binary(BUserID), is_binary(BMessID) ->
@@ -860,7 +812,7 @@ dig_skip_nr(N, Digest) ->
     {N1, T} = dig_skip_n(N, lists:reverse(Digest)),
     {N1, lists:reverse(T)}.
 
-dig_skip_n_with_border(N, BorderHour, [{Hour, Cnt}|_]=T) when Hour >= BorderHour ->
+dig_skip_n_with_border(N, BorderHour, [{Hour, _}|_]=T) when Hour >= BorderHour ->
     {N, T}; %% out of the border
 dig_skip_n_with_border(N, BorderHour, [{_, Cnt}|T]) when N >= Cnt ->
     dig_skip_n_with_border(N - Cnt, BorderHour, T);
@@ -916,9 +868,6 @@ frequency_1([H|T], H, N) ->
     frequency_1(T, H, N+1);
 frequency_1(T, H, N) ->
     [{H, N}|frequency(T)].
-
-frequency_test_() ->
-    [?_assertEqual([{a, 2}, {b, 3}], frequency([a, a, b, b, b]))].
 
 
 to_values(Conn, Keys) ->
@@ -1495,6 +1444,9 @@ dig_position_test_() ->
      ?_assertEqual(inside, dig_position(5, Digest)),
      ?_assertEqual(inside, dig_position(6, Digest)),
      ?_assertEqual('after', dig_position(8, Digest))].
+
+frequency_test_() ->
+    [?_assertEqual([{a, 2}, {b, 3}], frequency([a, a, b, b, b]))].
 
 -endif.
 
