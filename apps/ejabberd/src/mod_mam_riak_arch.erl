@@ -212,252 +212,275 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
     DigestKey = digest_key(BUserID, BWithJID),
     MessIdxKeyMaker = mess_index_key_maker(BUserID, BWithJID),
     Now = mod_mam_utils:now_to_microseconds(now()),
-
-    QueryAllF = fun(Conn) ->
-        LBound = MessIdxKeyMaker({lower, Start}),
-        UBound = MessIdxKeyMaker({upper, End}),
-        Keys = get_key_range(Conn, SecIndex, LBound, UBound),
-        TotalCount = length(Keys),
-        {Offset, MatchedKeys} = paginate(Keys, fix_rsm(BUserID, RSM), PageSize),
-        case TotalCount - Offset > MaxResultLimit andalso not LimitPassed of
-            true ->
-                {error, 'policy-violation'};
-
-            false ->
-                MessageRows = get_message_rows(Conn, MatchedKeys),
-                {ok, {TotalCount, Offset, MessageRows}}
-        end
-    end,
-
-
-    AnalyseDigestIndexF = fun(Conn, Digest, Offset) ->
-        %% It is true, when there is an hour, that begins with
-        %% the first message of the record set.
-        IsEmptyHourOffset = case Start of
-            undefined -> true;
-            _ -> dig_calc_volume(hour(Start), Digest) =:= 0
-            end,
-        %% Count of messages from the hour beginning to `Start'.
-        HourOffset = case IsEmptyHourOffset of
-            true -> 0;
-            false ->
-                S = MessIdxKeyMaker({lower, hour_lower_bound(hour(Start))}),
-                E = MessIdxKeyMaker({upper, Start}),
-                get_entry_count_between(Conn, SecIndex, S, E)
-            end,
-        %% Skip unused part of the index (it is not a part of RSet).
-        Digest2 = case is_defined(Start) of
-            false -> Digest;
-            true  -> dig_from_hour(hour(Start), Digest)
-            end,
-        %% Skip `HourOffset'.
-        %% `Digest3' is a beginning of the RSet.
-        Digest3 = dig_skip_hour_offset(HourOffset, Digest2),
-        %% Looking for the erliest hour, that should be loaded from Riak.
-        %% `LeftOffset' is how many etries left to skip.
-        {LeftOffset, Digest4} = case is_defined(End) of
-            true  -> dig_skip_n_with_border(Offset, hour(End), Digest3);
-            false -> dig_skip_n(Offset, Digest3)
-            end,
-        LBoundHour = dig_first_hour(Digest4),
-        LBound = MessIdxKeyMaker({lower, hour_lower_bound(LBoundHour)}),
-        %% `Left' is how many records are left to fill a full page.
-        {Left, Digest5} = case is_defined(End) of
-            true  -> dig_skip_n_with_border(LeftOffset+PageSize, hour(End), Digest4);
-            false -> dig_skip_n(LeftOffset+PageSize, Digest4)
-            end,
-%       Skipped = Offset - Left,
-        Strategy = case dig_is_empty(Digest5) of
-            true  -> get_whole_range;
-            false ->
-                case is_defined(End) andalso dig_first_hour(Digest5) >= hour(End) of
-                    true  -> handle_border;
-                    false -> handle_page_limit
-                end
-            end,
-        case Strategy of
-            %% We will select recent entries only.
-            get_whole_range ->
-                UBound = MessIdxKeyMaker({upper, End}),
-                Keys = get_key_range(Conn, SecIndex, LBound, UBound),
-                %% Tip: `LeftOffset' is zero-based, but `sublist' expects offset from `1'.
-                MatchedKeys = lists:sublist(Keys, LeftOffset+1, PageSize),
-                TotalCount = length(Keys) + Offset - LeftOffset,
-                MessageRows = get_message_rows(Conn, MatchedKeys),
-                {ok, {TotalCount, Offset, MessageRows}};
-            handle_border ->
-                UBound = MessIdxKeyMaker({upper, End}),
-                %% Request values.
-                Keys = get_key_range(Conn, SecIndex, LBound, UBound),
-                MatchedKeys = lists:sublist(Keys, LeftOffset+1, PageSize),
-                TotalCount = length(Keys) + Offset - LeftOffset,
-                MessageRows = get_message_rows(Conn, MatchedKeys),
-                {ok, {TotalCount, Offset, MessageRows}};
-            %% Not all index digest was traversed, stop here.
-            handle_page_limit ->
-                %% `UBoundHour' is a last hour in the range to get.
-                UBoundHour = dig_first_hour(Digest5),
-                UBound = MessIdxKeyMaker({upper, hour_upper_bound(UBoundHour)}),
-                %% Get actual recent data.
-                LastKnownHour = dig_last_hour(Digest5),
-                %% Values from `DigestX' will be never matched.
-%               DigestX = dig_skip_hour_offset(Left, Digest5),
-                %% Values from `Digest6' will not be extracted.
-                Digest6 = dig_tail(Digest5),
-                DigestLeft = case is_defined(End) of
-                    true  -> dig_calc_before(hour(End), Digest6);
-                    false -> dig_total(Digest6)
-                    end,
-                S1 = MessIdxKeyMaker({lower, hour_lower_bound(LastKnownHour+1)}),
-                E1 = MessIdxKeyMaker({upper, End}),
-                RecentCnt = get_entry_count_between(Conn, SecIndex, S1, E1),
-                %% Request values.
-                Keys = get_key_range(Conn, SecIndex, LBound, UBound),
-                MatchedKeys = lists:sublist(Keys, LeftOffset+1, PageSize),
-                TotalCount = length(Keys) + Offset - LeftOffset + DigestLeft + RecentCnt,
-                MessageRows = get_message_rows(Conn, MatchedKeys),
-                {ok, {TotalCount, Offset, MessageRows}}
-        end
-    end,
-
-    AnalyseDigestLastPageF = fun(Conn, Digest) ->
-        %% Get actual recent data.
-        %% Where the lower bound is located: before, inside or after the index digest.
-        StartPos = dig_position_start(Start, Digest),
-        EndPos = dig_position_end(End, Digest),
-        %% There are impossible cases due to `Start =< End'.
-        Strategy =
-        case {StartPos, EndPos} of
-            {before,   before} -> empty;
-            {before,   inside} -> upper_bounded; % digest only
-            {before,  'after'} -> whole_digest_and_recent;
-          % {inside,   before} -> impossible;
-            {inside,   inside} -> bounded; % digest only
-            {inside,  'after'} -> lower_bounded;
-          % {'after',  before} -> impossible;
-          % {'after',  inside} -> impossible;
-            {'after', 'after'} -> recent_only
-        end,
-        HasLBound = case Strategy of
-            bounded       -> true;
-            lower_bounded -> true;
-            _             -> false
-        end,
-        case Strategy of
-            empty -> {ok, {0, 0, []}};
-            recent_only -> QueryAllF(Conn);
-            whole_digest_and_recent ->
-                Keys = get_minimum_key_range_before(
-                    Conn, MessIdxKeyMaker, SecIndex, End, PageSize, Digest),
-                RecentCnt = filter_and_count_recent_keys(Keys, Digest),
-                TotalCount = dig_total(Digest) + RecentCnt,
-                MatchedKeys = sublist_r(Keys, PageSize),
-                MessageRows = get_message_rows(Conn, MatchedKeys),
-                Offset = TotalCount - length(MatchedKeys),
-                {ok, {TotalCount, Offset, MessageRows}};
-            lower_bounded ->
-                %% Contains records, that will be in RSet for sure
-                %% Digest2 does not contain hour(Start).
-                Digest2 = dig_after_hour(hour(Start), Digest),
-                case dig_total(Digest2) < PageSize of
-                true -> QueryAllF(Conn); %% It is a small range
-                false -> 
-                    StartHourCnt = case dig_is_skipped(hour(Start), Digest) of
-                        true -> 0; 
-                        false -> get_hour_entry_count_after(
-                            Conn, MessIdxKeyMaker, SecIndex, Start)
-                        end,
-                    Keys = get_minimum_key_range_before(
-                        Conn, MessIdxKeyMaker, SecIndex, End, PageSize, Digest2),
-                    RecentCnt = filter_and_count_recent_keys(Keys, Digest2),
-                    TotalCount = StartHourCnt + dig_total(Digest2) + RecentCnt,
-                    MatchedKeys = sublist_r(Keys, PageSize),
-                    MessageRows = get_message_rows(Conn, MatchedKeys),
-                    Offset = TotalCount - length(MatchedKeys),
-                    {ok, {TotalCount, Offset, MessageRows}}
-                end;
-            upper_bounded ->
-                Digest2 = dig_before_hour(hour(End), Digest),
-                case dig_total(Digest2) < PageSize of
-                true -> QueryAllF(Conn); %% It is a small range
-                false -> 
-                    Keys = get_minimum_key_range_before(
-                        Conn, MessIdxKeyMaker, SecIndex, End, PageSize, Digest2),
-                    LastHourCnt = filter_and_count_recent_keys(Keys, Digest2),
-                    TotalCount = dig_total(Digest2) + LastHourCnt,
-                    MatchedKeys = sublist_r(Keys, PageSize),
-                    MessageRows = get_message_rows(Conn, MatchedKeys),
-                    Offset = TotalCount - length(MatchedKeys),
-                    {ok, {TotalCount, Offset, MessageRows}}
-                end;
-            bounded ->
-                Digest2 = dig_before_hour(hour(End),
-                    dig_after_hour(hour(Start), Digest)),
-                case dig_total(Digest2) < PageSize of
-                true -> QueryAllF(Conn); %% It is a small range
-                false -> 
-                    StartHourCnt = case dig_is_skipped(hour(Start), Digest) of
-                        true -> 0; 
-                        false -> get_hour_entry_count_after(
-                            Conn, MessIdxKeyMaker, SecIndex, Start)
-                        end,
-                    Keys = get_minimum_key_range_before(
-                        Conn, MessIdxKeyMaker, SecIndex, End, PageSize, Digest2),
-                    LastHourCnt = filter_and_count_recent_keys(Keys, Digest2),
-                    TotalCount = StartHourCnt + dig_total(Digest2) + LastHourCnt,
-                    MatchedKeys = sublist_r(Keys, PageSize),
-                    MessageRows = get_message_rows(Conn, MatchedKeys),
-                    Offset = TotalCount - length(MatchedKeys),
-                    {ok, {TotalCount, Offset, MessageRows}}
-                end;
-            _ -> QueryAllF(Conn)
-        end
-    end,
-
-    AnalyseDigestF = fun(Conn, Digest) ->
-        case RSM of
-            #rsm_in{index = Index} when is_integer(Index), Index >= 0 ->
-                %% If `Start' is not recorded, that requested result
-                %% set contains new messages only
-                case is_defined(Start) andalso not dig_is_recorded(hour(Start), Digest) of
-                    %% Match only recent messages.
-                    true -> QueryAllF(Conn);
-                    false -> AnalyseDigestIndexF(Conn, Digest, Index)
-                end;
-            %% Last page.
-            #rsm_in{direction = before, id = undefined} ->
-                AnalyseDigestLastPageF(Conn, Digest);
-            #rsm_in{direction = before, id = Id} ->
-                QueryAllF(Conn);
-            #rsm_in{direction = aft, id = Id} ->
-                QueryAllF(Conn);
-            _ ->
-                QueryAllF(Conn)
-        end
-    end,
-
+    RSM1 = fix_rsm(BUserID, RSM),
     F = fun(Conn) ->
-            case is_short_range(Now, Start, End) of
-                true ->
-                    %% ignore index digest.
-                    QueryAllF(Conn);
-                false ->
-                    case get_actual_digest(
-                        Conn, DigestKey, Now, SecIndex, MessIdxKeyMaker) of
-                        {error, notfound} ->
-                            Result = QueryAllF(Conn),
-                            should_create_digest(LocLServer, Result)
-                            andalso
-                            create_digest(Conn, DigestKey,
-                                fetch_all_keys(Conn, SecIndex, MessIdxKeyMaker)),
-                            Result;
-                            
-                        {ok, Digest} ->
-                            AnalyseDigestF(Conn, Digest)
-                    end
+        QueryAllF = fun() -> 
+            query_all(Conn, SecIndex, MessIdxKeyMaker, Start, End, PageSize, RSM1)
+            end,
+        check_result_and_return(Conn, MaxResultLimit, LimitPassed,
+        case is_short_range(Now, Start, End) of
+        true ->
+            %% ignore index digest.
+            QueryAllF();
+        false ->
+            case get_actual_digest(
+                Conn, DigestKey, Now, SecIndex, MessIdxKeyMaker) of
+            {error, notfound} ->
+                Result = QueryAllF(),
+                should_create_digest(LocLServer, Result)
+                andalso
+                create_digest(Conn, DigestKey,
+                    fetch_all_keys(Conn, SecIndex, MessIdxKeyMaker)),
+                Result;
+                
+            {ok, Digest} ->
+                analyse_digest(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
+                               Start, End, PageSize, RSM1, Digest)
             end
+        end)
         end,
     with_connection(LocLServer, F).
+
+
+return_matched_keys(TotalCount, Offset, MatchedKeys) ->
+    {ok, {TotalCount, Offset, MatchedKeys}}.
+
+check_result_and_return(Conn, MaxResultLimit, LimitPassed,
+                        {ok, {TotalCount, Offset, MatchedKeys}}) ->
+    check_and_return(
+        Conn, MaxResultLimit, LimitPassed, MatchedKeys, TotalCount, Offset);
+check_result_and_return(_, _, _, Result) ->
+    Result.
+
+check_and_return(
+    Conn, MaxResultLimit, LimitPassed, MatchedKeys, TotalCount, Offset) ->
+    case is_policy_violation(TotalCount, Offset, MaxResultLimit, LimitPassed) of
+    true -> return_policy_violation();
+    false ->
+        MessageRows = get_message_rows(Conn, MatchedKeys),
+        {ok, {TotalCount, Offset, MessageRows}}
+    end.
+
+%% If a query returns a number of stanzas greater than this limit and the
+%% client did not specify a limit using RSM then the server should return
+%% a policy-violation error to the client. 
+is_policy_violation(TotalCount, Offset, MaxResultLimit, LimitPassed) ->
+    TotalCount - Offset > MaxResultLimit andalso not LimitPassed.
+
+return_policy_violation() ->
+    {error, 'policy-violation'}.
+
+
+analyse_digest(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
+               Start, End, PageSize, RSM, Digest) ->
+    case RSM of
+        #rsm_in{index = Offset} when is_integer(Offset), Offset >= 0 ->
+            %% If `Start' is not recorded, that requested result
+            %% set contains new messages only
+            case is_defined(Start) andalso not dig_is_recorded(hour(Start), Digest) of
+                %% Match only recent messages.
+                true -> QueryAllF();
+                false -> 
+                    analyse_digest_index(Conn, SecIndex, MessIdxKeyMaker,
+                         Offset, Start, End, PageSize, Digest) 
+            end;
+        %% Last page.
+        #rsm_in{direction = before, id = undefined} ->
+            analyse_digest_last_page(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
+                                     Start, End, PageSize, Digest);
+        #rsm_in{direction = before, id = Id} ->
+            QueryAllF();
+        #rsm_in{direction = aft, id = Id} ->
+            QueryAllF();
+        _ ->
+            QueryAllF()
+    end.
+
+analyse_digest_index(Conn, SecIndex, MessIdxKeyMaker,
+                     Offset, Start, End, PageSize, Digest) ->
+    %% It is true, when there is an hour, that begins with
+    %% the first message of the record set.
+    IsEmptyHourOffset = case Start of
+        undefined -> true;
+        _ -> dig_calc_volume(hour(Start), Digest) =:= 0
+        end,
+    %% Count of messages from the hour beginning to `Start'.
+    HourOffset = case IsEmptyHourOffset of
+        true -> 0;
+        false ->
+            S = MessIdxKeyMaker({lower, hour_lower_bound(hour(Start))}),
+            E = MessIdxKeyMaker({upper, Start}),
+            get_entry_count_between(Conn, SecIndex, S, E)
+        end,
+    %% Skip unused part of the index (it is not a part of RSet).
+    Digest2 = case is_defined(Start) of
+        false -> Digest;
+        true  -> dig_from_hour(hour(Start), Digest)
+        end,
+    %% Skip `HourOffset'.
+    %% `Digest3' is a beginning of the RSet.
+    Digest3 = dig_skip_hour_offset(HourOffset, Digest2),
+    %% Looking for the erliest hour, that should be loaded from Riak.
+    %% `LeftOffset' is how many etries left to skip.
+    {LeftOffset, Digest4} = case is_defined(End) of
+        true  -> dig_skip_n_with_border(Offset, hour(End), Digest3);
+        false -> dig_skip_n(Offset, Digest3)
+        end,
+    LBoundHour = dig_first_hour(Digest4),
+    LBound = MessIdxKeyMaker({lower, hour_lower_bound(LBoundHour)}),
+    %% `Left' is how many records are left to fill a full page.
+    {Left, Digest5} = case is_defined(End) of
+        true  -> dig_skip_n_with_border(LeftOffset+PageSize, hour(End), Digest4);
+        false -> dig_skip_n(LeftOffset+PageSize, Digest4)
+        end,
+%       Skipped = Offset - Left,
+    Strategy = case dig_is_empty(Digest5) of
+        true  -> get_whole_range;
+        false ->
+            case is_defined(End) andalso dig_first_hour(Digest5) >= hour(End) of
+                true  -> handle_border;
+                false -> handle_page_limit
+            end
+        end,
+    case Strategy of
+        %% We will select recent entries only.
+        get_whole_range ->
+            UBound = MessIdxKeyMaker({upper, End}),
+            Keys = get_key_range(Conn, SecIndex, LBound, UBound),
+            %% Tip: `LeftOffset' is zero-based, but `sublist' expects offset from `1'.
+            MatchedKeys = lists:sublist(Keys, LeftOffset+1, PageSize),
+            TotalCount = length(Keys) + Offset - LeftOffset,
+            return_matched_keys(TotalCount, Offset, MatchedKeys);
+        handle_border ->
+            UBound = MessIdxKeyMaker({upper, End}),
+            %% Request values.
+            Keys = get_key_range(Conn, SecIndex, LBound, UBound),
+            MatchedKeys = lists:sublist(Keys, LeftOffset+1, PageSize),
+            TotalCount = length(Keys) + Offset - LeftOffset,
+            return_matched_keys(TotalCount, Offset, MatchedKeys);
+        %% Not all index digest was traversed, stop here.
+        handle_page_limit ->
+            %% `UBoundHour' is a last hour in the range to get.
+            UBoundHour = dig_first_hour(Digest5),
+            UBound = MessIdxKeyMaker({upper, hour_upper_bound(UBoundHour)}),
+            %% Get actual recent data.
+            LastKnownHour = dig_last_hour(Digest5),
+            %% Values from `DigestX' will be never matched.
+%               DigestX = dig_skip_hour_offset(Left, Digest5),
+            %% Values from `Digest6' will not be extracted.
+            Digest6 = dig_tail(Digest5),
+            DigestLeft = case is_defined(End) of
+                true  -> dig_calc_before(hour(End), Digest6);
+                false -> dig_total(Digest6)
+                end,
+            S1 = MessIdxKeyMaker({lower, hour_lower_bound(LastKnownHour+1)}),
+            E1 = MessIdxKeyMaker({upper, End}),
+            RecentCnt = get_entry_count_between(Conn, SecIndex, S1, E1),
+            %% Request values.
+            Keys = get_key_range(Conn, SecIndex, LBound, UBound),
+            MatchedKeys = lists:sublist(Keys, LeftOffset+1, PageSize),
+            TotalCount = length(Keys) + Offset - LeftOffset + DigestLeft + RecentCnt,
+            return_matched_keys(TotalCount, Offset, MatchedKeys)
+    end.
+
+analyse_digest_last_page(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
+                         Start, End, PageSize, Digest) ->
+    %% Get actual recent data.
+    %% Where the lower bound is located: before, inside or after the index digest.
+    StartPos = dig_position_start(Start, Digest),
+    EndPos = dig_position_end(End, Digest),
+    %% There are impossible cases due to `Start =< End'.
+    Strategy =
+    case {StartPos, EndPos} of
+        {before,   before} -> empty;
+        {before,   inside} -> upper_bounded; % digest only
+        {before,  'after'} -> whole_digest_and_recent;
+      % {inside,   before} -> impossible;
+        {inside,   inside} -> bounded; % digest only
+        {inside,  'after'} -> lower_bounded;
+      % {'after',  before} -> impossible;
+      % {'after',  inside} -> impossible;
+        {'after', 'after'} -> recent_only
+    end,
+    case Strategy of
+        empty -> return_empty();
+        recent_only -> QueryAllF();
+        whole_digest_and_recent ->
+            Keys = get_minimum_key_range_before(
+                Conn, MessIdxKeyMaker, SecIndex, End, PageSize, Digest),
+            RecentCnt = filter_and_count_recent_keys(Keys, Digest),
+            TotalCount = dig_total(Digest) + RecentCnt,
+            MatchedKeys = sublist_r(Keys, PageSize),
+            Offset = TotalCount - length(MatchedKeys),
+            return_matched_keys(TotalCount, Offset, MatchedKeys);
+        lower_bounded ->
+            %% Contains records, that will be in RSet for sure
+            %% Digest2 does not contain hour(Start).
+            Digest2 = dig_after_hour(hour(Start), Digest),
+            case dig_total(Digest2) < PageSize of
+            true -> QueryAllF(); %% It is a small range
+            false -> 
+                StartHourCnt = case dig_is_skipped(hour(Start), Digest) of
+                    true -> 0; 
+                    false -> get_hour_entry_count_after(
+                        Conn, MessIdxKeyMaker, SecIndex, Start)
+                    end,
+                Keys = get_minimum_key_range_before(
+                    Conn, MessIdxKeyMaker, SecIndex, End, PageSize, Digest2),
+                RecentCnt = filter_and_count_recent_keys(Keys, Digest2),
+                TotalCount = StartHourCnt + dig_total(Digest2) + RecentCnt,
+                MatchedKeys = sublist_r(Keys, PageSize),
+                Offset = TotalCount - length(MatchedKeys),
+                return_matched_keys(TotalCount, Offset, MatchedKeys)
+            end;
+        upper_bounded ->
+            Digest2 = dig_before_hour(hour(End), Digest),
+            case dig_total(Digest2) < PageSize of
+            true -> QueryAllF(); %% It is a small range
+            false -> 
+                Keys = get_minimum_key_range_before(
+                    Conn, MessIdxKeyMaker, SecIndex, End, PageSize, Digest2),
+                LastHourCnt = filter_and_count_recent_keys(Keys, Digest2),
+                TotalCount = dig_total(Digest2) + LastHourCnt,
+                MatchedKeys = sublist_r(Keys, PageSize),
+                Offset = TotalCount - length(MatchedKeys),
+                return_matched_keys(TotalCount, Offset, MatchedKeys)
+            end;
+        bounded ->
+            Digest2 = dig_before_hour(hour(End),
+                dig_after_hour(hour(Start), Digest)),
+            case dig_total(Digest2) < PageSize of
+            true -> QueryAllF(); %% It is a small range
+            false -> 
+                StartHourCnt = case dig_is_skipped(hour(Start), Digest) of
+                    true -> 0; 
+                    false -> get_hour_entry_count_after(
+                        Conn, MessIdxKeyMaker, SecIndex, Start)
+                    end,
+                Keys = get_minimum_key_range_before(
+                    Conn, MessIdxKeyMaker, SecIndex, End, PageSize, Digest2),
+                LastHourCnt = filter_and_count_recent_keys(Keys, Digest2),
+                TotalCount = StartHourCnt + dig_total(Digest2) + LastHourCnt,
+                MatchedKeys = sublist_r(Keys, PageSize),
+                Offset = TotalCount - length(MatchedKeys),
+                return_matched_keys(TotalCount, Offset, MatchedKeys)
+            end;
+        _ -> QueryAllF()
+    end.
+
+return_empty() ->
+    {ok, {0, 0, []}}.
+
+
+query_all(Conn, SecIndex, MessIdxKeyMaker, Start, End, PageSize, RSM) ->
+    LBound = MessIdxKeyMaker({lower, Start}),
+    UBound = MessIdxKeyMaker({upper, End}),
+    Keys = get_key_range(Conn, SecIndex, LBound, UBound),
+    TotalCount = length(Keys),
+    {Offset, MatchedKeys} = paginate(Keys, RSM, PageSize),
+    return_matched_keys(TotalCount, Offset, MatchedKeys).
+
+
 
 should_create_digest(LocLServer, {ok, {TotalCount, _, _}}) ->
     TotalCount >= digest_creation_threshold(LocLServer);
@@ -504,7 +527,6 @@ merge_siblings(DigestObj) ->
         false ->
             DigestObj
     end.
-            
 
 %% @doc Request new entries from the server.
 %% `Last' and `Now' are microseconds.
@@ -521,21 +543,6 @@ last_modified(Obj) ->
     MD = riakc_obj:get_metadata(Obj),
     TimeStamp = proplists:get_value(<<"X-Riak-Last-Modified">>, MD),
     mod_mam_utils:now_to_microseconds(TimeStamp).
-
-%   Filter = prepare_filter(UserJID, Start, End, WithJID),
-%   TotalCount = calc_count(LServer, Filter),
-%   Offset     = calc_offset(LServer, Filter, PageSize, TotalCount, RSM),
-%   %% If a query returns a number of stanzas greater than this limit and the
-%   %% client did not specify a limit using RSM then the server should return
-%   %% a policy-violation error to the client. 
-%   case TotalCount - Offset > MaxResultLimit andalso not LimitPassed of
-%       true ->
-%           {error, 'policy-violation'};
-
-%       false ->
-%           MessageRows = extract_messages(LServer, Filter, Offset, PageSize),
-%           {ok, {TotalCount, Offset, MessageRows}}
-%   end.
     
 
 deserialize_values(Values) ->
