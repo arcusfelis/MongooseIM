@@ -391,6 +391,26 @@ lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
                     Offset = TotalCount - length(MatchedKeys),
                     {ok, {TotalCount, Offset, MessageRows}}
                 end;
+            bounded ->
+                Digest2 = dig_before_hour(hour(End),
+                    dig_after_hour(hour(Start), Digest)),
+                case dig_total(Digest2) < PageSize of
+                true -> QueryAllF(Conn); %% It is a small range
+                false -> 
+                    StartHourCnt = case dig_is_skipped(hour(Start), Digest) of
+                        true -> 0; 
+                        false -> get_hour_entry_count_after(
+                            Conn, MessIdxKeyMaker, SecIndex, Start)
+                        end,
+                    Keys = get_minimum_key_range_before(
+                        Conn, MessIdxKeyMaker, SecIndex, End, PageSize, Digest2),
+                    LastHourCnt = filter_and_count_recent_keys(Keys, Digest2),
+                    TotalCount = StartHourCnt + dig_total(Digest2) + LastHourCnt,
+                    MatchedKeys = sublist_r(Keys, PageSize),
+                    MessageRows = get_message_rows(Conn, MatchedKeys),
+                    Offset = TotalCount - length(MatchedKeys),
+                    {ok, {TotalCount, Offset, MessageRows}}
+                end;
             _ -> QueryAllF(Conn)
         end
     end,
@@ -970,7 +990,18 @@ meck_test_() ->
       {setup, 
        fun() -> load_mock(0), load_data() end,
        fun(_) -> unload_mock() end,
-       {timeout, 60, {spawn, {generator, fun long_case/0}}}}}].
+       {timeout, 60, {spawn, {generator, fun long_case/0}}}}},
+     {"Without index digest.",
+      {setup, 
+       fun() -> load_mock(100), load_data2() end,
+       fun(_) -> unload_mock() end,
+       {timeout, 60, {spawn, {generator, fun short_case/0}}}}},
+     {"With index digest.",
+      {setup, 
+       fun() -> load_mock(0), load_data2() end,
+       fun(_) -> unload_mock() end,
+       {timeout, 60, {spawn, {generator, fun short_case/0}}}}}
+    ].
 
 load_mock(DigestThreshold) ->
     GM = gen_mod,
@@ -1091,7 +1122,6 @@ unload_mock() ->
     ok.
 
 load_data() ->
-    %% Alice to Cat
     Log1Id = fun(Time) ->
         Date = iolist_to_binary("2000-07-21T" ++ Time ++ "Z"),
         id(Date)
@@ -1100,6 +1130,7 @@ load_data() ->
         Date = iolist_to_binary("2000-07-22T" ++ Time ++ "Z"),
         id(Date)
         end,
+    %% Alice to Cat
     A2C = fun(Time, Text) ->
         Packet = message(iolist_to_binary(Text)),
         ?MODULE:archive_message(Log1Id(Time), outgoing, alice(), cat(), alice(),
@@ -1271,6 +1302,98 @@ long_case() ->
                     to_microseconds("2000-07-22", "06:50:28"), undefined,
                     5, true, 5))}].
 
+%% Short dialogs
+load_data2() ->
+    Log1Id = fun(Time) ->
+        Date = iolist_to_binary("2000-07-21T" ++ Time ++ "Z"),
+        id(Date)
+        end,
+    Log2Id = fun(Time) ->
+        Date = iolist_to_binary("2000-07-22T" ++ Time ++ "Z"),
+        id(Date)
+        end,
+    Log3Id = fun(Time) ->
+        Date = iolist_to_binary("2000-07-23T" ++ Time ++ "Z"),
+        id(Date)
+        end,
+    A2H = fun(Time, Text) ->
+        Packet = message(iolist_to_binary(Text)),
+        ?MODULE:archive_message(Log1Id(Time), outgoing, alice(), hatter(), alice(),
+                                Packet)
+        end,
+    H2A = fun(Time, Text) ->
+        Packet = message(iolist_to_binary(Text)),
+        ?MODULE:archive_message(Log1Id(Time), incoming, alice(), hatter(), hatter(),
+                                Packet)
+        end,
+    A2D = fun(Time, Text) ->
+        Packet = message(iolist_to_binary(Text)),
+        ?MODULE:archive_message(Log2Id(Time), outgoing, alice(), duchess(), alice(),
+                                Packet)
+        end,
+    D2A = fun(Time, Text) ->
+        Packet = message(iolist_to_binary(Text)),
+        ?MODULE:archive_message(Log2Id(Time), incoming, alice(), duchess(), duchess(),
+                                Packet)
+        end,
+    A2M = fun(Time, Text) ->
+        Packet = message(iolist_to_binary(Text)),
+        ?MODULE:archive_message(Log3Id(Time), outgoing, alice(), mouse(), alice(),
+                                Packet)
+        end,
+    M2A = fun(Time, Text) ->
+        Packet = message(iolist_to_binary(Text)),
+        ?MODULE:archive_message(Log3Id(Time), incoming, alice(), mouse(), mouse(),
+                                Packet)
+        end,
+    
+    %% Credits to http://quotations.about.com/od/moretypes/a/alice4.htm
+    % Alice and The Hatter from Alice in the Wonderland
+    Log1 = fun(A, H) ->
+        A("13:10:03", "What a funny watch! It tells the day of the month, "
+                      "and it doesn't tell what o'clock it is!"),
+        H("13:10:10", "Why should it? Does your watch tell you what year it is?"),
+        A("13:10:15", "Of course not, but that's because it stays the same year"
+                      " for such a long time together."),
+        H("13:10:16", "…which is just the case with mine."),
+        ok
+        end,
+
+% Alice and the Duchess from Alice in Wonderland
+    Log2 = fun(A, D) ->
+        A("15:59:59", "I didn't know that Cheshire cats always grinned; "
+                      "in fact, I didn't know that cats could grin."),
+        D("16:00:05", "You don't know much; and that's a fact."),
+        ok
+        end,
+
+% Alice and the Dormouse from Alice in Wonderland
+    Log3 = fun(A, M) ->
+        M("10:34:04", "You've got no right to grow here."),
+        A("10:34:20", "Don't talk nonsense. You know you're growing too."),
+        M("10:34:23", "Yes, but I grow at a reasonable pace, "
+                      "not in that ridiculous fashion."),
+        ok
+        end,
+    Log1(A2H, H2A),
+    Log2(A2D, D2A),
+    Log3(A2M, M2A),
+    ok.
+
+
+short_case() ->
+    [{"Last 2 from the range.",
+    %% bounded
+    assert_keys(2, 0,
+                [join_date_time("2000-07-22", Time)
+
+                 || Time <- ["15:59:59", "16:00:05"]],
+                lookup_messages(alice(),
+                    #rsm_in{direction = before},
+                    to_microseconds("2000-07-21", "13:30:00"),
+                    to_microseconds("2000-07-23", "10:30:00"), undefined,
+                    2, true, 2))}].
+
 
 to_microseconds(Date, Time) ->
     %% Reuse the library function.
@@ -1309,6 +1432,18 @@ alice() ->
 cat() ->
     #jid{luser = <<"cat">>, lserver = <<"wonderland">>, lresource = <<>>,
           user = <<"cat">>,  server = <<"wonderland">>,  resource = <<>>}.
+
+hatter() ->
+    #jid{luser = <<"hatter">>, lserver = <<"wonderland">>, lresource = <<>>,
+          user = <<"hatter">>,  server = <<"wonderland">>,  resource = <<>>}.
+
+duchess() ->
+    #jid{luser = <<"duchess">>, lserver = <<"wonderland">>, lresource = <<>>,
+          user = <<"duchess">>,  server = <<"wonderland">>,  resource = <<>>}.
+
+mouse() ->
+    #jid{luser = <<"dormouse">>, lserver = <<"wonderland">>, lresource = <<>>,
+          user = <<"dormouse">>,  server = <<"wonderland">>,  resource = <<>>}.
 
 party() ->
     #jid{luser = <<"party">>, lserver = <<"wonderland">>, lresource = <<>>,
