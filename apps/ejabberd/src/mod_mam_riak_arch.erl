@@ -435,6 +435,7 @@ analyse_digest_before(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
     %% S B E
     first_page ->
         %% Page is in the beginning of the RSet.
+        %% `PageDigest' is empty.
         LBound = MessIdxKeyMaker({lower, Start}),
         UBound = previous_key(BeforeKey),
         Keys = get_key_range(Conn, SecIndex, LBound, UBound),
@@ -1105,6 +1106,7 @@ fetch_all_keys(Conn, SecIndex, MessIdxKeyMaker) ->
 -ifdef(TEST).
 
 meck_test_() ->
+    {inorder,
     [{"Without index digest.",
       {setup, 
        fun() -> load_mock(100), load_data() end,
@@ -1124,8 +1126,26 @@ meck_test_() ->
       {setup, 
        fun() -> load_mock(0), load_data2() end,
        fun(_) -> unload_mock() end,
-       {timeout, 60, {spawn, {generator, fun short_case/0}}}}}
-    ].
+       {timeout, 60, {spawn, {generator, fun short_case/0}}}}},
+     {"Without index digest.",
+      {setup, 
+       fun() -> load_mock(100), load_data3() end,
+       fun(_) -> unload_mock() end,
+       {timeout, 60, {spawn, {generator, fun incremental_pagination_case/0}}}}},
+     {"With index digest.",
+      {setup, 
+       fun() -> load_mock(0), load_data3() end,
+       fun(_) -> unload_mock() end,
+       {timeout, 60, {spawn, {generator, fun incremental_pagination_case/0}}}}}
+    ]}.
+
+all_keys(Bucket) ->
+    MS = [{
+            {{Bucket, '$1'}, '_'},
+            [],
+            ['$1']
+          }],
+    ets:select(riak_store, MS).
 
 load_mock(DigestThreshold) ->
     GM = gen_mod,
@@ -1134,8 +1154,8 @@ load_mock(DigestThreshold) ->
         DigestThreshold
         end),
     SM = riakc_pb_socket, %% webscale is here!
-    Tab = ets:new(riak_store, [public, ordered_set]),
-    IdxTab = ets:new(riak_index, [public, ordered_set]),
+    Tab = ets:new(riak_store, [public, ordered_set, named_table]),
+    IdxTab = ets:new(riak_index, [public, ordered_set, named_table]),
     meck:new(SM),
     meck:expect(SM, get_index_range, fun
         (Conn, Bucket, <<"$key">>, LBound, UBound) ->
@@ -1238,6 +1258,8 @@ load_mock(DigestThreshold) ->
     ok.
 
 unload_mock() ->
+    catch ets:delete(riak_store),
+    catch ets:delete(riak_index),
     meck:unload(gen_mod),
     meck:unload(riakc_pb_socket),
     meck:unload(riakc_obj),
@@ -1554,8 +1576,10 @@ short_case() ->
                     to_microseconds("2000-07-23", "10:30:00"), undefined,
                     5, true, 5))},
 
+
    {"Return a page of 2 elements before N from the range.",
     %% S B E, RSetDigest is not empty, PageDigest is not empty.
+    %% first_page
     assert_keys(7, 2,
                 ["2000-07-21T13:10:16",
                  "2000-07-22T15:59:59"],
@@ -1568,6 +1592,7 @@ short_case() ->
                     2, true, 2))},
 
    {"Return a page of 2 elements before N from the range (empty page digest).",
+    %% first_page
     %% S B E, RSetDigest is not empty, PageDigest is empty.
     %% "2000-07-21T13:10:10", "2000-07-21T13:10:15", "2000-07-22T13:10:16",
     %% "2000-07-22T15:59:59", "2000-07-23T16:00:05", "2000-07-23T10:34:04",
@@ -1581,9 +1606,112 @@ short_case() ->
                                 Id("2000-07-22", "15:59:59"))},
                     to_microseconds("2000-07-21", "13:10:10"),
                     to_microseconds("2000-07-23", "10:34:20"), undefined,
-                    2, true, 2))}
+                    2, true, 2))},
+
+    {"Return a last page before a known entry " %% it looks impossible.
+     "(B > E. There are no entries after B or E).",
+    %% last_page
+    assert_keys(9, 4,
+                ["2000-07-22T15:59:59", "2000-07-22T16:00:05",
+                 "2000-07-23T10:34:04", "2000-07-23T10:34:20",
+                 "2000-07-23T10:34:23"],
+                lookup_messages(alice(),
+                    #rsm_in{direction = before,
+                            id = mod_mam_utils:mess_id_to_external_binary(
+                                Id("2000-07-28", "00:00:00"))},
+                    undefined,
+                    to_microseconds("2000-07-27", "00:00:00"), undefined,
+                    5, true, 5))},
+
+    {"Return an empty page before a known entry. B < S.",
+    %% count_only
+    assert_keys(9, 0,
+                [],
+                lookup_messages(alice(),
+                    #rsm_in{direction = before,
+                            id = mod_mam_utils:mess_id_to_external_binary(
+                                Id("2000-07-20", "00:00:00"))},
+                    undefined, undefined, undefined,
+                    5, true, 5))}
     ].
 
+
+next_mess_id(PrevMessId) ->
+    %% 256 000 000 is one second.
+    PrevMessId + 256 * random_microsecond_delay().
+
+random_microsecond_delay() ->
+    %% One hour is the maximim delay.
+    random:uniform(3600000000).
+
+load_data3() ->
+    FirstMessId = 352159376404720897,
+    random:seed({1,2,3}),
+    put_messages(FirstMessId, 1000).
+
+
+put_messages(MessId, N) when N > 0 ->
+    Text = integer_to_list(N),
+    Packet = message(iolist_to_binary(Text)),
+    case random_destination() of
+        outgoing ->
+            ?MODULE:archive_message(
+                MessId, outgoing, alice(), cat(), alice(), Packet);
+        incoming ->
+            ?MODULE:archive_message(
+                MessId, incoming, alice(), cat(), cat(), Packet)
+    end,
+    [MessId|put_messages(next_mess_id(MessId), N - 1)];
+put_messages(_, 0) ->
+    [].
+
+random_destination() ->
+    case random:uniform(2) of
+        1 -> incoming;
+        2 -> outgoing
+    end.
+
+incremental_pagination_case() ->
+    MessIDs = [key_to_mess_id(Key) || Key <- all_keys(message_bucket())],
+    TotalCount = length(MessIDs),
+    %% It is a tiny hack to get the first page.
+    %% This id is before any message id in the archive.
+    ErliestMessID = 0,
+    pagination_gen(ErliestMessID, 1, 10, 0, MessIDs, TotalCount).
+
+pagination_gen(LastMessID, PageNum, PageSize, Offset, MessIDs, TotalCount)
+    when is_integer(LastMessID) ->
+    {ok, {ResultTotalCount, ResultOffset, ResultRows}} =
+    ?MODULE:lookup_messages(alice(),
+        #rsm_in{direction = aft, id = mod_mam_utils:mess_id_to_external_binary(LastMessID)},
+        undefined, undefined, undefined,
+        PageSize, true, PageSize),
+    ResultMessIDs = [message_row_to_mess_id(Row) || Row <- ResultRows],
+    {PageMessIDs, LeftMessIDs} = save_split(PageSize, MessIDs),
+    NewOffset = Offset + length(ResultRows),
+    NewLastMessId = lists:last(PageMessIDs),
+    [{"Page " ++ integer_to_list(PageNum),
+     [?_assertEqual(TotalCount, ResultTotalCount),
+      ?_assertEqual(Offset, ResultOffset),
+      ?_assertEqual(PageMessIDs, ResultMessIDs)]}
+    | case NewOffset of
+        TotalCount -> [];
+        _ ->
+            {generator, fun() -> pagination_gen(
+                NewLastMessId, PageNum + 1, PageSize,
+                NewOffset, LeftMessIDs,  TotalCount)
+             end}
+      end].
+    
+
+%% `lists:split/2' that does allow small lists.
+save_split(N, L) when length(L) < N ->
+    {L, []};
+save_split(N, L) ->
+    lists:split(N, L).
+
+
+message_row_to_mess_id({MessId, _, _}) -> MessId.
 
 to_microseconds(Date, Time) ->
     %% Reuse the library function.
