@@ -86,22 +86,6 @@ lww_props() ->
 
 archive_size(LServer, LUser) ->
     0.
-
--spec lookup_messages(UserJID, RSM, Start, End, WithJID, PageSize,
-                      LimitPassed, MaxResultLimit) ->
-    {ok, {TotalCount, Offset, MessageRows}} | {error, 'policy-violation'}
-			     when
-    UserJID :: #jid{},
-    RSM     :: #rsm_in{} | none,
-    Start   :: unix_timestamp() | undefined,
-    End     :: unix_timestamp() | undefined,
-    PageSize :: non_neg_integer(),
-    WithJID :: #jid{} | undefined,
-    LimitPassed :: boolean(),
-    MaxResultLimit :: non_neg_integer(),
-    TotalCount :: non_neg_integer(),
-    Offset  :: non_neg_integer(),
-    MessageRows :: list(tuple()).
 %% Row is `{<<"13663125233">>,<<"bob@localhost">>,<<"res1">>,<<binary>>}'.
 %% `#rsm_in{direction = before | aft, index=int(), id = binary()}'
 %% `#rsm_in.id' is not inclusive.
@@ -202,6 +186,21 @@ digest_creation_threshold(Host) ->
     gen_mod:get_module_opt(Host, mod_mam, digest_creation_threshold, 100).
 
 
+-spec lookup_messages(UserJID, RSM, Start, End, WithJID, PageSize,
+                      LimitPassed, MaxResultLimit) ->
+    {ok, {TotalCount, Offset, MessageRows}} | {error, 'policy-violation'}
+			     when
+    UserJID :: #jid{},
+    RSM     :: #rsm_in{} | none,
+    Start   :: unix_timestamp() | undefined,
+    End     :: unix_timestamp() | undefined,
+    PageSize :: non_neg_integer(),
+    WithJID :: #jid{} | undefined,
+    LimitPassed :: boolean(),
+    MaxResultLimit :: non_neg_integer(),
+    TotalCount :: non_neg_integer(),
+    Offset  :: non_neg_integer(),
+    MessageRows :: list(tuple()).
 lookup_messages(UserJID=#jid{lserver=LocLServer, luser=LocLUser},
                 RSM, Start, End, WithJID,
                 PageSize, LimitPassed, MaxResultLimit) ->
@@ -403,8 +402,130 @@ get_recent_entry_count(Conn, SecIndex, MessIdxKeyMaker, End, Digest) ->
 
 analyse_digest_before(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
                       Start, End, PageSize, BeforeKey, Digest) ->
+    %% Any value from `RSetDigest' is inside the result set.
+    %% `RSetDigest' does not contain `hour(Start)' and `hour(End)'.
+    RSetDigest = dig_between(Start, End, Digest),
+    %% Hour in which a message with the passed id was send.
+    BeforeHour = key_to_hour(BeforeKey),
+    %% Top values from `PageDigest' will be on the page.
+    %% `BeforeHour' is not included.
+    PageDigest = dig_before_hour(BeforeHour, RSetDigest),
     KeyPos = key_position(MessIdxKeyMaker, BeforeKey, Start, End, Digest),
-    QueryAllF().
+    Strategy = case {dig_is_empty(RSetDigest),
+                     is_single_page(PageSize, PageDigest), KeyPos} of
+        {true, _, _} -> query_all;
+        {false, _, before} -> count_only;
+        {false, true, _} -> first_page;
+        {false, false, inside} -> middle_page;
+        {false, _, 'after'} -> last_page %% or near
+        end,
+    %% Place different points on the timeline:
+    %% B - before, S - start, E - end, N - now
+    case Strategy of
+    query_all -> QueryAllF();
+    %% B S E
+    count_only -> %% return a total count only
+        StartHourCnt = start_hour_count(
+            Conn, MessIdxKeyMaker, SecIndex, Start, End, Digest),
+        RecentCnt = get_recent_entry_count(
+            Conn, SecIndex, MessIdxKeyMaker, End, RSetDigest),
+        RSetDigestCnt = dig_total(RSetDigest),
+        TotalCount = StartHourCnt + RSetDigestCnt + RecentCnt,
+        return_matched_keys(TotalCount, 0, []);
+    %% S B E
+    first_page ->
+        %% Page is in the beginning of the RSet.
+        LBound = MessIdxKeyMaker({lower, Start}),
+        UBound = previous_key(BeforeKey),
+        Keys = get_key_range(Conn, SecIndex, LBound, UBound),
+        StartHourCnt = filter_and_count_keys_before_digest(Keys, RSetDigest),
+        MatchedKeys = sublist_r(Keys, PageSize),
+        Offset = length(Keys) - length(MatchedKeys),
+        RecentCnt = get_recent_entry_count(
+            Conn, SecIndex, MessIdxKeyMaker, End, RSetDigest),
+        RSetDigestCnt = dig_total(RSetDigest),
+        TotalCount = StartHourCnt + RSetDigestCnt + RecentCnt,
+        return_matched_keys(TotalCount, Offset, MatchedKeys);
+    %% S B E
+    middle_page ->
+        MinHour = page_minimum_hour(PageSize, PageDigest),
+        LBound = MessIdxKeyMaker({lower, hour_lower_bound(MinHour)}),
+        UBound = previous_key(BeforeKey),
+        Keys = get_key_range(Conn, SecIndex, LBound, UBound),
+        MatchedKeys = sublist_r(Keys, PageSize),
+        StartHourCnt = start_hour_count(
+            Conn, MessIdxKeyMaker, SecIndex, Start, End, Digest),
+        RecentCnt = get_recent_entry_count(
+            Conn, SecIndex, MessIdxKeyMaker, End, RSetDigest),
+        RSetDigestCnt = dig_total(RSetDigest),
+        TotalCount = StartHourCnt + RSetDigestCnt + RecentCnt,
+        %% Count of messages between `PageDigest' and `BeforeKey'.
+        BeforeOffset = filter_and_count_recent_keys(Keys, PageDigest),
+        LastMatchedOffset = StartHourCnt + dig_total(PageDigest) + BeforeOffset,
+        Offset = LastMatchedOffset - length(MatchedKeys),
+        return_matched_keys(TotalCount, Offset, MatchedKeys);
+    %% S E B
+    %% S E N B
+    %% S E B N
+    last_page ->
+        PrevBeforeKey = previous_key(BeforeKey),
+        EndKey = MessIdxKeyMaker({upper, End}),
+        MinHour = page_minimum_hour(PageSize, PageDigest),
+        UBound = min(previous_key(BeforeKey), EndKey),
+        LBound = MessIdxKeyMaker({lower, hour_lower_bound(MinHour)}),
+        Keys = get_key_range(Conn, SecIndex, LBound, UBound),
+        MatchedKeys = sublist_r(Keys, PageSize),
+        StartHourCnt = start_hour_count(
+            Conn, MessIdxKeyMaker, SecIndex, Start, End, Digest),
+        %% Count of messages between `PageDigest' and `BeforeKey'.
+        BeforeOffset = filter_and_count_recent_keys(Keys, PageDigest),
+        LastMatchedOffset = StartHourCnt + dig_total(PageDigest) + BeforeOffset,
+        %% if PrevBeforeKey > EndKey, returns 0.
+        RecentCnt = get_entry_count_between(
+            Conn, SecIndex, PrevBeforeKey, EndKey),
+        TotalCount = LastMatchedOffset + RecentCnt,
+        Offset = LastMatchedOffset - length(MatchedKeys),
+        return_matched_keys(TotalCount, Offset, MatchedKeys)
+    end.
+
+
+dig_between(Start, End, Digest) ->
+    Strategy = choose_strategy(Start, End, Digest),
+    case Strategy of
+        empty -> dig_empty();
+        recent_only -> dig_empty();
+        whole_digest_and_recent -> Digest;
+        lower_bounded -> dig_after_hour(hour(Start), Digest);
+        upper_bounded -> dig_before_hour(hour(End), Digest);
+        bounded -> dig_before_hour(hour(End), dig_after_hour(hour(Start), Digest));
+        _ -> Digest
+    end.
+
+filter_and_count_keys_before_digest(Keys, RSetDigest) ->
+    RSetDigestMinHour = dig_first_hour(RSetDigest),
+    length([K || K <- Keys, key_to_hour(K) < RSetDigestMinHour]).
+
+%% Count of entries between `Start' and `hour(Start)'.
+%% TODO: can be optimized: if `minutes(hour(Start)) < 30', count a hour offset.
+%% Limitation: `hour(Start) =/= hour(End)' enforced in `is_short_range/3'.
+start_hour_count(_, _, _, undefined, _, _) ->
+    0; % Start is undefined.
+start_hour_count(Conn, MessIdxKeyMaker, SecIndex, Start, End, Digest) ->
+    %% Use metainformation to optimize, if the hour is empty.
+    Strategy = choose_strategy(Start, End, Digest),
+    Request = Strategy =:= lower_bounded orelse Strategy =:= bounded,
+    case Request of
+        false -> 0;
+        true -> request_start_hour_count(
+                Conn, MessIdxKeyMaker, SecIndex, Start, Digest)
+    end.
+
+request_start_hour_count(Conn, MessIdxKeyMaker, SecIndex, Start, Digest) ->
+    case dig_is_skipped(hour(Start), Digest) of
+    true -> 0; 
+    false -> get_hour_entry_count_after(
+        Conn, MessIdxKeyMaker, SecIndex, Start)
+    end.
 
 choose_strategy(Start, End, Digest) ->
     %% Where the lower bound is located: before, inside or after the index digest.
@@ -444,11 +565,8 @@ analyse_digest_last_page(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
             case dig_total(Digest2) < PageSize of
             true -> QueryAllF(); %% It is a small range
             false -> 
-                StartHourCnt = case dig_is_skipped(hour(Start), Digest) of
-                    true -> 0; 
-                    false -> get_hour_entry_count_after(
-                        Conn, MessIdxKeyMaker, SecIndex, Start)
-                    end,
+                StartHourCnt = request_start_hour_count(
+                    Conn, MessIdxKeyMaker, SecIndex, Start, Digest),
                 Keys = get_minimum_key_range_before(
                     Conn, MessIdxKeyMaker, SecIndex, End, PageSize, Digest2),
                 RecentCnt = filter_and_count_recent_keys(Keys, Digest2),
@@ -476,11 +594,8 @@ analyse_digest_last_page(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
             case dig_total(Digest2) < PageSize of
             true -> QueryAllF(); %% It is a small range
             false -> 
-                StartHourCnt = case dig_is_skipped(hour(Start), Digest) of
-                    true -> 0; 
-                    false -> get_hour_entry_count_after(
-                        Conn, MessIdxKeyMaker, SecIndex, Start)
-                    end,
+                StartHourCnt = request_start_hour_count(
+                    Conn, MessIdxKeyMaker, SecIndex, Start, Digest),
                 Keys = get_minimum_key_range_before(
                     Conn, MessIdxKeyMaker, SecIndex, End, PageSize, Digest2),
                 LastHourCnt = filter_and_count_recent_keys(Keys, Digest2),
@@ -678,6 +793,7 @@ hour_id(MessID, UserID) ->
     <<UserID:64/big, (hour(Microseconds)):24/big>>.
 
 %% Transforms `{{2013,7,21},{15,43,36}} => {{2013,7,21},{15,0,0}}'.
+%% microseconds to hour
 hour(Ms) when is_integer(Ms) ->
     Ms div microseconds_in_hour().
 
@@ -714,6 +830,8 @@ user_remote_jid_message_id(BUserID, BMessID, BJID)
     when is_binary(BUserID), is_binary(BMessID), is_binary(BJID) ->
     <<BUserID/binary, BJID/binary, 0, BMessID/binary>>.
 
+key_to_hour(Key) when is_binary(Key) ->
+    hour(key_to_microseconds(Key)).
 
 key_to_microseconds(Key) when is_binary(Key) ->
     {Microseconds, _} = mod_mam_utils:decode_compact_uuid(key_to_mess_id(Key)),
@@ -723,6 +841,17 @@ key_to_mess_id(Key) ->
     %% Get 8 bytes.
     <<MessID:64/big>> = binary:part(Key, byte_size(Key), -8),
     MessID.
+
+%% This function is used to create a key, that will be lower that `BeforeKey',
+%% but greater or equal, than any key before `BeforeKey'.
+previous_key(BeforeKey) ->
+    PrevMessID = key_to_mess_id(BeforeKey) - 1,
+    replace_mess_id(PrevMessID, BeforeKey).
+
+replace_mess_id(NewMessID, SrcKey) ->
+    %% Delete old message id.
+    <<Prefix/binary>> = binary:part(SrcKey, 0, byte_size(SrcKey) - 8),
+    <<Prefix/binary, NewMessID:64/big>>.
 
 
 %% @doc Ensure, that `UpdateProps' are set in required position.
@@ -826,6 +955,7 @@ dig_maximum_key(MessIdxKeyMaker, Digest) ->
 
 %% @doc Return length of the key list ignoring keys from digest.
 %% Note: Digest must be older, than keys.
+%% Digest should be not empty.
 filter_and_count_recent_keys(Keys, Digest) ->
     LastHour = dig_last_hour(Digest),
     dig_total(dig_after_hour(LastHour, dig_new(Keys))).
@@ -895,6 +1025,9 @@ dig_position_end(End, Digest) ->
 dig_new(Keys) ->
     frequency([hour(key_to_microseconds(Key)) || Key <- Keys]).
 
+dig_empty() ->
+    [].
+
 %% Returns `[{Hour, MessageCount}]'.
 frequency([H|T]) ->
     frequency_1(T, H, 1);
@@ -922,10 +1055,12 @@ assert_valid_key({Bucket, Key}) when is_binary(Bucket), is_binary(Key) ->
 
 %% @doc Count entries (bounds are inclusive).
 %% TODO: use map-reduce here
-get_entry_count_between(Conn, SecIndex, LBound, UBound) ->
+get_entry_count_between(Conn, SecIndex, LBound, UBound) when LBound =< UBound ->
     {ok, ?INDEX_RESULTS{keys=Keys}} =
     riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
-    length(Keys).
+    length(Keys);
+get_entry_count_between(_, _, _, _) ->
+    0.
 
 get_hour_entry_count_after(Conn, MessIdxKeyMaker, SecIndex, Start) ->
     LBound = MessIdxKeyMaker({lower, Start}),
@@ -940,16 +1075,19 @@ get_key_range(Conn, SecIndex, LBound, UBound)
     Keys.
 
 get_minimum_key_range_before(Conn, MessIdxKeyMaker, SecIndex, Before, PageSize, Digest) ->
-    {_, MinDigest} = dig_skip_nr(PageSize, Digest),
-    %% Expected start hour of the page
-    ExpectedFirstHour = case dig_is_empty(MinDigest) of
-        true -> dig_first_hour(Digest);
-        false -> dig_last_hour(MinDigest)
-    end,
-    LBound = MessIdxKeyMaker({lower, hour_lower_bound(ExpectedFirstHour)}),
+    MinHour = page_minimum_hour(PageSize, Digest),
+    LBound = MessIdxKeyMaker({lower, hour_lower_bound(MinHour)}),
     UBound = MessIdxKeyMaker({upper, Before}),
     get_key_range(Conn, SecIndex, LBound, UBound).
     
+%% Expected start hour of the page
+page_minimum_hour(PageSize, Digest) ->
+    %% Skip `PageSize' elements from the end.
+    {_, MinDigest} = dig_skip_nr(PageSize, Digest),
+    case dig_is_empty(MinDigest) of
+        true -> dig_first_hour(Digest);
+        false -> dig_last_hour(MinDigest)
+    end.
 
 -spec get_message_rows(term(), [binary()]) -> list(message_row()).
 get_message_rows(Conn, Keys) ->
@@ -1205,6 +1343,15 @@ load_data() ->
     ok.
 
 long_case() ->
+    Log1Id = fun(Time) ->
+        Date = iolist_to_binary("2000-07-21T" ++ Time ++ "Z"),
+        id(Date)
+        end,
+    Log2Id = fun(Time) ->
+        Date = iolist_to_binary("2000-07-22T" ++ Time ++ "Z"),
+        id(Date)
+        end,
+
     %% lookup_messages(UserJID, RSM, Start, End, WithJID,
     %%                 PageSize, LimitPassed, MaxResultLimit) ->
     %% {ok, {TotalCount, Offset, MessageRows}}
@@ -1279,12 +1426,25 @@ long_case() ->
     %% bounded
     assert_keys(6, 1,
                 [join_date_time("2000-07-22", Time)
-
                  || Time <- ["06:49:50", "06:50:05", "06:50:10",
                              "06:50:25", "06:50:28"]],
                 lookup_messages(alice(),
                     #rsm_in{direction = before},
                     to_microseconds("2000-07-22", "06:49:45"),
+                    to_microseconds("2000-07-22", "06:50:28"), undefined,
+                    5, true, 5))},
+
+   {"Return a page of 5 elements before N from the range.",
+    %% S B E, RSetDigest is empty, PageDigest is empty.
+    assert_keys(13, 5,
+                [join_date_time("2000-07-22", Time)
+                 || Time <- ["06:49:30", "06:49:36", "06:49:45",
+                             "06:49:50", "06:50:05"]],
+                lookup_messages(alice(),
+                    #rsm_in{direction = before,
+                            id = mod_mam_utils:mess_id_to_external_binary(
+                                Log2Id("06:50:10"))},
+                    to_microseconds("2000-07-22", "06:49:05"),
                     to_microseconds("2000-07-22", "06:50:28"), undefined,
                     5, true, 5))}].
 
@@ -1368,6 +1528,9 @@ load_data2() ->
 
 
 short_case() ->
+    Id = fun(Date, Time) ->
+        id(iolist_to_binary(Date ++ "T" ++ Time ++ "Z"))
+        end,
     [{"Last 2 from the range.",
     %% bounded
     assert_keys(2, 0,
@@ -1378,7 +1541,48 @@ short_case() ->
                     #rsm_in{direction = before},
                     to_microseconds("2000-07-21", "13:30:00"),
                     to_microseconds("2000-07-23", "10:30:00"), undefined,
-                    2, true, 2))}].
+                    2, true, 2))},
+    {"Partically full page from the range.",
+    %% bounded
+    assert_keys(3, 0,
+                ["2000-07-21T13:10:16",
+                 "2000-07-22T15:59:59",
+                 "2000-07-22T16:00:05"],
+                lookup_messages(alice(),
+                    #rsm_in{direction = before},
+                    to_microseconds("2000-07-21", "13:10:16"),
+                    to_microseconds("2000-07-23", "10:30:00"), undefined,
+                    5, true, 5))},
+
+   {"Return a page of 2 elements before N from the range.",
+    %% S B E, RSetDigest is not empty, PageDigest is not empty.
+    assert_keys(7, 2,
+                ["2000-07-21T13:10:16",
+                 "2000-07-22T15:59:59"],
+                lookup_messages(alice(),
+                    #rsm_in{direction = before,
+                            id = mod_mam_utils:mess_id_to_external_binary(
+                                Id("2000-07-22", "16:00:05"))},
+                    to_microseconds("2000-07-21", "13:10:10"),
+                    to_microseconds("2000-07-23", "10:34:20"), undefined,
+                    2, true, 2))},
+
+   {"Return a page of 2 elements before N from the range (empty page digest).",
+    %% S B E, RSetDigest is not empty, PageDigest is empty.
+    %% "2000-07-21T13:10:10", "2000-07-21T13:10:15", "2000-07-22T13:10:16",
+    %% "2000-07-22T15:59:59", "2000-07-23T16:00:05", "2000-07-23T10:34:04",
+    %% "2000-07-23T10:34:20"
+    assert_keys(7, 1,
+                ["2000-07-21T13:10:15",
+                 "2000-07-21T13:10:16"],
+                lookup_messages(alice(),
+                    #rsm_in{direction = before,
+                            id = mod_mam_utils:mess_id_to_external_binary(
+                                Id("2000-07-22", "15:59:59"))},
+                    to_microseconds("2000-07-21", "13:10:10"),
+                    to_microseconds("2000-07-23", "10:34:20"), undefined,
+                    2, true, 2))}
+    ].
 
 
 to_microseconds(Date, Time) ->
@@ -1485,6 +1689,13 @@ dig_position_test_() ->
 frequency_test_() ->
     [?_assertEqual([{a, 2}, {b, 3}], frequency([a, a, b, b, b]))].
 
+
+page_minimum_hour_test_() ->
+    [?_assertEqual(3, page_minimum_hour( 5, [{1, 6}, {2, 5}, {3, 8}])),
+     ?_assertEqual(2, page_minimum_hour(10, [{1, 6}, {2, 5}, {3, 8}])),
+     ?_assertEqual(1, page_minimum_hour(20, [{1, 6}, {2, 5}, {3, 8}]))
+    ].
+
 -endif.
 
 is_short_range(Now, Start, End) ->
@@ -1502,3 +1713,5 @@ sublist_r(Keys, N) ->
     lists:sublist(Keys, max(0, length(Keys) - N) + 1, N).
 
 
+is_single_page(PageSize, PageDigest) ->
+    dig_total(PageDigest) =< PageSize.
