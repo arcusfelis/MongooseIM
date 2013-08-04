@@ -277,6 +277,7 @@ analyse_digest(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
             %% If `Start' is not recorded, that requested result
             %% set contains new messages only
             case is_defined(Start) andalso not dig_is_recorded(hour(Start), Digest) of
+                %% `Start' is after the digist.
                 %% Match only recent messages.
                 true -> QueryAllF();
                 false -> 
@@ -298,36 +299,24 @@ analyse_digest(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
 
 analyse_digest_index(Conn, SecIndex, MessIdxKeyMaker,
                      Offset, Start, End, PageSize, Digest) ->
-    %% It is true, when there is an hour, that begins with
-    %% the first message of the record set.
-    IsEmptyHourOffset = case Start of
-        undefined -> true;
-        _ -> dig_calc_volume(hour(Start), Digest) =:= 0
-        end,
-    %% Count of messages from the hour beginning to `Start'.
-    HourOffset = case IsEmptyHourOffset of
-        true -> 0;
-        false ->
-            S = MessIdxKeyMaker({lower, hour_lower_bound(hour(Start))}),
-            E = MessIdxKeyMaker({upper, Start}),
-            get_entry_count_between(Conn, SecIndex, S, E)
-        end,
+    %% Position of the first message of the RSet in its hour.
+    HourOffset = start_hour_offset(
+        Conn, MessIdxKeyMaker, SecIndex, Start, Digest),
     %% Skip unused part of the index (it is not a part of RSet).
     Digest2 = case is_defined(Start) of
         false -> Digest;
         true  -> dig_from_hour(hour(Start), Digest)
         end,
     %% Skip `HourOffset'.
-    %% `Digest3' is a beginning of the RSet.
+    %% `Digest3' is on the beginning of the RSet.
     Digest3 = dig_skip_hour_offset(HourOffset, Digest2),
     %% Looking for the erliest hour, that should be loaded from Riak.
-    %% `LeftOffset' is how many etries left to skip.
+    %% `LeftOffset' is how many entries is left to skip.
     {LeftOffset, Digest4} = case is_defined(End) of
         true  -> dig_skip_n_with_border(Offset, hour(End), Digest3);
         false -> dig_skip_n(Offset, Digest3)
         end,
-    LBoundHour = dig_first_hour(Digest4),
-    LBound = MessIdxKeyMaker({lower, hour_lower_bound(LBoundHour)}),
+    LBound = calc_lbound(MessIdxKeyMaker, Start, Digest4),
     %% `Left' is how many records are left to fill a full page.
     {Left, Digest5} = case is_defined(End) of
         true  -> dig_skip_n_with_border(LeftOffset+PageSize, hour(End), Digest4);
@@ -377,6 +366,12 @@ analyse_digest_index(Conn, SecIndex, MessIdxKeyMaker,
             return_matched_keys(TotalCount, Offset, MatchedKeys)
     end.
 
+calc_lbound(MessIdxKeyMaker, Start, Digest) ->
+    FirstHour = dig_first_hour(Digest),
+    MessIdxKeyMaker({lower, maybe_max(Start, hour_lower_bound(FirstHour))}).
+
+maybe_max(undefined, X) -> X;
+maybe_max(X, Y) -> max(X, Y).
 
 %% Is the key `BeforeKey' before, `after' or inside of the result set?
 key_position(MessIdxKeyMaker, BeforeKey, Start, End, Digest) ->
@@ -519,6 +514,18 @@ start_hour_count(Conn, MessIdxKeyMaker, SecIndex, Start, End, Digest) ->
         false -> 0;
         true -> request_start_hour_count(
                 Conn, MessIdxKeyMaker, SecIndex, Start, Digest)
+    end.
+
+start_hour_offset(Conn, MessIdxKeyMaker, SecIndex, Start, Digest) ->
+    IsZero = (not is_defined(Start)) orelse
+             dig_is_skipped(hour(Start), Digest),
+    %% Count of messages from the hour beginning to `Start'.
+    case IsZero of
+    true -> 0;
+    false -> %% should calculate
+        S = MessIdxKeyMaker({lower, hour_lower_bound(hour(Start))}),
+        E = MessIdxKeyMaker({upper, Start}),
+        get_entry_count_between(Conn, SecIndex, S, E)
     end.
 
 request_start_hour_count(Conn, MessIdxKeyMaker, SecIndex, Start, Digest) ->
@@ -965,7 +972,7 @@ filter_and_count_recent_keys(Keys, Digest) ->
 dig_is_recorded(Hour, Digest) ->
     %% Tip: if no information exists after specified hour,
     %%      `dig_calc_volume' returns `undefined'.
-    is_defined(dig_calc_volume(hour(Hour), Digest)).
+    is_defined(dig_calc_volume(Hour, Digest)).
 
 dig_is_skipped(Hour, Digest) ->
     dig_calc_volume(hour(Hour), Digest) =:= 0.
@@ -1111,32 +1118,42 @@ meck_test_() ->
       {setup, 
        fun() -> load_mock(100), load_data() end,
        fun(_) -> unload_mock() end,
-       {timeout, 60, {spawn, {generator, fun long_case/0 }}}}},
+       {timeout, 60, {generator, fun long_case/0 }}}},
      {"With index digest.",
       {setup, 
        fun() -> load_mock(0), load_data() end,
        fun(_) -> unload_mock() end,
-       {timeout, 60, {spawn, {generator, fun long_case/0}}}}},
+       {timeout, 60, {generator, fun long_case/0}}}},
      {"Without index digest.",
       {setup, 
        fun() -> load_mock(100), load_data2() end,
        fun(_) -> unload_mock() end,
-       {timeout, 60, {spawn, {generator, fun short_case/0}}}}},
+       {timeout, 60, {generator, fun short_case/0}}}},
      {"With index digest.",
       {setup, 
        fun() -> load_mock(0), load_data2() end,
        fun(_) -> unload_mock() end,
-       {timeout, 60, {spawn, {generator, fun short_case/0}}}}},
+       {timeout, 60, {generator, fun short_case/0}}}},
      {"Without index digest.",
       {setup, 
        fun() -> load_mock(100), load_data3() end,
        fun(_) -> unload_mock() end,
-       {timeout, 60, {spawn, {generator, fun incremental_pagination_case/0}}}}},
+       {timeout, 60, {generator, fun incremental_pagination_case/0}}}},
      {"With index digest.",
       {setup, 
        fun() -> load_mock(0), load_data3() end,
        fun(_) -> unload_mock() end,
-       {timeout, 60, {spawn, {generator, fun incremental_pagination_case/0}}}}}
+       {timeout, 60, {generator, fun incremental_pagination_case/0}}}},
+     {"Without index digest.",
+      {setup, 
+       fun() -> load_mock(100), load_data3() end,
+       fun(_) -> unload_mock() end,
+       {timeout, 60, {generator, fun decremental_pagination_case/0}}}},
+     {"With index digest.",
+      {setup, 
+       fun() -> load_mock(0), load_data3() end,
+       fun(_) -> unload_mock() end,
+       {timeout, 60, {generator, fun decremental_pagination_case/0}}}}
     ]}.
 
 all_keys(Bucket) ->
@@ -1444,6 +1461,41 @@ long_case() ->
                     undefined, undefined, undefined,
                     5, true, 5))},
 
+    {"Index 30 (at the end).",
+    assert_keys(34, 30,
+                [join_date_time("2000-07-22", Time)
+                 || Time <- ["06:50:50", "06:51:00",
+                             "06:51:10", "06:51:15"]],
+                lookup_messages(alice(),
+                    #rsm_in{index = 30},
+                    undefined, undefined, undefined,
+                    5, true, 5))},
+
+    %% RSet timestamps:
+    %% "06:49:05", "06:49:10", "06:49:15", "06:49:20", "06:49:25",
+    %% "06:49:30", "06:49:36", "06:49:45", "06:49:50", "06:50:05"
+    {"Index 0 in the range (HourOffset is not empty).",
+    assert_keys(10, 0,
+                [join_date_time("2000-07-22", Time)
+                 || Time <- ["06:49:05", "06:49:10", "06:49:15",
+                             "06:49:20", "06:49:25"]],
+                lookup_messages(alice(),
+                    #rsm_in{index = 0},
+                    to_microseconds("2000-07-22", "06:49:05"),
+                    to_microseconds("2000-07-22", "06:50:05"),
+                    undefined, 5, true, 5))},
+
+    {"Index 3 in the range (HourOffset is not empty).",
+    assert_keys(10, 3,
+                [join_date_time("2000-07-22", Time)
+                 || Time <- ["06:49:20", "06:49:25",
+                             "06:49:30", "06:49:36", "06:49:45"]],
+                lookup_messages(alice(),
+                    #rsm_in{index = 3},
+                    to_microseconds("2000-07-22", "06:49:05"),
+                    to_microseconds("2000-07-22", "06:50:05"),
+                    undefined, 5, true, 5))},
+
     {"Last 5 from the range.",
     %% bounded
     assert_keys(6, 1,
@@ -1674,31 +1726,65 @@ random_destination() ->
 incremental_pagination_case() ->
     MessIDs = [key_to_mess_id(Key) || Key <- all_keys(message_bucket())],
     TotalCount = length(MessIDs),
-    %% It is a tiny hack to get the first page.
-    %% This id is before any message id in the archive.
-    ErliestMessID = 0,
-    pagination_gen(ErliestMessID, 1, 10, 0, MessIDs, TotalCount).
+    %% 0 id is before any message id in the archive.
+    incremental_pagination_gen(0, 1, 10, 0, MessIDs, TotalCount).
 
-pagination_gen(LastMessID, PageNum, PageSize, Offset, MessIDs, TotalCount)
+incremental_pagination_gen(
+    LastMessID, PageNum, PageSize, Offset, MessIDs, TotalCount)
     when is_integer(LastMessID) ->
     {ok, {ResultTotalCount, ResultOffset, ResultRows}} =
     ?MODULE:lookup_messages(alice(),
-        #rsm_in{direction = aft, id = mod_mam_utils:mess_id_to_external_binary(LastMessID)},
+        #rsm_in{direction = aft,
+            id = mod_mam_utils:mess_id_to_external_binary(LastMessID)},
         undefined, undefined, undefined,
         PageSize, true, PageSize),
     ResultMessIDs = [message_row_to_mess_id(Row) || Row <- ResultRows],
     {PageMessIDs, LeftMessIDs} = save_split(PageSize, MessIDs),
     NewOffset = Offset + length(ResultRows),
-    NewLastMessId = lists:last(PageMessIDs),
+    NewLastMessID = lists:last(PageMessIDs),
     [{"Page " ++ integer_to_list(PageNum),
      [?_assertEqual(TotalCount, ResultTotalCount),
       ?_assertEqual(Offset, ResultOffset),
       ?_assertEqual(PageMessIDs, ResultMessIDs)]}
-    | case NewOffset of
-        TotalCount -> [];
-        _ ->
-            {generator, fun() -> pagination_gen(
-                NewLastMessId, PageNum + 1, PageSize,
+    | case NewOffset >= TotalCount of
+        true -> [];
+        false ->
+            {generator, fun() -> incremental_pagination_gen(
+                NewLastMessID, PageNum + 1, PageSize,
+                NewOffset, LeftMessIDs,  TotalCount)
+             end}
+      end].
+
+decremental_pagination_case() ->
+    MessIDs = [key_to_mess_id(Key) || Key <- all_keys(message_bucket())],
+    TotalCount = length(MessIDs),
+    PageSize = 10,
+    PageNum = TotalCount div PageSize,
+    Offset = TotalCount - PageSize,
+    decremental_pagination_gen(
+        undefined, PageNum, PageSize, Offset, MessIDs, TotalCount).
+
+decremental_pagination_gen(
+    BeforeMessID, PageNum, PageSize, Offset, MessIDs, TotalCount) ->
+    {ok, {ResultTotalCount, ResultOffset, ResultRows}} =
+    ?MODULE:lookup_messages(alice(),
+        #rsm_in{direction = before,
+            id = maybe_mess_id_to_external_binary(BeforeMessID)},
+        undefined, undefined, undefined,
+        PageSize, true, PageSize),
+    ResultMessIDs = [message_row_to_mess_id(Row) || Row <- ResultRows],
+    {LeftMessIDs, PageMessIDs} = save_split(Offset, MessIDs),
+    NewOffset = Offset - length(ResultRows),
+    NewBeforeMessID = hd(PageMessIDs),
+    [{"Page " ++ integer_to_list(PageNum),
+     [?_assertEqual(TotalCount, ResultTotalCount),
+      ?_assertEqual(Offset, ResultOffset),
+      ?_assertEqual(PageMessIDs, ResultMessIDs)]}
+    | case NewOffset =< 0 of
+        true -> [];
+        false ->
+            {generator, fun() -> decremental_pagination_gen(
+                NewBeforeMessID, PageNum - 1, PageSize,
                 NewOffset, LeftMessIDs,  TotalCount)
              end}
       end].
@@ -1843,3 +1929,9 @@ sublist_r(Keys, N) ->
 
 is_single_page(PageSize, PageDigest) ->
     dig_total(PageDigest) =< PageSize.
+
+
+maybe_mess_id_to_external_binary(undefined) ->
+    undefined;
+maybe_mess_id_to_external_binary(MessID) ->
+    mod_mam_utils:mess_id_to_external_binary(MessID).
