@@ -1496,6 +1496,17 @@ long_case() ->
                     to_microseconds("2000-07-22", "06:50:05"),
                     undefined, 5, true, 5))},
 
+    {"Index 7 in the range (HourOffset is not empty). "
+     "This page is last and not full.",
+    assert_keys(10, 7,
+                [join_date_time("2000-07-22", Time)
+                 || Time <- ["06:49:45", "06:49:50", "06:50:05"]],
+                lookup_messages(alice(),
+                    #rsm_in{index = 7},
+                    to_microseconds("2000-07-22", "06:49:05"),
+                    to_microseconds("2000-07-22", "06:50:05"),
+                    undefined, 5, true, 5))},
+
     {"Last 5 from the range.",
     %% bounded
     assert_keys(6, 1,
