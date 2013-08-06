@@ -25,17 +25,8 @@
 message_bucket() ->
     <<"mam_m">>.
 
-message_count_bucket() ->
-    <<"mam_c">>.
-
 digest_bucket() ->
     <<"mam_d">>.
-
-message_count_by_bare_remote_jid_bucket() ->
-    <<"mam_cc">>.
-
-message_count_by_full_remote_jid_bucket() ->
-    <<"mam_ccc">>.
 
 user_id_bare_remote_jid_index() ->
     {binary_index, "b"}.
@@ -74,9 +65,7 @@ start(Host) ->
     application:start(riak_pool),
     F = fun(Conn) ->
             update_bucket(Conn, message_bucket(), lww_props()),
-            update_bucket(Conn, message_count_bucket(), [{allow_mult, true}]),
-            update_bucket(Conn, message_count_by_full_remote_jid_bucket(), [{allow_mult, true}]),
-            update_bucket(Conn, message_count_by_bare_remote_jid_bucket(), [{allow_mult, true}])
+            update_bucket(Conn, digest_bucket(), [{allow_mult, true}])
         end,
     with_connection(Host, F).
 
@@ -86,6 +75,7 @@ lww_props() ->
 
 archive_size(LServer, LUser) ->
     0.
+
 %% Row is `{<<"13663125233">>,<<"bob@localhost">>,<<"res1">>,<<binary>>}'.
 %% `#rsm_in{direction = before | aft, index=int(), id = binary()}'
 %% `#rsm_in.id' is not inclusive.
@@ -756,7 +746,7 @@ get_actual_digest(Conn, DigestKey, Now, SecIndex, MessIdxKeyMaker) ->
         {error, notfound} ->
             {error, notfound};
         {ok, DigestObj} ->
-            DigestObj2 = merge_siblings(DigestObj),
+            DigestObj2 = merge_siblings(Conn, SecIndex, MessIdxKeyMaker, DigestObj),
             Digest2 = binary_to_term(riakc_obj:get_value(DigestObj2)),
             Last = last_modified(DigestObj2),
             case hour(Last) =:= hour(Now) of
@@ -776,12 +766,14 @@ get_actual_digest(Conn, DigestKey, Now, SecIndex, MessIdxKeyMaker) ->
 has_siblings(Obj) ->
     length(riakc_obj:get_values(Obj)) > 1.
 
-merge_siblings(DigestObj) ->
+merge_siblings(Conn, SecIndex, MessIdxKeyMaker, DigestObj) ->
     case has_siblings(DigestObj) of
         true ->
             DigestObj2 = fix_metadata(DigestObj),
-            %% TODO: write me
-            riakc_obj:update_value(error(todo), DigestObj2);
+            Values = riakc_obj:get_values(DigestObj),
+            NewValue = dig_merge(
+                Conn, SecIndex, MessIdxKeyMaker, deserialize_values(Values)),
+            riakc_obj:update_value(NewValue, DigestObj2);
         false ->
             DigestObj
     end.
@@ -1128,6 +1120,34 @@ dig_add_keys(Keys, Digest) ->
     %% Sorted.
     Digest ++ dig_new(Keys).
 
+dig_merge(Conn, SecIndex, MessIdxKeyMaker, Digests) ->
+    SiblingCnt = length(Digests),
+    F1 = fun({Hour, Cnt}, Dict) -> dict:append(Hour, Cnt, Dict) end,
+    F2 = fun(Digest, Dict) -> lists:foldl(F1, Dict, Digest) end,
+    Hour2Cnts = dict:to_list(lists:foldl(F2, dict:new(), Digests)),
+    lists:merge([merge_digest(Conn, SecIndex, MessIdxKeyMaker,
+                              Hour, Cnts, SiblingCnt)
+                || {Hour, Cnts} <- Hour2Cnts]).
+
+merge_digest(Conn, SecIndex, MessIdxKeyMaker, Hour, Cnts, SiblingCnt) ->
+    case all_equal(Cnts) andalso length(Cnts) =:= SiblingCnt of
+        true -> [{Hour, hd(Cnts)}]; %% good value
+        false ->
+            %% collision
+            case get_hour_entry_count(Conn, SecIndex, MessIdxKeyMaker, Hour) of
+                0 -> [];
+                NewCnt -> [{Hour, NewCnt}]
+            end
+    end.
+
+all_equal([H|T]) ->
+    all_equal(H, T).
+
+all_equal(H, [H|T]) -> all_equal(H, T);
+all_equal(_, [_|_]) -> false;
+all_equal(_, []) -> true.
+
+
 %% Where `Hour' is located: before, inside or after the index digest.
 dig_position(Hour, Digest) ->
     FirstKnownHour = dig_first_hour(Digest),
@@ -1196,6 +1216,11 @@ get_entry_count_between(_, _, _, _) ->
 get_hour_entry_count_after(Conn, MessIdxKeyMaker, SecIndex, Start) ->
     LBound = MessIdxKeyMaker({lower, Start}),
     UBound = MessIdxKeyMaker({upper, hour_upper_bound(hour(Start))}),
+    get_entry_count_between(Conn, SecIndex, LBound, UBound).
+
+get_hour_entry_count(Conn, SecIndex, MessIdxKeyMaker, Hour) ->
+    LBound = MessIdxKeyMaker({lower, hour_lower_bound(Hour)}),
+    UBound = MessIdxKeyMaker({upper, hour_upper_bound(Hour)}),
     get_entry_count_between(Conn, SecIndex, LBound, UBound).
 
 get_key_range(Conn, SecIndex, LBound, UBound)
