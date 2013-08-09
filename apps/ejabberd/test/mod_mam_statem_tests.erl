@@ -249,8 +249,8 @@ pretty_print_lookup_messages(LocJID, RSM, Now, PageSize) ->
         "% ~p~nlookup_messages(~s, ~s, undefined, undefined, ~s, undefined, ~p, true, 256),~n",
         [microseconds_to_datetime(Now),
          pretty_print_jid(LocJID),
-         pretty_print_microseconds(Now),
          pretty_print_rsm(RSM),
+         pretty_print_microseconds(Now),
          PageSize]).
 
 pretty_print_jid(#jid{luser = <<"alice">>}) -> "alice()";

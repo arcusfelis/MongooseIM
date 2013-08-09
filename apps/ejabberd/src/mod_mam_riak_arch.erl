@@ -48,14 +48,14 @@ key_index() ->
 
 -define(MEASURE_TIME_TIMER, 1).
 -ifdef(MEASURE_TIME_TIMER).
--define(MEASURE_TIME(Tag, Operation), measure_time((Tag), (fun() -> (Operation) end))). 
+-define(MEASURE_TIME(Tag, Operation), measure_time((Tag), (fun() -> (Operation) end))).
 measure_time(Tag, F) ->
     {Microseconds, Out} = timer:tc(F),
     io:format("~p ~p~n", [Tag, Microseconds]),
     Out.
 -else.
 -ifdef(MEASURE_TIME_FOLSOM).
--define(MEASURE_TIME(Tag, Operation), measure_time((Tag), (fun() -> (Operation) end))). 
+-define(MEASURE_TIME(Tag, Operation), measure_time((Tag), (fun() -> (Operation) end))).
 measure_time(Tag, F) ->
     case folsom_metrics:metric_exists(Tag) of
         true ->
@@ -64,7 +64,7 @@ measure_time(Tag, F) ->
             F()
     end.
 -else.
--define(MEASURE_TIME(_, Operation), Operation). 
+-define(MEASURE_TIME(_, Operation), Operation).
 -endif. % MEASURE_TIME_FOLSOM
 -endif. % MEASURE_TIME_TIMER
 
@@ -216,7 +216,7 @@ lookup_messages(_UserJID=#jid{lserver=LocLServer, luser=LocLUser},
     MessIdxKeyMaker = mess_index_key_maker(BUserID, BWithJID),
     RSM1 = fix_rsm(BUserID, RSM),
     F = fun(Conn) ->
-        QueryAllF = fun() -> 
+        QueryAllF = fun() ->
             query_all(Conn, SecIndex, MessIdxKeyMaker, Start, End, PageSize, RSM1)
             end,
         check_result_and_return(Conn, MaxResultLimit, LimitPassed,
@@ -234,7 +234,6 @@ lookup_messages(_UserJID=#jid{lserver=LocLServer, luser=LocLUser},
                 create_non_empty_digest(Conn, DigestKey,
                     fetch_all_keys(Conn, SecIndex, MessIdxKeyMaker)),
                 Result;
-                
             {ok, Digest} ->
                 analyse_digest(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
                                Start, End, PageSize, RSM1, Digest)
@@ -265,7 +264,7 @@ check_and_return(
 
 %% If a query returns a number of stanzas greater than this limit and the
 %% client did not specify a limit using RSM then the server should return
-%% a policy-violation error to the client. 
+%% a policy-violation error to the client.
 is_policy_violation(TotalCount, Offset, MaxResultLimit, LimitPassed) ->
     TotalCount - Offset > MaxResultLimit andalso not LimitPassed.
 
@@ -283,10 +282,10 @@ analyse_digest(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
                 %% `Start' is after the digist.
                 %% Match only recent messages.
                 true -> QueryAllF();
-                false -> 
+                false ->
                     analyse_digest_index(
                         Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
-                        Offset, Start, End, PageSize, Digest) 
+                        Offset, Start, End, PageSize, Digest)
             end;
         %% Last page.
         #rsm_in{direction = before, id = undefined} ->
@@ -310,7 +309,7 @@ analyse_digest_index(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
     recent_only -> QueryAllF();
     whole_digest_and_recent ->
         DigestCnt = dig_total(Digest),
-        Strategy2 = 
+        Strategy2 =
         case {PageSize, Offset > DigestCnt, Offset + PageSize > DigestCnt} of
         %% Index is too high. Get recent keys.
         {0, _, _} -> count_only;
@@ -389,7 +388,7 @@ analyse_digest_index(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
         Keys = get_key_range(Conn, SecIndex, LBound, UBound),
         %% How many entries in `RSetDigest' before `Keys'.
         SkippedCnt = dig_total(dig_before_hour(LHour, RSetDigest)),
-        %% How many unwanted keys were extracted. 
+        %% How many unwanted keys were extracted.
         PageOffset = RSetOffset - SkippedCnt,
         MatchedKeys = save_sublist(Keys, PageOffset+1, PageSize),
         RecentCnt = case UBoundPos of
@@ -460,7 +459,7 @@ analyse_digest_index(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
         end,
         case Strategy2 of
         bounded_query_all -> QueryAllF();
-        bounded_count_only -> 
+        bounded_count_only ->
             AfterHourCnt = after_hour_cnt(
                 Conn, MessIdxKeyMaker, SecIndex, End, RSetDigest),
             StartHourOffset = start_hour_offset(
@@ -540,7 +539,6 @@ get_recent_entry_count(Conn, SecIndex, MessIdxKeyMaker, End, Digest) ->
     S1 = MessIdxKeyMaker({lower, hour_lower_bound(LastKnownHour+1)}),
     E1 = MessIdxKeyMaker({upper, End}),
     get_entry_count_between(Conn, SecIndex, S1, E1).
-    
 
 
 analyse_digest_before(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
@@ -790,7 +788,7 @@ after_hour_cnt(Conn, MessIdxKeyMaker, SecIndex, End, Digest) ->
 
 request_start_hour_count(Conn, MessIdxKeyMaker, SecIndex, Start, Digest) ->
     case dig_is_skipped(hour(Start), Digest) of
-    true -> 0; 
+    true -> 0;
     false -> get_hour_entry_count_after(
         Conn, MessIdxKeyMaker, SecIndex, Start)
     end.
@@ -832,7 +830,7 @@ analyse_digest_last_page(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
             Digest2 = dig_after_hour(hour(Start), Digest),
             case dig_total(Digest2) < PageSize of
             true -> QueryAllF(); %% It is a small range
-            false -> 
+            false ->
                 StartHourCnt = request_start_hour_count(
                     Conn, MessIdxKeyMaker, SecIndex, Start, Digest),
                 Keys = get_minimum_key_range_before(
@@ -847,7 +845,7 @@ analyse_digest_last_page(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
             Digest2 = dig_before_hour(hour(End), Digest),
             case dig_total(Digest2) < PageSize of
             true -> QueryAllF(); %% It is a small range
-            false -> 
+            false ->
                 Keys = get_minimum_key_range_before(
                     Conn, MessIdxKeyMaker, SecIndex, End, PageSize, Digest2),
                 LastHourCnt = filter_and_count_recent_keys(Keys, Digest2),
@@ -861,7 +859,7 @@ analyse_digest_last_page(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
                 dig_after_hour(hour(Start), Digest)),
             case dig_total(Digest2) < PageSize of
             true -> QueryAllF(); %% It is a small range
-            false -> 
+            false ->
                 StartHourCnt = request_start_hour_count(
                     Conn, MessIdxKeyMaker, SecIndex, Start, Digest),
                 Keys = get_minimum_key_range_before(
@@ -922,7 +920,7 @@ get_actual_digest(Conn, DigestKey, Now, SecIndex, MessIdxKeyMaker) ->
                     {ok, Digest2};
                 false ->
                     Digest3 = update_digest(Conn, Last, Now, Digest2, SecIndex, MessIdxKeyMaker),
-                    DigestObj3 = riakc_obj:update_value(term_to_binary(Digest3), DigestObj2),
+                    DigestObj3 = riakc_obj:update_value(DigestObj2, term_to_binary(Digest3)),
                     riakc_pb_socket:put(Conn, DigestObj3),
                     {ok, Digest3}
             end
@@ -938,7 +936,7 @@ merge_siblings(Conn, SecIndex, MessIdxKeyMaker, DigestObj) ->
             Values = riakc_obj:get_values(DigestObj),
             NewValue = dig_merge(
                 Conn, SecIndex, MessIdxKeyMaker, deserialize_values(Values)),
-            riakc_obj:update_value(NewValue, DigestObj2);
+            riakc_obj:update_value(DigestObj2, NewValue);
         false ->
             DigestObj
     end.
@@ -951,14 +949,14 @@ update_digest(Conn, Last, Now, Digest, SecIndex, MessIdxKeyMaker) ->
     {ok, ?INDEX_RESULTS{keys=Keys}} =
     riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
     dig_add_keys(Keys, Digest).
-    
+
 
 %% @doc Return mtime of the object in microseconds.
 last_modified(Obj) ->
     MD = riakc_obj:get_metadata(Obj),
     TimeStamp = proplists:get_value(<<"X-Riak-Last-Modified">>, MD),
     mod_mam_utils:now_to_microseconds(TimeStamp).
-    
+
 
 deserialize_values(Values) ->
     [binary_to_term(Value) || Value <- Values].
@@ -1103,7 +1101,7 @@ set_index(Obj, BUserIDFullRemJIDMessID, BUserIDBareRemJIDMessID) ->
 
 
 with_connection(_LocLServer, F) ->
-    ?MEASURE_TIME(with_connection, 
+    ?MEASURE_TIME(with_connection,
         riak_pool:with_connection(mam_cluster, F)).
 
 user_id_to_binary(UserID) ->
@@ -1301,7 +1299,7 @@ dig_is_recorded(Hour, Digest) ->
 
 dig_is_skipped(Hour, Digest) ->
     dig_calc_volume(hour(Hour), Digest) =:= 0.
-                
+
 
 dig_skip_n(N, [{_, Cnt}|T]) when N >= Cnt ->
     dig_skip_n(N - Cnt, T);
@@ -1401,7 +1399,7 @@ frequency([H|T]) ->
     frequency_1(T, H, 1);
 frequency([]) ->
     [].
-    
+
 frequency_1([H|T], H, N) ->
     frequency_1(T, H, N+1);
 frequency_1(T, H, N) ->
@@ -1455,7 +1453,7 @@ get_minimum_key_range_before(Conn, MessIdxKeyMaker, SecIndex, Before, PageSize, 
     LBound = MessIdxKeyMaker({lower, hour_lower_bound(MinHour)}),
     UBound = MessIdxKeyMaker({upper, Before}),
     get_key_range(Conn, SecIndex, LBound, UBound).
-    
+
 %% Expected start hour of the page
 page_minimum_hour(PageSize, Digest) ->
     %% Skip `PageSize' elements from the end.
@@ -1494,47 +1492,53 @@ fetch_all_keys(Conn, SecIndex, MessIdxKeyMaker) ->
 
 -ifdef(TEST).
 
-test_now() -> now().
+test_now() -> mod_mam_utils:now_to_microseconds(now()).
 
 meck_test_() ->
     {inorder,
-    [{"Without index digest.",
-      {setup, 
+    [{"Checking, that digest update will be triggered.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       {generator, fun digest_update_case/0}}},
+
+     {"Without index digest.",
+      {setup,
        fun() -> load_mock(10000), load_data() end,
        fun(_) -> unload_mock() end,
        {timeout, 60, {generator, fun long_case/0 }}}},
      {"With index digest.",
-      {setup, 
+      {setup,
        fun() -> load_mock(0), load_data() end,
        fun(_) -> unload_mock() end,
        {timeout, 60, {generator, fun long_case/0}}}},
      {"Without index digest.",
-      {setup, 
+      {setup,
        fun() -> load_mock(10000), load_data2() end,
        fun(_) -> unload_mock() end,
        {timeout, 60, {generator, fun short_case/0}}}},
      {"With index digest.",
-      {setup, 
+      {setup,
        fun() -> load_mock(0), load_data2() end,
        fun(_) -> unload_mock() end,
        {timeout, 60, {generator, fun short_case/0}}}},
      {"Without index digest.",
-      {setup, 
+      {setup,
        fun() -> load_mock(10000), load_data3() end,
        fun(_) -> unload_mock() end,
        {timeout, 60, {generator, fun incremental_pagination_case/0}}}},
      {"With index digest.",
-      {setup, 
+      {setup,
        fun() -> load_mock(0), load_data3() end,
        fun(_) -> unload_mock() end,
        {timeout, 60, {generator, fun incremental_pagination_case/0}}}},
      {"Without index digest.",
-      {setup, 
+      {setup,
        fun() -> load_mock(10000), load_data3() end,
        fun(_) -> unload_mock() end,
        {timeout, 60, {generator, fun decremental_pagination_case/0}}}},
      {"With index digest.",
-      {setup, 
+      {setup,
        fun() -> load_mock(0), load_data3() end,
        fun(_) -> unload_mock() end,
        {timeout, 60, {generator, fun decremental_pagination_case/0}}}}
@@ -1603,7 +1607,7 @@ load_mock(DigestThreshold) ->
     meck:expect(SM, set_bucket, fun(Conn, Bucket, Opts) ->
         ok
         end),
-    meck:expect(SM, put, fun(Conn, Obj) ->
+    meck:expect(SM, put, fun(Conn, Obj) when is_list(Obj) ->
         Key    = proplists:get_value(key, Obj),
         Bucket = proplists:get_value(bucket, Obj),
         Md     = proplists:get_value(metadata, Obj, []),
@@ -1784,7 +1788,7 @@ long_case() ->
     %% lookup_messages(UserJID, RSM, Start, End, Now, WithJID,
     %%                 PageSize, LimitPassed, MaxResultLimit) ->
     %% {ok, {TotalCount, Offset, MessageRows}}
-    
+
     [
     {"Trigger digest creation.",
     ?_assertKeys(34, 0, [],
@@ -1845,7 +1849,7 @@ long_case() ->
                 lookup_messages(alice(),
                     #rsm_in{direction = before}, undefined,
                     to_microseconds("2000-07-22", "06:50:29"),
-                    undefined, test_now(), 
+                    test_now(), undefined,
                     5, true, 5))},
 
     {"Index 3.",
@@ -1998,7 +2002,7 @@ load_data2() ->
         ?MODULE:archive_message(Log3Id(Time), incoming, alice(), mouse(), mouse(),
                                 Packet)
         end,
-    
+
     %% Credits to http://quotations.about.com/od/moretypes/a/alice4.htm
     % Alice and The Hatter from Alice in the Wonderland
     Log1 = fun(A, H) ->
@@ -2329,7 +2333,19 @@ decremental_pagination_gen(
                 NewOffset, LeftMessIDs,  TotalCount)
              end}
       end].
-    
+
+
+digest_update_case() ->
+    % {{2013,8,4},{13,29,38}}
+    archive_message(352159482415239681, outgoing, alice(), cat(), alice(), packet()),
+    % {{2013,8,4},{14,34,58}}
+    lookup_messages(alice(), none, undefined, undefined, 1375626898543018, undefined, 10, true, 10),
+    % {{2013,8,4},{15,23,2}}
+    ?_assertKeys(1, 0, ["2013-08-04T13:29:38"],
+        lookup_messages(alice(), none, undefined, undefined, 1375629782832922, undefined, 10, true, 10)).
+
+
+
 
 %% `lists:split/3' that does allow small lists.
 %% `lists:split/2' is already save.
@@ -2345,7 +2361,7 @@ to_microseconds(Date, Time) ->
     %% Reuse the library function.
     assert_defined(mod_mam_utils:maybe_microseconds(
         list_to_binary(join_date_time_z(Date, Time)))).
-    
+
 assert_defined(X) when X =/= undefined -> X.
 
 assert_keys(ExpectedTotalCount, ExpectedOffset, DateTimes,
@@ -2434,7 +2450,7 @@ id(Date) ->
 
 date_to_hour(Date, Time) ->
     date_to_hour(list_to_binary(join_date_time_z(Date, Time))).
-    
+
 date_to_hour(DateTime) when is_binary(DateTime) ->
     Microseconds = mod_mam_utils:maybe_microseconds(DateTime),
     hour(Microseconds).
@@ -2451,7 +2467,6 @@ dig_before_hour_test_() ->
 
 dig_position_test_() ->
     Digest = [{3, 25}, {6, 15}],
-    
     [?_assertEqual(before, dig_position(2, Digest)),
      ?_assertEqual(inside, dig_position(3, Digest)),
      ?_assertEqual(inside, dig_position(5, Digest)),
@@ -2483,7 +2498,7 @@ is_short_range(Now, Start, End) ->
     end.
 
 calc_range(_,   undefined, _)     -> undefined;
-calc_range(Now, Start, undefined) -> Now - Start; 
+calc_range(Now, Start, undefined) -> Now - Start;
 calc_range(_,   Start, End)       -> End - Start.
 
 %% Returns N elements from behind.
