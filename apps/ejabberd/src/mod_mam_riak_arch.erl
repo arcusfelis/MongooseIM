@@ -944,7 +944,7 @@ merge_siblings(Conn, SecIndex, MessIdxKeyMaker, DigestObj) ->
 %% @doc Request new entries from the server.
 %% `Last' and `Now' are microseconds.
 update_digest(Conn, Last, Now, Digest, SecIndex, MessIdxKeyMaker) ->
-    LBound = MessIdxKeyMaker({lower, hour_upper_bound(hour(Last))}),
+    LBound = MessIdxKeyMaker({lower, hour_lower_bound(hour(Last))}),
     UBound = MessIdxKeyMaker({upper, hour_upper_bound(hour(Now) - 1)}),
     {ok, ?INDEX_RESULTS{keys=Keys}} =
     riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
@@ -1493,6 +1493,11 @@ fetch_all_keys(Conn, SecIndex, MessIdxKeyMaker) ->
 -ifdef(TEST).
 
 test_now() -> mod_mam_utils:now_to_microseconds(now()).
+get_now() -> case get(mocked_now) of undefined -> now(); X -> X end.
+set_now(Microseconds) when is_integer(Microseconds) ->
+    put(mocked_now, mod_mam_utils:microseconds_to_now(Microseconds)).
+reset_now() ->
+    erase(mocked_now).
 
 meck_test_() ->
     {inorder,
@@ -1611,8 +1616,11 @@ load_mock(DigestThreshold) ->
         Key    = proplists:get_value(key, Obj),
         Bucket = proplists:get_value(bucket, Obj),
         Md     = proplists:get_value(metadata, Obj, []),
+        Md1    = proplists:delete(<<"X-Riak-Last-Modified">>, Md),
+        Md2    = [{<<"X-Riak-Last-Modified">>, get_now()}|Md1],
         Is     = proplists:get_value(secondary_index, Md, []),
-        ets:insert(Tab, {{Bucket, Key}, Obj}),
+        Obj1   = [{metadata, Md2}|proplists:delete(metadata, Obj)],
+        ets:insert(Tab, {{Bucket, Key}, Obj1}),
         ets:insert(IdxTab, [{{IdxName, Bucket, SecKey}, {Bucket, Key}}
                             || {IdxName, SecKeys} <- Is, SecKey <- SecKeys]),
         ok
@@ -1626,7 +1634,7 @@ load_mock(DigestThreshold) ->
     OM = riakc_obj,
     meck:new(OM),
     meck:expect(OM, new, fun(Bucket, Key, Value) ->
-        Md = [{<<"X-Riak-Last-Modified">>, now()}],
+        Md = [],
         [{bucket, Bucket}, {key, Key}, {value, Value}, {metadata, Md}]
         end),
     meck:expect(OM, get_metadata, fun(Obj) ->
@@ -1664,6 +1672,7 @@ load_mock(DigestThreshold) ->
     ok.
 
 unload_mock() ->
+    reset_now(),
     catch ets:delete(riak_store),
     catch ets:delete(riak_index),
     meck:unload(gen_mod),
@@ -1674,6 +1683,7 @@ unload_mock() ->
     ok.
 
 reset_mock() ->
+    reset_now(),
     ets:match_delete(riak_store, '_'),
     ets:match_delete(riak_index, '_'),
     ok.
@@ -2336,13 +2346,32 @@ decremental_pagination_gen(
 
 
 digest_update_case() ->
-    % {{2013,8,4},{13,29,38}}
-    archive_message(352159482415239681, outgoing, alice(), cat(), alice(), packet()),
-    % {{2013,8,4},{14,34,58}}
-    lookup_messages(alice(), none, undefined, undefined, 1375626898543018, undefined, 10, true, 10),
-    % {{2013,8,4},{15,23,2}}
-    ?_assertKeys(1, 0, ["2013-08-04T13:29:38"],
-        lookup_messages(alice(), none, undefined, undefined, 1375629782832922, undefined, 10, true, 10)).
+    %% EUnit calls any generator twice.
+    %% This generator saves new messages, that is why
+    %% the generator will produce different results after each call.
+    reset_mock(),
+    Id = fun(Date) -> id(list_to_binary(Date)) end,
+    %% 13:30
+    set_now(to_microseconds("2000-01-01", "14:30:00")),
+    archive_message(Id("2000-01-01T13:30:00Z"),
+        outgoing, alice(), cat(), alice(), packet()),
+    %% 13:40
+    set_now(to_microseconds("2000-01-01", "14:40:00")),
+    Generators1 =
+    assert_keys(1, 0, ["2000-01-01T13:30:00"],
+        lookup_messages(alice(), none, undefined, undefined,
+            to_microseconds("2000-01-01", "14:40:00"), undefined, 10, true, 10)),
+    %% 13:50
+    set_now(to_microseconds("2000-01-01", "14:50:00")),
+    archive_message(Id("2000-01-01T13:50:00Z"),
+        outgoing, alice(), cat(), alice(), packet()),
+    %% 14:30
+    set_now(to_microseconds("2000-01-01", "14:50:00")),
+    Generators2 =
+    assert_keys(2, 0, ["2000-01-01T13:30:00", "2000-01-01T13:50:00"],
+        lookup_messages(alice(), none, undefined, undefined,
+            to_microseconds("2000-01-01", "14:30:00"), undefined, 10, true, 10)),
+    Generators1 ++ Generators2.
 
 
 
@@ -2444,7 +2473,7 @@ message(Text) when is_binary(Text) ->
             }]
     }.
 
-id(Date) ->
+id(Date) when is_binary(Date) ->
     Microseconds = mod_mam_utils:maybe_microseconds(Date),
     encode_compact_uuid(Microseconds, 1).
 
