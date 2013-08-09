@@ -13,7 +13,8 @@
          precondition/2, postcondition/3, next_state/3]).
 
 -record(state, {
-    prev_mess_id,
+    next_mess_id,
+    next_now, % microseconds
     messages,
     mess_ids
 }).
@@ -56,22 +57,22 @@ maybe_user_jid() ->
 jid_pair() ->
     ?SUCHTHAT({JID1, JID2}, {user_jid(), user_jid()}, JID1 =/= JID2).
 
-init_mess_id() ->
-    352159376404720897.
 
-mess_id(#state{prev_mess_id=MessID}) ->
-    next_mess_id(MessID).
+init_now() ->
+    137670079723301.
 
-next_mess_id(PrevMessId) ->
-    %% 256 000 000 is one second.
-    PrevMessId + 256 * random_microsecond_delay().
+microseconds_to_mess_id(Microseconds) when is_integer(Microseconds) ->
+    Microseconds * 256.
 
-now_microseconds(#state{prev_mess_id=PrevMessId}) when is_integer(PrevMessId) ->
-    next_mess_id(PrevMessId) div 256.
+next_now(S=#state{next_now=PrevNow}) ->
+    set_next_now(PrevNow + random_microsecond_delay(), S).
 
-microseconds_to_mess_id(Microseconds, PrevMessId)
-    when is_integer(Microseconds), is_integer(PrevMessId) ->
-    Microseconds * 256 + PrevMessId rem 256.
+%% @doc This function is called each time, when new time is needed.
+set_next_now(NextNow, S=#state{}) when is_integer(NextNow) ->
+    ?M:set_now(NextNow),
+    S#state{
+        next_now=NextNow,
+        next_mess_id=microseconds_to_mess_id(NextNow)}.
 
 random_microsecond_delay() ->
     %% One hour is the maximim delay.
@@ -89,32 +90,29 @@ rsm() ->
 %% ------------------------------------------------------------------
 
 initial_state() -> 
-    #state{
-        prev_mess_id=init_mess_id(),
+    set_next_now(init_now(), #state{
         mess_ids=[],
-        messages=dict:new()}.
+        messages=dict:new()}).
 
 command(S) ->
     oneof([
      ?LET({LocJID, RemJID}, jid_pair(),
           {call, ?M, archive_message,
-           [mess_id(S), incoming, LocJID, RemJID, RemJID, packet()]}),
+           [S#state.next_mess_id, incoming, LocJID, RemJID, RemJID, packet()]}),
      ?LET({LocJID, RemJID}, jid_pair(),
           {call, ?M, archive_message,
-           [mess_id(S), outgoing, LocJID, RemJID, LocJID, packet()]}),
+           [S#state.next_mess_id, outgoing, LocJID, RemJID, LocJID, packet()]}),
     {call, ?M, lookup_messages,
-     [user_jid(), rsm(), undefined, undefined, now_microseconds(S),
+     [user_jid(), rsm(), undefined, undefined, S#state.next_now,
       maybe_user_jid(), page_size(), true, 256]}
     ]).
 
 next_state(S, _V, {call, ?M, archive_message, [MessID, _, LocJID, RemJID, _, _]}) ->
-    S#state{
-        prev_mess_id=MessID,
+    next_now(S#state{
         messages=save_message(MessID, LocJID, RemJID, S#state.messages),
-        mess_ids=[MessID|S#state.mess_ids]};
-next_state(S, _V, {call, ?M, lookup_messages, [_, _, _, _, Now, _, _, _, _]}) ->
-    S#state{
-        prev_mess_id=microseconds_to_mess_id(Now, S#state.prev_mess_id)};
+        mess_ids=[MessID|S#state.mess_ids]});
+next_state(S, _V, {call, ?M, lookup_messages, [_, _, _, _, _, _, _, _, _]}) ->
+    next_now(S#state{});
 next_state(S, _V, _) ->
     S.
 

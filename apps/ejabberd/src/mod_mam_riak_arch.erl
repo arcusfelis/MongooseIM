@@ -15,7 +15,8 @@
 -ifdef(TEST).
 -export([load_mock/1,
          unload_mock/0,
-         reset_mock/0]).
+         reset_mock/0,
+         set_now/1]).
 
 %% Lazy calculation
 -define(_assertKeys(TotalCount, Offset, Keys, Result),
@@ -919,7 +920,7 @@ get_actual_digest(Conn, DigestKey, Now, SecIndex, MessIdxKeyMaker) ->
                     has_siblings(DigestObj) andalso riakc_pb_socket:put(Conn, DigestObj2),
                     {ok, Digest2};
                 false ->
-                    Digest3 = update_digest(Conn, Last, Now, Digest2, SecIndex, MessIdxKeyMaker),
+                    Digest3 = update_digest(Conn, Now, Digest2, SecIndex, MessIdxKeyMaker),
                     DigestObj3 = riakc_obj:update_value(DigestObj2, term_to_binary(Digest3)),
                     riakc_pb_socket:put(Conn, DigestObj3),
                     {ok, Digest3}
@@ -942,10 +943,12 @@ merge_siblings(Conn, SecIndex, MessIdxKeyMaker, DigestObj) ->
     end.
 
 %% @doc Request new entries from the server.
-%% `Last' and `Now' are microseconds.
-update_digest(Conn, Last, Now, Digest, SecIndex, MessIdxKeyMaker) ->
-    LBound = MessIdxKeyMaker({lower, hour_lower_bound(hour(Last))}),
-    UBound = MessIdxKeyMaker({upper, hour_upper_bound(hour(Now) - 1)}),
+%% `Now' are microseconds.
+update_digest(Conn, Now, Digest, SecIndex, MessIdxKeyMaker) ->
+    LHour = dig_last_hour(Digest) + 1,
+    UHour = hour(Now) - 1,
+    LBound = MessIdxKeyMaker({lower, hour_lower_bound(LHour)}),
+    UBound = MessIdxKeyMaker({upper, hour_upper_bound(UHour)}),
     {ok, ?INDEX_RESULTS{keys=Keys}} =
     riakc_pb_socket:get_index_range(Conn, message_bucket(), SecIndex, LBound, UBound),
     dig_add_keys(Keys, Digest).
@@ -1493,11 +1496,20 @@ fetch_all_keys(Conn, SecIndex, MessIdxKeyMaker) ->
 -ifdef(TEST).
 
 test_now() -> mod_mam_utils:now_to_microseconds(now()).
-get_now() -> case get(mocked_now) of undefined -> now(); X -> X end.
+
+
+%% Virtual timer
+get_now() ->
+    case ets:lookup(test_vars, mocked_now) of
+        [] -> now();
+        [{_, V}] -> V
+    end.
 set_now(Microseconds) when is_integer(Microseconds) ->
-    put(mocked_now, mod_mam_utils:microseconds_to_now(Microseconds)).
+    ets:insert(test_vars,
+               {mocked_now, mod_mam_utils:microseconds_to_now(Microseconds)}).
 reset_now() ->
-    erase(mocked_now).
+    ets:delete(test_vars, mocked_now).
+
 
 meck_test_() ->
     {inorder,
@@ -1566,6 +1578,7 @@ load_mock(DigestThreshold) ->
     SM = riakc_pb_socket, %% webscale is here!
     Tab = ets:new(riak_store, [public, ordered_set, named_table]),
     IdxTab = ets:new(riak_index, [public, ordered_set, named_table]),
+    ets:new(test_vars, [public, ordered_set, named_table]),
     meck:new(SM),
     meck:expect(SM, get_index_range, fun
         (Conn, Bucket, <<"$key">>, LBound, UBound) ->
@@ -1673,6 +1686,7 @@ load_mock(DigestThreshold) ->
 
 unload_mock() ->
     reset_now(),
+    catch ets:delete(test_vars),
     catch ets:delete(riak_store),
     catch ets:delete(riak_index),
     meck:unload(gen_mod),
@@ -1684,6 +1698,7 @@ unload_mock() ->
 
 reset_mock() ->
     reset_now(),
+    ets:match_delete(test_vars, '_'),
     ets:match_delete(riak_store, '_'),
     ets:match_delete(riak_index, '_'),
     ok.
