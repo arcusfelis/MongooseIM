@@ -1,6 +1,6 @@
 -module(mod_mam_odbc_arch).
 -export([archive_size/2,
-         lookup_messages/8,
+         lookup_messages/9,
          remove_user_from_db/2]).
 
 %% UID
@@ -30,7 +30,7 @@ archive_size(LServer, LUser) ->
     list_to_integer(binary_to_list(BSize)).
 
 
--spec lookup_messages(UserJID, RSM, Start, End, WithJID, PageSize,
+-spec lookup_messages(UserJID, RSM, Start, End, Now, WithJID, PageSize,
                       LimitPassed, MaxResultLimit) ->
     {ok, {TotalCount, Offset, MessageRows}} | {error, 'policy-violation'}
 			     when
@@ -38,6 +38,7 @@ archive_size(LServer, LUser) ->
     RSM     :: #rsm_in{} | none,
     Start   :: unix_timestamp() | undefined,
     End     :: unix_timestamp() | undefined,
+    Now     :: unix_timestamp(),
     PageSize :: non_neg_integer(),
     WithJID :: #jid{} | undefined,
     LimitPassed :: boolean(),
@@ -46,7 +47,7 @@ archive_size(LServer, LUser) ->
     Offset  :: non_neg_integer(),
     MessageRows :: list(tuple()).
 lookup_messages(UserJID=#jid{lserver=LServer},
-                RSM, Start, End, WithJID,
+                RSM, Start, End, _Now, WithJID,
                 PageSize, LimitPassed, MaxResultLimit) ->
     Filter = prepare_filter(UserJID, Start, End, WithJID),
     TotalCount = calc_count(LServer, Filter),

@@ -194,6 +194,7 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
 
     wait_flushing(LServer),
 
+    Now   = mod_mam_utils:now_to_microseconds(now()),
     %% Filtering by date.
     %% Start :: integer() | undefined
     Start = maybe_microseconds(xml:get_path_s(QueryEl, [{elem, <<"start">>}, cdata])),
@@ -210,7 +211,7 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
     PageSize = min(max_result_limit(),
                    maybe_integer(Limit, default_result_limit())),
     LimitPassed = Limit =/= <<>>,
-    case lookup_messages(From, RSM, Start, End, With, PageSize,
+    case lookup_messages(From, RSM, Start, End, Now, With, PageSize,
                          LimitPassed, max_result_limit()) of
     {error, 'policy-violation'} ->
         ?DEBUG("Policy violation by ~p.", [LUser]),
@@ -379,7 +380,7 @@ message_row_to_ext_id({MessID,_,_}) ->
     mess_id_to_external_binary(MessID).
 
 
--spec lookup_messages(UserJID, RSM, Start, End, WithJID, PageSize,
+-spec lookup_messages(UserJID, RSM, Start, End, Now, WithJID, PageSize,
                       LimitPassed, MaxResultLimit) ->
     {ok, {TotalCount, Offset, MessageRows}} | {error, 'policy-violation'}
     when
@@ -387,6 +388,7 @@ message_row_to_ext_id({MessID,_,_}) ->
     RSM     :: #rsm_in{} | none,
     Start   :: unix_timestamp() | undefined,
     End     :: unix_timestamp() | undefined,
+    Now     :: unix_timestamp(),
     WithJID :: #jid{} | undefined,
     PageSize :: non_neg_integer(),
     LimitPassed :: boolean(),
@@ -394,10 +396,10 @@ message_row_to_ext_id({MessID,_,_}) ->
     TotalCount :: non_neg_integer(),
     Offset  :: non_neg_integer(),
     MessageRows :: list(tuple()).
-lookup_messages(UserJID=#jid{lserver=LServer}, RSM, Start, End,
+lookup_messages(UserJID=#jid{lserver=LServer}, RSM, Start, End, Now,
                 WithJID, PageSize, LimitPassed, MaxResultLimit) ->
     AM = archive_module(LServer),
-    AM:lookup_messages(UserJID, RSM, Start, End, WithJID, PageSize,
+    AM:lookup_messages(UserJID, RSM, Start, End, Now, WithJID, PageSize,
                        LimitPassed, MaxResultLimit).
 
 archive_message(Id, Dir,
