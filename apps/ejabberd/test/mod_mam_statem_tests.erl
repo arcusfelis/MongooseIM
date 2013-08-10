@@ -78,9 +78,9 @@ random_microsecond_delay() ->
     %% One hour is the maximim delay.
     random:uniform(3600000000).
 
-page_size() -> byte().
+page_size() -> integer(0, 10).
 
-offset() -> byte().
+offset() -> integer(0, 30).
 
 rsm() ->
     oneof([none, #rsm_in{index=offset()}]).
@@ -206,7 +206,7 @@ run_property_testing_test_() ->
          fun() ->
             EunitLeader = erlang:group_leader(),
             erlang:group_leader(whereis(user), self()),
-            Res = proper:module(?MODULE, [{constraint_tries, 500}, long_result]),
+            Res = proper:module(?MODULE, [{constraint_tries, 3000}, long_result]),
             erlang:group_leader(EunitLeader, self()),
             analyse_result(Res),
             ?assertEqual([], Res)

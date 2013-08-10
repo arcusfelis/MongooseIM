@@ -311,7 +311,8 @@ analyse_digest_index(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
     whole_digest_and_recent ->
         DigestCnt = dig_total(Digest),
         Strategy2 =
-        case {PageSize, Offset > DigestCnt, Offset + PageSize > DigestCnt} of
+        %% When Offset == DigestCnt, PageDigest is empty.
+        case {PageSize, Offset >= DigestCnt, Offset + PageSize >= DigestCnt} of
         %% Index is too high. Get recent keys.
         {0, _, _} -> count_only;
         {_, true, _} -> nothing_from_digest;
@@ -1504,9 +1505,11 @@ get_now() ->
         [] -> now();
         [{_, V}] -> V
     end.
+
 set_now(Microseconds) when is_integer(Microseconds) ->
     ets:insert(test_vars,
                {mocked_now, mod_mam_utils:microseconds_to_now(Microseconds)}).
+
 reset_now() ->
     ets:delete(test_vars, mocked_now).
 
@@ -2099,6 +2102,14 @@ short_case() ->
                     undefined, undefined, test_now(), undefined,
                     5, true, 5))},
 
+    {"Index = TotalCount.",
+    %% nothing_from_digest
+    ?_assertKeys(9, 9, [],
+                lookup_messages(alice(),
+                    #rsm_in{index = 9},
+                    undefined, undefined, test_now(), undefined,
+                    5, true, 5))},
+
     {"Offset > TotalCount.",
     %% nothing_from_digest
     ?_assertKeys(9, 100, [],
@@ -2387,8 +2398,6 @@ digest_update_case() ->
         lookup_messages(alice(), none, undefined, undefined,
             to_microseconds("2000-01-01", "14:30:00"), undefined, 10, true, 10)),
     Generators1 ++ Generators2.
-
-
 
 
 %% `lists:split/3' that does allow small lists.
