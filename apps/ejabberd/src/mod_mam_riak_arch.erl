@@ -364,7 +364,8 @@ analyse_digest_index(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
             %% page and starting messages of the requsted page.
             %% `FirstHourOffset' is how many entries to skip in `PageDigest'.
             {FirstHourOffset, PageDigest} = dig_skip_n(Offset, Digest),
-            {LastHourOffset, LeftDigest} = dig_skip_n(PageSize, PageDigest),
+            {LastHourOffset, LeftDigest} = dig_skip_n(
+                FirstHourOffset + PageSize, PageDigest),
             %% Calc minimum and maximum hours of the page
             LHour = dig_first_hour(PageDigest),
             UHour = case LastHourOffset of
@@ -1547,6 +1548,13 @@ meck_test_() ->
        fun(_) -> unload_mock() end,
        {generator, fun index_pagination_case/0}}},
 
+     {"Paginate by index. All entries are in digest. "
+      "PageDigest begins in the middle of an hour.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       {generator, fun only_from_digest_non_empty_hour_offset_case/0}}},
+
      {"From proper.",
       {setup,
        fun() -> load_mock(0) end,
@@ -2470,8 +2478,45 @@ index_pagination_case() ->
         lookup_messages(alice(), #rsm_in{index=1}, undefined, undefined,
             get_now(), undefined, 5, true, 5)).
 
-proper_case() ->
+only_from_digest_non_empty_hour_offset_case() ->
+    %% only_from_digest
+    %% FirstHourOffset is not zero.
     reset_mock(),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,0,0}})),
+    archive_message(id(), outgoing, cat(), alice(), cat(), packet()),   % 0
+    set_now(datetime_to_microseconds({{2000,1,1},{0,50,26}})),
+    archive_message(id(), incoming, cat(), alice(), alice(), packet()), % 1
+    set_now(datetime_to_microseconds({{2000,1,1},{1,41,1}})),
+    archive_message(id(), outgoing, cat(), alice(), cat(), packet()),   % 2
+    set_now(datetime_to_microseconds({{2000,1,1},{3,5,26}})),
+    archive_message(id(), outgoing, cat(), alice(), cat(), packet()),   % 3
+    set_now(datetime_to_microseconds({{2000,1,1},{4,21,20}})),
+    lookup_messages(cat(), none, undefined, undefined,
+        get_now(), undefined, 6, true, 256),
+    set_now(datetime_to_microseconds({{2000,1,1},{5,18,1}})),
+    archive_message(id(), incoming, cat(), alice(), alice(), packet()), % 4
+    set_now(datetime_to_microseconds({{2000,1,1},{6,4,39}})),
+    archive_message(id(), outgoing, cat(), alice(), cat(), packet()),   % 5
+
+    set_now(datetime_to_microseconds({{2000,1,1},{6,55,40}})),
+    archive_message(id(), outgoing, cat(), alice(), cat(), packet()),   % 6
+    set_now(datetime_to_microseconds({{2000,1,1},{8,20,55}})),
+    archive_message(id(), outgoing, cat(), alice(), cat(), packet()),   % 7
+    set_now(datetime_to_microseconds({{2000,1,1},{15,47,1}})),
+    archive_message(id(), outgoing, cat(), alice(), cat(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{18,29,24}})),
+    archive_message(id(), outgoing, cat(), alice(), cat(), packet()),
+
+    set_now(datetime_to_microseconds({{2000,1,1},{18,47,56}})),
+    archive_message(id(), incoming, cat(), alice(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{19,13,5}})),
+    assert_keys(11, 6,
+        ["2000-01-01T06:55:40", "2000-01-01T08:20:55",
+         "2000-01-01T15:47:01", "2000-01-01T18:29:24"],
+        lookup_messages(cat(), #rsm_in{index=6}, undefined, undefined,
+            get_now(), undefined, 4, true, 256)).
+
+proper_case() ->
     [].
 
 %% `lists:split/3' that does allow small lists.
