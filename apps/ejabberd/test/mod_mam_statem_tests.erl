@@ -12,6 +12,10 @@
 -export([initial_state/0, command/1,
          precondition/2, postcondition/3, next_state/3]).
 
+-import(mod_mam_utils, [
+    microseconds_to_datetime/1
+]).
+
 -record(state, {
     next_mess_id,
     next_now, % microseconds
@@ -59,7 +63,8 @@ jid_pair() ->
 
 
 init_now() ->
-    137670079723301.
+%   mod_mam_utils:datetime_to_microseconds({{2000,1,1}, {0,0,0}}).
+    946684800000000.
 
 microseconds_to_mess_id(Microseconds) when is_integer(Microseconds) ->
     Microseconds * 256.
@@ -235,20 +240,24 @@ pretty_print_result([]) ->
     [].
 
 pretty_print_archive_message(MessID, Dir, LocJID, RemJID, SrcJID) ->
+    {Now, _} = mod_mam_utils:decode_compact_uuid(MessID),
+    DateTime = microseconds_to_datetime(Now),
     io_lib:format(
-        "% ~p~narchive_message(~p, ~p, ~s, ~s, ~s, packet()),~n",
-        [mess_id_to_datetime(MessID), MessID, Dir,
+        "set_now(datetime_to_microseconds(~p)),~n"
+        "archive_message(id(), ~p, ~s, ~s, ~s, packet()),~n",
+        [DateTime, Dir,
          pretty_print_jid(LocJID),
          pretty_print_jid(RemJID),
          pretty_print_jid(SrcJID)]).
 
 pretty_print_lookup_messages(LocJID, RSM, Now, PageSize) ->
+    DateTime = microseconds_to_datetime(Now),
     io_lib:format(
-        "% ~p~nlookup_messages(~s, ~s, undefined, undefined, ~s, undefined, ~p, true, 256),~n",
-        [microseconds_to_datetime(Now),
+        "set_now(datetime_to_microseconds(~p)),~n"
+        "lookup_messages(~s, ~s, undefined, undefined, get_now(), undefined, ~p, true, 256),~n",
+        [DateTime,
          pretty_print_jid(LocJID),
          pretty_print_rsm(RSM),
-         pretty_print_microseconds(Now),
          PageSize]).
 
 pretty_print_jid(#jid{luser = <<"alice">>}) -> "alice()";
@@ -260,13 +269,6 @@ pretty_print_rsm(_) -> "none".
 
 pretty_print_microseconds(Microseconds) ->
     io_lib:format("~p", [Microseconds]).
-
-mess_id_to_datetime(MessID) ->
-    {Microseconds, _} = mod_mam_utils:decode_compact_uuid(MessID),
-    calendar:now_to_datetime(mod_mam_utils:microseconds_to_now(Microseconds)).
-
-microseconds_to_datetime(Microseconds) ->
-    calendar:now_to_datetime(mod_mam_utils:microseconds_to_now(Microseconds)).
 
 -endif.
 -endif.

@@ -2,7 +2,9 @@
 %% Time
 -export([maybe_microseconds/1,
          now_to_microseconds/1,
-         microseconds_to_now/1]).
+         microseconds_to_now/1,
+         datetime_to_microseconds/1,
+         microseconds_to_datetime/1]).
 
 %% UID
 -export([generate_message_id/0,
@@ -84,6 +86,15 @@ microseconds_to_now(MicroSeconds) when is_integer(MicroSeconds) ->
     erlang:timestamp().
 iso8601_datetime_binary_to_timestamp(DateTime) when is_binary(DateTime) ->
     jlib:datetime_string_to_timestamp(binary_to_list(DateTime)).
+
+datetime_to_microseconds({{_,_,_}, {_,_,_}} = DateTime) ->
+    S1 = calendar:datetime_to_gregorian_seconds(DateTime),
+    S0 = calendar:datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}}),
+    Seconds = S1 - S0,
+    Seconds * 1000000.
+
+microseconds_to_datetime(MicroSeconds) when is_integer(MicroSeconds) ->
+    calendar:now_to_datetime(mod_mam_utils:microseconds_to_now(MicroSeconds)).
 
 %% -----------------------------------------------------------------------
 %% UID

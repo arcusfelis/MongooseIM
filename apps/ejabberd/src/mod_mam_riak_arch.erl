@@ -10,6 +10,10 @@
 -import(mod_mam_utils,
         [encode_compact_uuid/2]).
 
+%% Time
+-import(mod_mam_utils,
+        [datetime_to_microseconds/1]).
+
 -type message_row() :: tuple().
 
 -ifdef(TEST).
@@ -137,6 +141,14 @@ paginate_test_() ->
       ?_assertEqual({3, [4,5,6]},
                     paginate([1,2,3, 4,5,6, 7,8,9, 10,12,13],
                              #rsm_in{index = 3}, 3))},
+     {"Index 0, TotalCount 2, PageSize 5.",
+      ?_assertEqual({0, [1,2]},
+                    paginate([1,2],
+                             #rsm_in{index = 0}, 5))},
+     {"Index 1, TotalCount 2, PageSize 5.",
+      ?_assertEqual({1, [2]},
+                    paginate([1,2],
+                             #rsm_in{index = 1}, 5))},
      {"Last Page",
       ?_assertEqual({6, [7,8,9]},
                     paginate([1,2,3, 4,5,6, 7,8,9],
@@ -334,14 +346,6 @@ analyse_digest_index(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
             Keys = get_key_range(Conn, SecIndex, LBound, UBound),
             MatchedKeys = save_sublist(Keys, LeftOffset+1, PageSize),
             TotalCount = DigestCnt + length(Keys),
-            ?debugVal(TotalCount),
-            ?debugVal(DigestCnt),
-            ?debugVal(Keys),
-            ?debugVal(Digest),
-            ?debugVal(LHour),
-            ?debugVal(hour(mod_mam_utils:now_to_microseconds(get_now()))),
-            ?debugVal(get_now()),
-            
             return_matched_keys(TotalCount, Offset, MatchedKeys);
         part_from_digest ->
             %% Head of  `PageDigest' contains last entries of the previous
@@ -1512,15 +1516,12 @@ test_now() -> mod_mam_utils:now_to_microseconds(now()) + 7200 * 1000000.
 %% Virtual timer
 get_now() ->
     case ets:lookup(test_vars, mocked_now) of
-        [] -> now();
+        [] -> mod_mam_utils:now_to_microseconds(now());
         [{_, V}] -> V
     end.
 
 set_now(Microseconds) when is_integer(Microseconds) ->
-    ?debugVal(Microseconds),
-    ?debugVal(mod_mam_utils:microseconds_to_now(Microseconds)),
-    ets:insert(test_vars,
-               {mocked_now, mod_mam_utils:microseconds_to_now(Microseconds)}).
+    ets:insert(test_vars, {mocked_now, Microseconds}).
 
 reset_now() ->
     ets:delete(test_vars, mocked_now).
@@ -1539,6 +1540,12 @@ meck_test_() ->
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
        {generator, fun index_nothing_from_digest_case/0}}},
+
+     {"Paginate by index without digest (it is not yet generated).",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       {generator, fun index_pagination_case/0}}},
 
      {"From proper.",
       {setup,
@@ -1657,7 +1664,8 @@ load_mock(DigestThreshold) ->
         Bucket = proplists:get_value(bucket, Obj),
         Md     = proplists:get_value(metadata, Obj, []),
         Md1    = proplists:delete(<<"X-Riak-Last-Modified">>, Md),
-        Md2    = [{<<"X-Riak-Last-Modified">>, get_now()}|Md1],
+        Now    = mod_mam_utils:microseconds_to_now(get_now()),
+        Md2    = [{<<"X-Riak-Last-Modified">>, Now}|Md1],
         Is     = proplists:get_value(secondary_index, Md, []),
         Obj1   = [{metadata, Md2}|proplists:delete(metadata, Obj)],
         ets:insert(Tab, {{Bucket, Key}, Obj1}),
@@ -2449,11 +2457,22 @@ index_nothing_from_digest_case() ->
             to_microseconds("2000-01-01", "14:30:00"), undefined, 10, true, 10)),
     Generators1 ++ Generators2.
 
+index_pagination_case() ->
+    reset_mock(),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,0,0}})),
+    archive_message(id(), incoming, alice(), cat(), cat(), packet()),
+
+    set_now(datetime_to_microseconds({{2000,1,1},{5,13,5}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+
+    set_now(datetime_to_microseconds({{2000,1,1},{5,32,10}})),
+    assert_keys(2, 1, ["2000-01-01T05:13:05"],
+        lookup_messages(alice(), #rsm_in{index=1}, undefined, undefined,
+            get_now(), undefined, 5, true, 5)).
+
 proper_case() ->
     reset_mock(),
-    Id = fun(Date) -> id(list_to_binary(Date)) end,
     [].
-
 
 %% `lists:split/3' that does allow small lists.
 %% `lists:split/2' is already save.
@@ -2556,6 +2575,11 @@ id(Date) when is_binary(Date) ->
     Microseconds = mod_mam_utils:maybe_microseconds(Date),
     encode_compact_uuid(Microseconds, 1).
 
+id() ->
+    Microseconds = get_now(),
+    encode_compact_uuid(Microseconds, 1).
+    
+
 date_to_hour(Date, Time) ->
     date_to_hour(list_to_binary(join_date_time_z(Date, Time))).
 
@@ -2597,6 +2621,15 @@ maybe_mess_id_to_external_binary(undefined) ->
 maybe_mess_id_to_external_binary(MessID) ->
     mod_mam_utils:mess_id_to_external_binary(MessID).
 
+
+
+save_sublist_test_() ->
+    [?_assertEqual(save_sublist([1,2,3], 1, 10), [1,2,3])
+    ,?_assertEqual(save_sublist([1,2,3], 2, 10), [2,3])
+    ,?_assertEqual(save_sublist([1,2,3], 3, 10), [3])
+    ,?_assertEqual(save_sublist([1,2,3], 4, 10), [])
+    ].
+
 -endif.
 
 is_short_range(Now, Start, End) ->
@@ -2613,7 +2646,7 @@ calc_range(_,   Start, End)       -> End - Start.
 sublist_r(Keys, N) ->
     lists:sublist(Keys, max(0, length(Keys) - N) + 1, N).
 
-save_sublist(L, S, C) when S < length(L) ->
+save_sublist(L, S, C) when S =< length(L) ->
     lists:sublist(L, S, C);
 save_sublist(_, _, _) ->
     [].
