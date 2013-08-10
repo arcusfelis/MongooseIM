@@ -87,8 +87,18 @@ page_size() -> integer(0, 10).
 
 offset() -> integer(0, 30).
 
-rsm() ->
-    oneof([none, #rsm_in{index=offset()}]).
+mess_id(#state{next_mess_id=MessID, mess_ids=MessIDs}) ->
+    oneof([MessID|MessIDs]).
+
+rsm(MessID) ->
+    oneof([
+        none,
+        #rsm_in{index=offset()},
+        #rsm_in{direction = before},
+        #rsm_in{
+            direction = oneof([before, aft]),
+            id = {call, mod_mam_utils, mess_id_to_external_binary, [MessID]}}
+    ]).
 
 %% ------------------------------------------------------------------
 %% Callbacks
@@ -108,8 +118,8 @@ command(S) ->
           {call, ?M, archive_message,
            [S#state.next_mess_id, outgoing, LocJID, RemJID, LocJID, packet()]}),
     {call, ?M, lookup_messages,
-     [user_jid(), rsm(), undefined, undefined, S#state.next_now,
-      maybe_user_jid(), page_size(), true, 256]}
+     [user_jid(), rsm(mess_id(S)), undefined, undefined,
+      S#state.next_now, maybe_user_jid(), page_size(), true, 256]}
     ]).
 
 next_state(S, _V, {call, ?M, archive_message, [MessID, _, LocJID, RemJID, _, _]}) ->
@@ -169,8 +179,17 @@ find_messages(LocJID, RemJID, MD) ->
 
 paginate(none, ML) ->
     ML;
-paginate(#rsm_in{index=Offset}, ML) ->
-    save_nthtail(Offset, ML).
+paginate(#rsm_in{index=Offset}, ML) when is_integer(Offset) ->
+    save_nthtail(Offset, ML);
+paginate(#rsm_in{direction = before, id = undefined}, ML) ->
+    ML;
+paginate(#rsm_in{direction = before, id = BExtMessID}, ML) ->
+    BeforeMessID = mod_mam_utils:external_binary_to_mess_id(BExtMessID),
+    [MessID || MessID <- ML, MessID < BeforeMessID];
+paginate(#rsm_in{direction = aft, id = BExtMessID}, ML) ->
+    AfterMessID = mod_mam_utils:external_binary_to_mess_id(BExtMessID),
+    [MessID || MessID <- ML, MessID > AfterMessID].
+
 
 %% @doc This is variant of `lists:nthtail/2', that returns `[]',
 %% when `N' is greater then length of the list.
@@ -211,7 +230,7 @@ run_property_testing_test_() ->
          fun() ->
             EunitLeader = erlang:group_leader(),
             erlang:group_leader(whereis(user), self()),
-            Res = proper:module(?MODULE, [{constraint_tries, 3000}, long_result]),
+            Res = proper:module(?MODULE, [{numtests, 300}, {max_size, 50}, long_result]),
             erlang:group_leader(EunitLeader, self()),
             analyse_result(Res),
             ?assertEqual([], Res)
