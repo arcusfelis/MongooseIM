@@ -165,7 +165,7 @@ find_messages(LocJID, RemJID, MD) ->
 paginate(none, ML) ->
     ML;
 paginate(#rsm_in{index=Offset}, ML) ->
-    save_nthtail(Offset+1, ML).
+    save_nthtail(Offset, ML).
 
 %% @doc This is variant of `lists:nthtail/2', that returns `[]',
 %% when `N' is greater then length of the list.

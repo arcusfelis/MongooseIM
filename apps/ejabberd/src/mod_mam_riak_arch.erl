@@ -233,7 +233,7 @@ lookup_messages(_UserJID=#jid{lserver=LocLServer, luser=LocLUser},
                 should_create_digest(LocLServer, Result)
                 andalso
                 create_non_empty_digest(Conn, DigestKey,
-                    fetch_all_keys(Conn, SecIndex, MessIdxKeyMaker)),
+                    fetch_old_keys(Conn, SecIndex, MessIdxKeyMaker, Now)),
                 Result;
             {ok, Digest} ->
                 analyse_digest(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
@@ -314,16 +314,16 @@ analyse_digest_index(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
         %% When Offset == DigestCnt, PageDigest is empty.
         case {PageSize, Offset >= DigestCnt, Offset + PageSize >= DigestCnt} of
         %% Index is too high. Get recent keys.
-        {0, _, _} -> count_only;
+        {0, _, _} -> index_all_count_only;
         {_, true, _} -> nothing_from_digest;
         {_, false, true} -> part_from_digest;
         {_, false, false} -> only_from_digest
         end,
         case Strategy2 of
-        count_only ->
+        index_all_count_only ->
             RecentCnt = get_recent_entry_count(
                 Conn, SecIndex, MessIdxKeyMaker, End, Digest),
-            TotalCount = dig_total(Digest) - RecentCnt,
+            TotalCount = dig_total(Digest) + RecentCnt,
             return_matched_keys(TotalCount, Offset, []);
         nothing_from_digest ->
             %% Left to skip
@@ -334,6 +334,14 @@ analyse_digest_index(Conn, QueryAllF, SecIndex, MessIdxKeyMaker,
             Keys = get_key_range(Conn, SecIndex, LBound, UBound),
             MatchedKeys = save_sublist(Keys, LeftOffset+1, PageSize),
             TotalCount = DigestCnt + length(Keys),
+            ?debugVal(TotalCount),
+            ?debugVal(DigestCnt),
+            ?debugVal(Keys),
+            ?debugVal(Digest),
+            ?debugVal(LHour),
+            ?debugVal(hour(mod_mam_utils:now_to_microseconds(get_now()))),
+            ?debugVal(get_now()),
+            
             return_matched_keys(TotalCount, Offset, MatchedKeys);
         part_from_digest ->
             %% Head of  `PageDigest' contains last entries of the previous
@@ -1488,15 +1496,17 @@ get_message_rows(Conn, Keys) ->
     MessageRows = deserialize_values(Values),
     lists:usort(MessageRows).
 
-fetch_all_keys(Conn, SecIndex, MessIdxKeyMaker) ->
+fetch_old_keys(Conn, SecIndex, MessIdxKeyMaker, Now) ->
+    UHour = hour(Now) - 1,
     LBound = MessIdxKeyMaker({lower, undefined}),
-    UBound = MessIdxKeyMaker({upper, undefined}),
+    UBound = MessIdxKeyMaker({upper, hour_upper_bound(UHour)}),
     get_key_range(Conn, SecIndex, LBound, UBound).
 
 
 -ifdef(TEST).
 
-test_now() -> mod_mam_utils:now_to_microseconds(now()).
+%% + 2 hours
+test_now() -> mod_mam_utils:now_to_microseconds(now()) + 7200 * 1000000.
 
 
 %% Virtual timer
@@ -1507,6 +1517,8 @@ get_now() ->
     end.
 
 set_now(Microseconds) when is_integer(Microseconds) ->
+    ?debugVal(Microseconds),
+    ?debugVal(mod_mam_utils:microseconds_to_now(Microseconds)),
     ets:insert(test_vars,
                {mocked_now, mod_mam_utils:microseconds_to_now(Microseconds)}).
 
@@ -1521,6 +1533,18 @@ meck_test_() ->
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
        {generator, fun digest_update_case/0}}},
+
+     {"With recent messages by index.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       {generator, fun index_nothing_from_digest_case/0}}},
+
+     {"From proper.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       {generator, fun proper_case/0}}},
 
      {"Without index digest.",
       {setup,
@@ -2378,26 +2402,57 @@ digest_update_case() ->
     reset_mock(),
     Id = fun(Date) -> id(list_to_binary(Date)) end,
     %% 13:30
-    set_now(to_microseconds("2000-01-01", "14:30:00")),
+    set_now(to_microseconds("2000-01-01", "13:30:00")),
     archive_message(Id("2000-01-01T13:30:00Z"),
         outgoing, alice(), cat(), alice(), packet()),
     %% 13:40
-    set_now(to_microseconds("2000-01-01", "14:40:00")),
+    set_now(to_microseconds("2000-01-01", "13:40:00")),
     Generators1 =
     assert_keys(1, 0, ["2000-01-01T13:30:00"],
         lookup_messages(alice(), none, undefined, undefined,
-            to_microseconds("2000-01-01", "14:40:00"), undefined, 10, true, 10)),
+            to_microseconds("2000-01-01", "13:40:00"), undefined, 10, true, 10)),
     %% 13:50
-    set_now(to_microseconds("2000-01-01", "14:50:00")),
+    set_now(to_microseconds("2000-01-01", "13:50:00")),
     archive_message(Id("2000-01-01T13:50:00Z"),
         outgoing, alice(), cat(), alice(), packet()),
     %% 14:30
-    set_now(to_microseconds("2000-01-01", "14:50:00")),
+    set_now(to_microseconds("2000-01-01", "14:30:00")),
     Generators2 =
     assert_keys(2, 0, ["2000-01-01T13:30:00", "2000-01-01T13:50:00"],
         lookup_messages(alice(), none, undefined, undefined,
             to_microseconds("2000-01-01", "14:30:00"), undefined, 10, true, 10)),
     Generators1 ++ Generators2.
+
+index_nothing_from_digest_case() ->
+    %% nothing_from_digest
+    reset_mock(),
+    Id = fun(Date) -> id(list_to_binary(Date)) end,
+    %% 13:30
+    set_now(to_microseconds("2000-01-01", "13:30:00")),
+    archive_message(Id("2000-01-01T13:30:00Z"),
+        outgoing, alice(), cat(), alice(), packet()),
+    %% 13:40
+    set_now(to_microseconds("2000-01-01", "13:40:00")),
+    Generators1 =
+    assert_keys(1, 0, ["2000-01-01T13:30:00"],
+        lookup_messages(alice(), none, undefined, undefined,
+            to_microseconds("2000-01-01", "13:40:00"), undefined, 10, true, 10)),
+    %% 13:50
+    set_now(to_microseconds("2000-01-01", "13:50:00")),
+    archive_message(Id("2000-01-01T13:50:00Z"),
+        outgoing, alice(), cat(), alice(), packet()),
+    %% 14:30
+    set_now(to_microseconds("2000-01-01", "14:30:00")),
+    Generators2 =
+    assert_keys(2, 5, [],
+        lookup_messages(alice(), #rsm_in{index=5}, undefined, undefined,
+            to_microseconds("2000-01-01", "14:30:00"), undefined, 10, true, 10)),
+    Generators1 ++ Generators2.
+
+proper_case() ->
+    reset_mock(),
+    Id = fun(Date) -> id(list_to_binary(Date)) end,
+    [].
 
 
 %% `lists:split/3' that does allow small lists.
