@@ -122,11 +122,12 @@ command(S) ->
       S#state.next_now, maybe_user_jid(), page_size(), true, 256]}
     ]).
 
-next_state(S, _V, {call, ?M, archive_message, [MessID, _, LocJID, RemJID, _, _]}) ->
+next_state(S, _V, {call, ?M, archive_message,
+                   [MessID, _, LocJID, RemJID, _, _]}) ->
     next_now(S#state{
         messages=save_message(MessID, LocJID, RemJID, S#state.messages),
         mess_ids=[MessID|S#state.mess_ids]});
-next_state(S, _V, {call, ?M, lookup_messages, [_, _, _, _, _, _, _, _, _]}) ->
+next_state(S, _V, {call, ?M, lookup_messages, _}) ->
     next_now(S#state{});
 next_state(S, _V, _) ->
     S.
@@ -230,7 +231,8 @@ run_property_testing_test_() ->
          fun() ->
             EunitLeader = erlang:group_leader(),
             erlang:group_leader(whereis(user), self()),
-            Res = proper:module(?MODULE, [{numtests, 300}, {max_size, 50}, long_result]),
+            Res = proper:module(?MODULE,
+                [{numtests, 300}, {max_size, 50}, long_result]),
             erlang:group_leader(EunitLeader, self()),
             analyse_result(Res),
             ?assertEqual([], Res)
@@ -246,11 +248,13 @@ analyse_result([]) ->
     [].
 
 pretty_print_result([{set, _,
-    {call, _, archive_message, [MessID, Dir, LocJID, RemJID, SrcJID, _]}}|T]) ->
+    {call, _, archive_message,
+     [MessID, Dir, LocJID, RemJID, SrcJID, _]}}|T]) ->
     [pretty_print_archive_message(MessID, Dir, LocJID, RemJID, SrcJID)
     |pretty_print_result(T)];
 pretty_print_result([{set, _,
-    {call, _, lookup_messages, [LocJID, RSM, _, _, Now, _, PageSize, _, _]}}|T]) ->
+    {call, _, lookup_messages,
+     [LocJID, RSM, _, _, Now, _, PageSize, _, _]}}|T]) ->
     [pretty_print_lookup_messages(LocJID, RSM, Now, PageSize)
     |pretty_print_result(T)];
 pretty_print_result([_|T]) ->
@@ -273,7 +277,8 @@ pretty_print_lookup_messages(LocJID, RSM, Now, PageSize) ->
     DateTime = microseconds_to_datetime(Now),
     io_lib:format(
         "set_now(datetime_to_microseconds(~p)),~n"
-        "lookup_messages(~s, ~s, undefined, undefined, get_now(), undefined, ~p, true, 256),~n",
+        "lookup_messages(~s, ~s, undefined, undefined, "
+        "get_now(), undefined, ~p, true, 256),~n",
         [DateTime,
          pretty_print_jid(LocJID),
          pretty_print_rsm(RSM),
