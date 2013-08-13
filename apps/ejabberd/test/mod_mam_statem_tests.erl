@@ -92,12 +92,10 @@ mess_id(#state{next_mess_id=MessID, mess_ids=MessIDs}) ->
 
 rsm(MessID) ->
     oneof([
-        none,
+        undefined,
         #rsm_in{index=offset()},
         #rsm_in{direction = before},
-        #rsm_in{
-            direction = oneof([before, aft]),
-            id = {call, mod_mam_utils, mess_id_to_external_binary, [MessID]}}
+        #rsm_in{direction = oneof([before, aft]), id = MessID}
     ]).
 
 %% ------------------------------------------------------------------
@@ -178,17 +176,15 @@ find_messages(LocJID, RemJID, MD) ->
         error -> []
     end.
 
-paginate(none, ML) ->
+paginate(undefined, ML) ->
     ML;
 paginate(#rsm_in{index=Offset}, ML) when is_integer(Offset) ->
     save_nthtail(Offset, ML);
 paginate(#rsm_in{direction = before, id = undefined}, ML) ->
     ML;
-paginate(#rsm_in{direction = before, id = BExtMessID}, ML) ->
-    BeforeMessID = mod_mam_utils:external_binary_to_mess_id(BExtMessID),
+paginate(#rsm_in{direction = before, id = BeforeMessID}, ML) ->
     [MessID || MessID <- ML, MessID < BeforeMessID];
-paginate(#rsm_in{direction = aft, id = BExtMessID}, ML) ->
-    AfterMessID = mod_mam_utils:external_binary_to_mess_id(BExtMessID),
+paginate(#rsm_in{direction = aft, id = AfterMessID}, ML) ->
     [MessID || MessID <- ML, MessID > AfterMessID].
 
 
@@ -289,7 +285,7 @@ pretty_print_jid(#jid{luser = <<"cat">>})   -> "cat()".
 
 pretty_print_rsm(#rsm_in{index=Offset}) when is_integer(Offset) ->
     io_lib:format("#rsm_in{index=~p}", [Offset]);
-pretty_print_rsm(_) -> "none".
+pretty_print_rsm(_) -> "undefined".
 
 pretty_print_microseconds(Microseconds) ->
     io_lib:format("~p", [Microseconds]).

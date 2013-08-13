@@ -199,7 +199,7 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
     %% Start :: integer() | undefined
     Start = maybe_microseconds(xml:get_path_s(QueryEl, [{elem, <<"start">>}, cdata])),
     End   = maybe_microseconds(xml:get_path_s(QueryEl, [{elem, <<"end">>}, cdata])),
-    RSM   = jlib:rsm_decode(QueryEl),
+    RSM   = fix_rsm(jlib:rsm_decode(QueryEl)),
     %% Filtering by contact.
     With  = maybe_jid(xml:get_path_s(QueryEl, [{elem, <<"with">>}, cdata])),
     %% This element's name is "limit".
@@ -385,7 +385,7 @@ message_row_to_ext_id({MessID,_,_}) ->
     {ok, {TotalCount, Offset, MessageRows}} | {error, 'policy-violation'}
     when
     UserJID :: #jid{},
-    RSM     :: #rsm_in{} | none,
+    RSM     :: #rsm_in{} | undefined,
     Start   :: unix_timestamp() | undefined,
     End     :: unix_timestamp() | undefined,
     Now     :: unix_timestamp(),
@@ -420,3 +420,15 @@ maybe_jid(<<>>) ->
     undefined;
 maybe_jid(JID) when is_binary(JID) ->
     jlib:binary_to_jid(JID).
+
+
+%% @doc Convert id into internal format.
+fix_rsm(none) ->
+    undefined;
+fix_rsm(RSM=#rsm_in{id = undefined}) ->
+    RSM;
+fix_rsm(RSM=#rsm_in{id = <<>>}) ->
+    RSM#rsm_in{id = undefined};
+fix_rsm(RSM=#rsm_in{id = BExtMessID}) when is_binary(BExtMessID) ->
+    MessID = mod_mam_utils:external_binary_to_mess_id(BExtMessID),
+    RSM#rsm_in{id = MessID}.

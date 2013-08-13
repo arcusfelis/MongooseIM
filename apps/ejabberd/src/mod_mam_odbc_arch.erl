@@ -5,8 +5,7 @@
 
 %% UID
 -import(mod_mam_utils,
-        [encode_compact_uuid/2,
-         external_binary_to_mess_id/1]).
+        [encode_compact_uuid/2]).
 
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
@@ -26,7 +25,7 @@ archive_size(LServer, LUser) ->
       LServer,
       ["SELECT COUNT(*) "
        "FROM mam_message "
-       "WHERE user_id = '", integer_to_list(UserID), "'"]),
+       "WHERE user_id = '", escape_user_id(UserID), "'"]),
     list_to_integer(binary_to_list(BSize)).
 
 
@@ -35,7 +34,7 @@ archive_size(LServer, LUser) ->
     {ok, {TotalCount, Offset, MessageRows}} | {error, 'policy-violation'}
 			     when
     UserJID :: #jid{},
-    RSM     :: #rsm_in{} | none,
+    RSM     :: #rsm_in{} | undefined,
     Start   :: unix_timestamp() | undefined,
     End     :: unix_timestamp() | undefined,
     Now     :: unix_timestamp(),
@@ -81,7 +80,7 @@ remove_user_from_db(LServer, LUser) ->
     ejabberd_odbc:sql_query(
       LServer,
       ["DELETE FROM mam_message "
-       "WHERE user_id = '", integer_to_list(UserID), "'"]),
+       "WHERE user_id = '", escape_user_id(UserID), "'"]),
     ok.
 
 
@@ -193,16 +192,16 @@ prepare_filter(#jid{lserver=LServer, luser=LUser}, Start, End, WithJID) ->
     SWithJID :: escaped_jid() | undefined,
     SWithResource :: escaped_resource() | undefined.
 prepare_filter(UserID, IStart, IEnd, SWithJID, SWithResource) ->
-   ["WHERE user_id='", integer_to_list(UserID), "'",
+   ["WHERE user_id='", escape_user_id(UserID), "'",
      case IStart of
         undefined -> "";
         _         -> [" AND id >= ",
-                      integer_to_list(encode_compact_uuid(IStart, 0))]
+                      escape_message_id(encode_compact_uuid(IStart, 0))]
      end,
      case IEnd of
         undefined -> "";
         _         -> [" AND id <= ",
-                      integer_to_list(encode_compact_uuid(IEnd, 255))]
+                      escape_message_id(encode_compact_uuid(IEnd, 255))]
      end,
      case SWithJID of
         undefined -> "";
@@ -225,28 +224,30 @@ prepare_filter(UserID, IStart, IEnd, SWithJID, SWithResource) ->
     Filter   :: filter(),
     PageSize :: non_neg_integer(),
     TotalCount :: non_neg_integer(),
-    RSM      :: #rsm_in{} | none,
+    RSM      :: #rsm_in{} | undefined,
     Offset   :: non_neg_integer().
 calc_offset(_LS, _F, _PS, _TC, #rsm_in{direction = undefined, index = Index})
     when is_integer(Index) ->
     Index;
 %% Requesting the Last Page in a Result Set
-calc_offset(_LS, _F, PS, TC, #rsm_in{direction = before, id = <<>>}) ->
+calc_offset(_LS, _F, PS, TC, #rsm_in{direction = before, id = undefined}) ->
     max(0, TC - PS);
 calc_offset(LServer, F, PS, _TC, #rsm_in{direction = before, id = ID})
-    when is_binary(ID) ->
-    SID = ext_to_sec_mess_id_bin(ID),
+    when is_integer(ID) ->
+    SID = escape_message_id(ID),
     max(0, calc_before(LServer, F, SID) - PS);
 calc_offset(LServer, F, _PS, _TC, #rsm_in{direction = aft, id = ID})
-    when is_binary(ID), byte_size(ID) > 0 ->
-    SID = ext_to_sec_mess_id_bin(ID),
+    when is_integer(ID) ->
+    SID = escape_message_id(ID),
     calc_index(LServer, F, SID);
 calc_offset(_LS, _F, _PS, _TC, _RSM) ->
     0.
 
-ext_to_sec_mess_id_bin(BExtMessID) ->
-    integer_to_list(external_binary_to_mess_id(BExtMessID)).
+escape_message_id(MessID) when is_integer(MessID) ->
+    integer_to_list(MessID).
 
+escape_user_id(UserID) when is_integer(UserID) ->
+    integer_to_list(UserID).
 
 secure_escaped_jid(JID) ->
     ejabberd_odbc:escape(jlib:binary_to_jid(JID)).

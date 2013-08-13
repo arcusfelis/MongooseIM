@@ -150,7 +150,7 @@ archive_size(LServer, LUser) ->
     Now = mod_mam_utils:now_to_microseconds(now()),
     {ok, {TotalCount, 0, []}} = lookup_messages(
             jlib:make_jid(LUser, LServer, <<>>),
-            none, undefined, undefined, Now, undefined, 0, true, 0),
+            undefined, undefined, undefined, Now, undefined, 0, true, 0),
     TotalCount.
 
 %% Row is `{<<"13663125233">>,<<"bob@localhost">>,<<"res1">>,<<binary>>}'.
@@ -158,7 +158,7 @@ archive_size(LServer, LUser) ->
 %% `#rsm_in.id' is not inclusive.
 %% `#rsm_in.index' is zero-based offset.
 %% `Start', `End' and `WithJID' are filters, they are applied BEFORE paging.
-paginate(Keys, none, PageSize) ->
+paginate(Keys, undefined, PageSize) ->
     {0, lists:sublist(Keys, PageSize)};
 %% Skip first KeysBeforeCnt keys.
 paginate(Keys, #rsm_in{direction = undefined, index = KeysBeforeCnt}, PageSize)
@@ -179,7 +179,7 @@ paginate(Keys, #rsm_in{direction = aft, id = Key}, PageSize) ->
     KeysBeforeCnt = before_count(IsDelimExists, KeysBefore),
     {KeysBeforeCnt, lists:sublist(KeysAfter, PageSize)};
 paginate(Keys, _, PageSize) ->
-    paginate(Keys, none, PageSize).
+    paginate(Keys, undefined, PageSize).
 
 -ifdef(TEST).
 
@@ -216,14 +216,11 @@ paginate_test_() ->
 
 -endif.
 
-fix_rsm(_BUserID, none) ->
-    none;
+fix_rsm(_BUserID, undefined) ->
+    undefined;
 fix_rsm(_BUserID, RSM=#rsm_in{id = undefined}) ->
     RSM;
-fix_rsm(_BUserID, RSM=#rsm_in{id = <<>>}) ->
-    RSM#rsm_in{id = undefined};
-fix_rsm(BUserID, RSM=#rsm_in{id = BExtMessID}) when is_binary(BExtMessID) ->
-    MessID = mod_mam_utils:external_binary_to_mess_id(BExtMessID),
+fix_rsm(BUserID, RSM=#rsm_in{id = MessID}) when is_integer(MessID) ->
     BMessID = mess_id_to_binary(MessID),
     Key = message_key(BUserID, BMessID),
     RSM#rsm_in{id = Key}.
@@ -266,7 +263,7 @@ digest_creation_threshold(Host) ->
     {ok, {TotalCount, Offset, MessageRows}} | {error, 'policy-violation'}
 			     when
     UserJID :: #jid{},
-    RSM     :: #rsm_in{} | none,
+    RSM     :: #rsm_in{} | undefined,
     Start   :: unix_timestamp() | undefined,
     End     :: unix_timestamp() | undefined,
     Now     :: unix_timestamp(),
@@ -1857,7 +1854,7 @@ long_case() ->
     [
     {"Trigger digest creation.",
     ?_assertKeys(34, 0, [],
-                lookup_messages(alice(), none,
+                lookup_messages(alice(), undefined,
                     undefined, undefined, test_now(), undefined,
                     0, true, 0))},
 
@@ -1867,7 +1864,7 @@ long_case() ->
                  || Time <- ["01:50:00", "01:50:05", "01:50:15",
                              "01:50:16", "01:50:17"]],
                 lookup_messages(alice(),
-                    none, undefined, undefined, test_now(), undefined,
+                    undefined, undefined, undefined, test_now(), undefined,
                     5, true, 5))},
 
     {"Last 5.",
@@ -1996,9 +1993,7 @@ long_case() ->
                  || Time <- ["06:49:30", "06:49:36", "06:49:45",
                              "06:49:50", "06:50:05"]],
                 lookup_messages(alice(),
-                    #rsm_in{direction = before,
-                            id = mod_mam_utils:mess_id_to_external_binary(
-                                Log2Id("06:50:10"))},
+                    #rsm_in{direction = before, id = Log2Id("06:50:10")},
                     to_microseconds("2000-07-22", "06:49:05"),
                     to_microseconds("2000-07-22", "06:50:28"),
                     test_now(), undefined,
@@ -2014,9 +2009,7 @@ long_case() ->
                  %% (they are addressed to the whole room).
                  || Time <- ["06:49:45", "06:50:05"]],
                 lookup_messages(alice(),
-                    #rsm_in{direction = before,
-                            id = mod_mam_utils:mess_id_to_external_binary(
-                                Log2Id("06:50:10"))},
+                    #rsm_in{direction = before, id = Log2Id("06:50:10")},
                     to_microseconds("2000-07-22", "06:49:05"),
                     to_microseconds("2000-07-22", "06:50:28"),
                     test_now(), hatter_at_party(),
@@ -2116,7 +2109,7 @@ short_case() ->
     ],
     [{"Trigger digest creation.",
     ?_assertKeys(9, 0, [],
-                lookup_messages(alice(), none,
+                lookup_messages(alice(), undefined,
                     undefined, undefined, test_now(), undefined,
                     0, true, 0))},
 
@@ -2189,8 +2182,7 @@ short_case() ->
                  "2000-07-22T15:59:59"],
                 lookup_messages(alice(),
                     #rsm_in{direction = before,
-                            id = mod_mam_utils:mess_id_to_external_binary(
-                                Id("2000-07-22", "16:00:05"))},
+                            id = Id("2000-07-22", "16:00:05")},
                     to_microseconds("2000-07-21", "13:10:10"),
                     to_microseconds("2000-07-23", "10:34:20"),
                     test_now(), undefined,
@@ -2207,8 +2199,7 @@ short_case() ->
                  "2000-07-21T13:10:16"],
                 lookup_messages(alice(),
                     #rsm_in{direction = before,
-                            id = mod_mam_utils:mess_id_to_external_binary(
-                                Id("2000-07-22", "15:59:59"))},
+                            id = Id("2000-07-22", "15:59:59")},
                     to_microseconds("2000-07-21", "13:10:10"),
                     to_microseconds("2000-07-23", "10:34:20"),
                     test_now(), undefined,
@@ -2223,8 +2214,7 @@ short_case() ->
                  "2000-07-23T10:34:23"],
                 lookup_messages(alice(),
                     #rsm_in{direction = before,
-                            id = mod_mam_utils:mess_id_to_external_binary(
-                                Id("2000-07-28", "00:00:00"))},
+                            id = Id("2000-07-28", "00:00:00")},
                     undefined,
                     to_microseconds("2000-07-27", "00:00:00"),
                     test_now(), undefined,
@@ -2236,8 +2226,7 @@ short_case() ->
                 [],
                 lookup_messages(alice(),
                     #rsm_in{direction = before,
-                            id = mod_mam_utils:mess_id_to_external_binary(
-                                Id("2000-07-20", "00:00:00"))},
+                            id = Id("2000-07-20", "00:00:00")},
                     undefined, undefined, test_now(), undefined,
                     5, true, 5))},
 
@@ -2252,8 +2241,7 @@ short_case() ->
                  "2000-07-23T10:34:20", "2000-07-23T10:34:23"],
                 lookup_messages(alice(),
                     #rsm_in{direction = aft,
-                            id = mod_mam_utils:mess_id_to_external_binary(
-                                Id("2000-07-22", "15:59:59"))},
+                            id = Id("2000-07-22", "15:59:59")},
                     undefined, undefined, test_now(), undefined,
                     5, true, 5))]},
 
@@ -2265,8 +2253,7 @@ short_case() ->
                 ["2000-07-23T10:34:20", "2000-07-23T10:34:23"],
                 lookup_messages(alice(),
                     #rsm_in{direction = aft,
-                            id = mod_mam_utils:mess_id_to_external_binary(
-                                Id("2000-07-23", "10:34:04"))},
+                            id = Id("2000-07-23", "10:34:04")},
                     undefined, undefined, test_now(), undefined,
                     5, true, 5))]},
 
@@ -2276,8 +2263,7 @@ short_case() ->
                 ["2000-07-23T10:34:20", "2000-07-23T10:34:23"],
                 lookup_messages(alice(),
                     #rsm_in{direction = aft,
-                            id = mod_mam_utils:mess_id_to_external_binary(
-                                Id("2000-07-23", "10:34:04"))},
+                            id = Id("2000-07-23", "10:34:04")},
                     undefined,
                     to_microseconds("2000-07-23", "10:34:24"),
                     test_now(), undefined,
@@ -2291,8 +2277,7 @@ short_case() ->
                 ["2000-07-21T13:10:15", "2000-07-21T13:10:16"],
                 lookup_messages(alice(),
                     #rsm_in{direction = aft,
-                            id = mod_mam_utils:mess_id_to_external_binary(
-                                Id("2000-07-21", "13:10:10"))},
+                            id = Id("2000-07-21", "13:10:10")},
                     undefined, undefined, test_now(), undefined,
                     2, true, 2))]}
     ].
@@ -2338,7 +2323,7 @@ incremental_pagination_case() ->
     TotalCount = length(MessIDs),
     [{"Trigger digest creation.",
     ?_assertKeys(TotalCount, 0, [],
-                lookup_messages(alice(), none,
+                lookup_messages(alice(), undefined,
                     undefined, undefined, test_now(), undefined,
                     0, true, 0))},
      %% 0 id is before any message id in the archive.
@@ -2349,8 +2334,7 @@ incremental_pagination_gen(
     when is_integer(LastMessID) ->
     {ok, {ResultTotalCount, ResultOffset, ResultRows}} =
     ?MODULE:lookup_messages(alice(),
-        #rsm_in{direction = aft,
-            id = mod_mam_utils:mess_id_to_external_binary(LastMessID)},
+        #rsm_in{direction = aft, id = LastMessID},
         undefined, undefined, test_now(), undefined,
         PageSize, true, PageSize),
     ResultMessIDs = [message_row_to_mess_id(Row) || Row <- ResultRows],
@@ -2378,7 +2362,7 @@ decremental_pagination_case() ->
     Offset = TotalCount - PageSize,
     [{"Trigger digest creation.",
     ?_assertKeys(TotalCount, 0, [],
-                lookup_messages(alice(), none,
+                lookup_messages(alice(), undefined,
                     undefined, undefined, test_now(), undefined,
                     0, true, 0))},
      decremental_pagination_gen(
@@ -2388,8 +2372,7 @@ decremental_pagination_gen(
     BeforeMessID, PageNum, PageSize, Offset, MessIDs, TotalCount) ->
     {ok, {ResultTotalCount, ResultOffset, ResultRows}} =
     ?MODULE:lookup_messages(alice(),
-        #rsm_in{direction = before,
-            id = maybe_mess_id_to_external_binary(BeforeMessID)},
+        #rsm_in{direction = before, id = BeforeMessID},
         undefined, undefined, test_now(), undefined,
         PageSize, true, PageSize),
     ResultMessIDs = [message_row_to_mess_id(Row) || Row <- ResultRows],
@@ -2424,7 +2407,7 @@ digest_update_case() ->
     set_now(to_microseconds("2000-01-01", "13:40:00")),
     Generators1 =
     assert_keys(1, 0, ["2000-01-01T13:30:00"],
-        lookup_messages(alice(), none, undefined, undefined,
+        lookup_messages(alice(), undefined, undefined, undefined,
             to_microseconds("2000-01-01", "13:40:00"), undefined, 10, true, 10)),
     %% 13:50
     set_now(to_microseconds("2000-01-01", "13:50:00")),
@@ -2434,7 +2417,7 @@ digest_update_case() ->
     set_now(to_microseconds("2000-01-01", "14:30:00")),
     Generators2 =
     assert_keys(2, 0, ["2000-01-01T13:30:00", "2000-01-01T13:50:00"],
-        lookup_messages(alice(), none, undefined, undefined,
+        lookup_messages(alice(), undefined, undefined, undefined,
             to_microseconds("2000-01-01", "14:30:00"), undefined, 10, true, 10)),
     Generators1 ++ Generators2.
 
@@ -2450,7 +2433,7 @@ index_nothing_from_digest_case() ->
     set_now(to_microseconds("2000-01-01", "13:40:00")),
     Generators1 =
     assert_keys(1, 0, ["2000-01-01T13:30:00"],
-        lookup_messages(alice(), none, undefined, undefined,
+        lookup_messages(alice(), undefined, undefined, undefined,
             to_microseconds("2000-01-01", "13:40:00"), undefined, 10, true, 10)),
     %% 13:50
     set_now(to_microseconds("2000-01-01", "13:50:00")),
@@ -2490,7 +2473,7 @@ only_from_digest_non_empty_hour_offset_case() ->
     set_now(datetime_to_microseconds({{2000,1,1},{3,5,26}})),
     archive_message(id(), outgoing, cat(), alice(), cat(), packet()),   % 3
     set_now(datetime_to_microseconds({{2000,1,1},{4,21,20}})),
-    lookup_messages(cat(), none, undefined, undefined,
+    lookup_messages(cat(), undefined, undefined, undefined,
         get_now(), undefined, 6, true, 256),
     set_now(datetime_to_microseconds({{2000,1,1},{5,18,1}})),
     archive_message(id(), incoming, cat(), alice(), alice(), packet()), % 4
@@ -2658,12 +2641,6 @@ page_minimum_hour_test_() ->
      ?_assertEqual(2, page_minimum_hour(10, [{1, 6}, {2, 5}, {3, 8}])),
      ?_assertEqual(1, page_minimum_hour(20, [{1, 6}, {2, 5}, {3, 8}]))
     ].
-
-
-maybe_mess_id_to_external_binary(undefined) ->
-    undefined;
-maybe_mess_id_to_external_binary(MessID) ->
-    mod_mam_utils:mess_id_to_external_binary(MessID).
 
 
 
