@@ -4,13 +4,15 @@
          wait_flushing/1,
          archive_size/2,
          lookup_messages/9,
-         remove_user_from_db/2]).
+         remove_user_from_db/2,
+         purge_single_message/3,
+         purge_multiple_messages/5]).
 
 %% UID
 -import(mod_mam_utils,
         [encode_compact_uuid/2]).
 
--type message_row() :: tuple().
+-type message_row() :: tuple(). % {MessID, SrcJID, Packet}
 
 -ifdef(TEST).
 -export([load_mock/1,
@@ -58,6 +60,16 @@ make_query(Conn, BUserID, BWithJID, WithJID, LBound, UBound) ->
         sec_index = SecIndex
     }.
 
+make_query(Conn, DigestObj) ->
+    DigestKey = riakc_obj:key(DigestObj),
+    {BUserID, BWithJID} = decode_digest_key(DigestKey),
+    SecIndex = choose_index_bin(BWithJID),
+    #r_query{
+        connection = Conn,
+        b_user_id = BUserID,
+        b_with_jid = BWithJID,
+        sec_index = SecIndex
+    }.
 
 set_bounds(LBound, UBound, RQ=#r_query{}) ->
     RQ#r_query{
@@ -939,6 +951,16 @@ choose_index(#jid{lresource = <<>>}) ->
 choose_index(#jid{}) ->
     user_id_full_remote_jid_index().
 
+choose_index_bin(undefined) ->
+    key_index();
+choose_index_bin(BWithJID) ->
+    case has_resource(BWithJID) of
+        true -> 
+            user_id_full_remote_jid_index();
+        false ->
+            user_id_bare_remote_jid_index()
+    end.
+
 secondary_key(BUserID, BMessID, undefined) ->
     message_key(BUserID, BMessID);
 secondary_key(BUserID, BMessID, BWithJID) ->
@@ -951,11 +973,23 @@ max_digest_key(BUserID) ->
     %% JID cannot contain 255
     digest_key(BUserID, <<255>>).
 
+%% @see jid_to_opt_binary
+min_full_jid_digest_key(BUserID, BWithBareJID) ->
+    <<BUserID/binary, BWithBareJID/binary, $/>>.
+
+max_full_jid_digest_key(BUserID, BWithBareJID) ->
+    <<BUserID/binary, BWithBareJID/binary, $/, 255>>.
+
 digest_key(BUserID, undefined) when is_binary(BUserID) ->
     <<BUserID/binary>>;
 digest_key(BUserID, BWithJID) when is_binary(BUserID), is_binary(BWithJID) ->
     <<BUserID/binary, BWithJID/binary>>.
 
+%% @see user_id_to_binary/1
+%% @see jid_to_opt_binary
+decode_digest_key(<<BUserID:8/binary, BWithJID/binary>>) ->
+    {BUserID, case BWithJID of <<>> -> undefined; _ -> BWithJID end}.
+    
 
 max_binary_mess_id() ->
     <<-1:64>>. %% set all bits.
@@ -990,6 +1024,119 @@ remove_user_from_db(LServer, LUser) ->
     with_connection(LServer, F),
     ok.
 
+-spec purge_single_message(UserJID, MessID, Now) ->
+    ok | {error, 'not-allowed' | 'not-found'} when
+    UserJID :: #jid{},
+    MessID :: message_id(),
+    Now :: unix_timestamp().
+purge_single_message(UserJID=#jid{lserver = LServer}, MessID, Now) ->
+    with_connection(LServer, fun(Conn) ->
+        purge_single_message(Conn, UserJID, MessID, Now)
+        end).
+
+purge_single_message(Conn, #jid{lserver = LServer, luser = LUser}, MessID, Now) ->
+    UserID = mod_mam_cache:user_id(LServer, LUser),
+    BUserID = user_id_to_binary(UserID),
+    BMessID = mess_id_to_binary(MessID),
+    Key = message_key(BUserID, BMessID),
+    OnlyRecentMessages = hour(Now) =:= hour(mess_id_to_microseconds(MessID)),
+    case riakc_pb_socket:get(Conn, message_bucket(), Key) of
+        {error, notfound} -> {error, 'not-found'};
+        {ok, _} when OnlyRecentMessages ->
+            riakc_pb_socket:delete(Conn, message_bucket(), Key),
+            ok;
+        {ok, MessObj} ->
+            {BBareRemJID, BFullRemJID} = extract_bin_remote_jids(MessObj),
+            UserDigestKey = digest_key(BUserID, undefined),
+            BareDigestKey = digest_key(BUserID, BBareRemJID),
+            FullDigestKey = digest_key(BUserID, BFullRemJID),
+            single_purge(Conn, MessID, UserDigestKey),
+            single_purge(Conn, MessID, BareDigestKey),
+            single_purge(Conn, MessID, FullDigestKey),
+            riakc_pb_socket:delete(Conn, message_bucket(), Key),
+            ok
+    end.
+
+-spec purge_multiple_messages(UserJID, Start, End, Now, WithJID) ->
+    ok | {error, 'not-allowed'} when
+    UserJID :: #jid{},
+    Start   :: unix_timestamp() | undefined,
+    End     :: unix_timestamp() | undefined,
+    Now     :: unix_timestamp(),
+    WithJID :: #jid{} | undefined.
+purge_multiple_messages(UserJID = #jid{lserver=LServer}, Start, End, Now, WithJID) ->
+    with_connection(LServer, fun(Conn) ->
+        purge_multiple_messages(Conn, UserJID, Start, End, Now, WithJID)
+        end).
+
+purge_multiple_messages(Conn, #jid{lserver=LServer, luser=LUser}, Start, End,
+                        Now, WithJID) ->
+    UserID = mod_mam_cache:user_id(LServer, LUser),
+    BUserID = user_id_to_binary(UserID),
+    BWithJID = maybe_jid_to_opt_binary(LServer, WithJID),
+    SecIndex = choose_index(WithJID),
+    LBound = maybe_microseconds_to_min_mess_id(Start),
+    UBound = maybe_microseconds_to_max_mess_id(End),
+    LBoundKey = maybe_mess_id_to_lower_bound_binary(LBound),
+    UBoundKey = maybe_mess_id_to_upper_bound_binary(UBound),
+    LBoundSecKey = secondary_key(BUserID, LBoundKey, BWithJID),
+    UBoundSecKey = secondary_key(BUserID, UBoundKey, BWithJID),
+    Keys = get_key_range(Conn, SecIndex, LBoundSecKey, UBoundSecKey),
+    [riakc_pb_socket:delete(Conn, message_bucket(), Key)
+    || Key <- Keys],
+    OnlyRecentMessages = is_defined(Start) andalso hour(Now) =:= hour(Start),
+    DoNothing = Keys =:= [],
+    Strategy =
+       case {DoNothing or OnlyRecentMessages, WithJID} of
+        {true,  _                     } -> skip_digest_update;
+        {false, undefined             } -> undef_jid;
+        {false, #jid{lresource = <<>>}} -> bare_jid;
+        {false, #jid{}                } -> full_jid
+    end,
+    case Strategy of
+    skip_digest_update ->
+        ok;
+    undef_jid ->
+        %% Delete information about records from the range from all digests.
+        OldDigestObjects = get_all_digest_objects(Conn, LServer, LUser),
+        NewDigestObjects = merge_and_purge_digest_objects(Conn, Start, End, OldDigestObjects),
+        [riakc_pb_socket:put(Conn, New) ||
+         {Old, New} <- lists:zip(OldDigestObjects, NewDigestObjects),
+         Old =/= New],
+        ok;
+    bare_jid ->
+        %% Delete information about records from the range from per JID digests.
+        %% Selectively delete info from the main user digest.
+        UserDigestKey = digest_key(BUserID, undefined),
+        BareDigestKey = digest_key(BUserID, BWithJID),
+        FullDigestKeys = get_full_jid_digest_keys(Conn, LServer, LUser, BWithJID),
+        %% Delete all entries in the range for next digests.
+        Keys = [BareDigestKey | FullDigestKeys],
+        OldDigestObjects = to_objects(Conn, Keys),
+        NewDigestObjects = merge_and_purge_digest_objects(Conn, Start, End, OldDigestObjects),
+        Updated = sparse_purge(Conn, Keys, UserDigestKey),
+        [riakc_pb_socket:put(Conn, Obj) || Obj <- Updated],
+        [riakc_pb_socket:put(Conn, New) ||
+         {Old, New} <- lists:zip(OldDigestObjects, NewDigestObjects),
+         Old =/= New],
+        ok;
+    full_jid ->
+        %% We only need to change 3 digests.
+        %% Delete information about records from the full JID digests.
+        %% Selectively delete info from the bare JID digest.
+        %% Selectively delete info from the main user digest.
+        BWithBareJID = jid_to_opt_binary(LServer, jlib:jid_remove_resource(WithJID)),
+        BWithFullJID = jid_to_opt_binary(LServer, WithJID),
+        UserDigestKey = digest_key(BUserID, undefined),
+        BareDigestKey = digest_key(BUserID, BWithBareJID),
+        FullDigestKey = digest_key(BUserID, BWithFullJID),
+        Updated = sparse_purge(Conn, Keys, UserDigestKey)
+               ++ sparse_purge(Conn, Keys, BareDigestKey)
+               ++ dense_purge(Conn, Start, End, FullDigestKey),
+        [riakc_pb_socket:put(Conn, Obj) || Obj <- Updated],
+        ok
+    end.
+
 
 delete_digests(Conn, LServer, LUser) ->
     Keys = get_all_digest_keys(Conn, LServer, LUser),
@@ -997,12 +1144,28 @@ delete_digests(Conn, LServer, LUser) ->
     || Key <- Keys],
     ok.
 
+%% @doc Get keys for full JIDs with the same bare JID.
+get_full_jid_digest_keys(Conn, LServer, LUser, BWithBareJID) ->
+    %% jid_to_opt_binary
+    UserID = mod_mam_cache:user_id(LServer, LUser),
+    BUserID = user_id_to_binary(UserID),
+    LBound = min_full_jid_digest_key(BUserID, BWithBareJID),
+    UBound = max_full_jid_digest_key(BUserID, BWithBareJID),
+    get_key_range(Conn, digest_bucket(), key_index(), LBound, UBound).
+
 get_all_digest_keys(Conn, LServer, LUser) ->
     UserID = mod_mam_cache:user_id(LServer, LUser),
     BUserID = user_id_to_binary(UserID),
     LBound = min_digest_key(BUserID),
     UBound = max_digest_key(BUserID),
     get_key_range(Conn, digest_bucket(), key_index(), LBound, UBound).
+
+get_all_digest_objects(Conn, LServer, LUser) ->
+    UserID = mod_mam_cache:user_id(LServer, LUser),
+    BUserID = user_id_to_binary(UserID),
+    LBound = min_digest_key(BUserID),
+    UBound = max_digest_key(BUserID),
+    get_object_range(Conn, digest_bucket(), key_index(), LBound, UBound).
 
 delete_messages(Conn, LServer, LUser) ->
     Keys = get_all_message_keys(Conn, LServer, LUser),
@@ -1016,6 +1179,24 @@ get_all_message_keys(Conn, LServer, LUser) ->
     LBound = message_key(BUserID, min_binary_mess_id()),
     UBound = message_key(BUserID, max_binary_mess_id()),
     get_key_range(Conn, message_bucket(), key_index(), LBound, UBound).
+
+get_hour_keys_before(Conn, BUserID, Start) ->
+    LMessID = hour_to_min_mess_id(hour(Start)),
+    UMessID = previous_mess_id(microseconds_to_max_mess_id(Start)),
+    LBound = message_key(BUserID, LMessID),
+    UBound = message_key(BUserID, UMessID),
+    get_key_range(Conn, message_bucket(), key_index(), LBound, UBound).
+
+get_hour_keys_after(Conn, BUserID, End) ->
+    LMessID = next_mess_id(microseconds_to_min_mess_id(End)),
+    UMessID = hour_to_max_mess_id(hour(End)),
+    LBound = message_key(BUserID, LMessID),
+    UBound = message_key(BUserID, UMessID),
+    get_key_range(Conn, message_bucket(), key_index(), LBound, UBound).
+
+dig_compare_volume(Hour, DeletedDigest, UserDigest) ->
+    dig_calc_volume(Hour, DeletedDigest) =:=
+    dig_calc_volume(Hour, UserDigest).
 
 maybe_jid_to_opt_binary(_, undefined) ->
     undefined;
@@ -1037,6 +1218,8 @@ jid_to_opt_binary(LServer, #jid{lserver=LServer, luser=LUser, lresource=LResourc
 jid_to_opt_binary(_, #jid{lserver=LServer, luser=LUser, lresource=LResource}) ->
     <<LServer/binary, $@, LUser/binary, $/, LResource/binary>>.
 
+has_resource(BWithJID) ->
+    binary:match(BWithJID, <<"/">>) =/= nomatch.
 
 wait_flushing(_LServer) ->
     ok.
@@ -1069,6 +1252,14 @@ set_index(Obj, BUserIDFullRemJIDMessID, BUserIDBareRemJIDMessID) ->
           {user_id_bare_remote_jid_index(), [BUserIDBareRemJIDMessID]}],
     MD1 = riakc_obj:set_secondary_index(MD, Is),
     riakc_obj:update_metadata(Obj, MD1).
+
+extract_bin_remote_jids(Obj) ->
+    MD = riakc_obj:get_metadata(Obj),
+    BareSecIdx = riakc_obj:get_secondary_index(MD, user_id_bare_remote_jid_index()),
+    FullSecIdx = riakc_obj:get_secondary_index(MD, user_id_full_remote_jid_index()),
+    BBareJID = user_remote_jid_message_id_to_bjid(BareSecIdx),
+    BFullJID = user_remote_jid_message_id_to_bjid(FullSecIdx),
+    {BBareJID, BFullJID}.
 
 
 with_connection(_LocLServer, F) ->
@@ -1123,6 +1314,11 @@ message_key(BUserID, BMessID)
 user_remote_jid_message_id(BUserID, BMessID, BJID)
     when is_binary(BUserID), is_binary(BMessID), is_binary(BJID) ->
     <<BUserID/binary, BJID/binary, 0, BMessID/binary>>.
+
+user_remote_jid_message_id_to_bjid(SecIndex) when is_integer(SecIndex) ->
+    %% `Delete' `BUserID', `0' and `BMessID'.
+    binary:part(SecIndex, 8, byte_size(SecIndex) - 17).
+    
 
 key_to_hour(Key) when is_binary(Key) ->
     hour(key_to_microseconds(Key)).
@@ -1319,6 +1515,9 @@ dig_merge(RQ, Digests) ->
         {NewHour, NewCnt} <- merge_digest(
                 RQ, Hour, Cnts, SiblingCnt)].
 
+dig_concat(Digests) ->
+    [Hour2Count || Digest <- Digests, Hour2Count <- Digest].
+
 merge_digest(RQ, Hour, Cnts, SiblingCnt) ->
     case all_equal(Cnts) andalso length(Cnts) =:= SiblingCnt of
         true -> [{Hour, hd(Cnts)}]; %% good value
@@ -1337,6 +1536,41 @@ all_equal(H, [H|T]) -> all_equal(H, T);
 all_equal(_, [_|_]) -> false;
 all_equal(_, []) -> true.
 
+%% @doc Subtract `Subtract' from `Digest' for each hour.
+%% `Digest' should contain all keys from `DeletedDigest'.
+-spec dig_subtract(Digest, SubDigest) -> Digest when
+    Digest :: list(),
+    SubDigest :: list().
+dig_subtract([H|T1], [H|T2]) ->
+    dig_subtract(T1, T2);
+dig_subtract([{Hour, Cnt}|T1], [{Hour, SubCnt}|T2]) when Cnt > SubCnt ->
+    [{Hour, Cnt-SubCnt}|dig_subtract(T1, T2)];
+dig_subtract([{Hour, Cnt}|T1], [{Hour, SubCnt}|T2]) when Cnt < SubCnt ->
+    %% To much to delete.
+    %% unexpected, ignore
+    dig_subtract(T1, T2);
+dig_subtract([{Hour1, _}=H1|T1], [{Hour2, _}|_]=T2) when Hour1 < Hour2 ->
+    %% Hour1 | ? |   ?   |
+    %% none  | ? | Hour2 |
+    [H1|dig_subtract(T1, T2)];
+dig_subtract([{Hour1, _}=H1|T1], [{Hour2, _}|_]=T2) when Hour1 < Hour2 ->
+    %% No entries about this hour.
+    %% none  | ? |   ?   |
+    %% Hour2 | ? | Hour2 |
+    %% unexpected, ignore
+    [H1|dig_subtract(T1, T2)];
+dig_subtract([], []) ->
+    [].
+
+%% @doc Decrease a counter for a specified hour.
+dig_decrease([{Hour, Cnt}|T], Hour, Cnt) ->
+    T;
+dig_decrease([{Hour, Cnt}|T], Hour, SubCnt) ->
+    [{Hour, Cnt - 1}|T];
+dig_decrease([{Hour, Cnt}|T], SubHour, SubCnt) when Hour < SubHour ->
+    [{Hour, Cnt}|dig_decrease(T, Hour, Cnt)];
+dig_decrease(T, _, _) ->
+    T.
 
 %% Where `Hour' is located: before, inside or after the index digest.
 dig_position(Hour, Digest) ->
@@ -1381,6 +1615,7 @@ frequency_1(T, H, N) ->
     [{H, N}|frequency(T)].
 
 
+%% @doc Return sorted keys.
 to_values(Conn, Keys) ->
     [assert_valid_key(Key) || Key <- Keys],
     Ops = [{map, {modfun, riak_kv_mapreduce, map_object_value}, undefined, true}],
@@ -1389,6 +1624,16 @@ to_values(Conn, Keys) ->
             [];
         {ok, [{0, Values}]} ->
             Values
+    end.
+
+to_objects(Conn, Keys) ->
+    [assert_valid_key(Key) || Key <- Keys],
+    Ops = [{map, {modfun, riak_kv_mapreduce, map_identity}, undefined, true}],
+    case riakc_pb_socket:mapred(Conn, Keys, Ops) of
+        {ok, []} ->
+            [];
+        {ok, [{0, Objects}]} ->
+            Objects
     end.
 
 assert_valid_key({Bucket, Key}) when is_binary(Bucket), is_binary(Key) ->
@@ -1463,6 +1708,18 @@ get_key_range(Conn, Bucket, SecIndex, LBound, UBound)
     {ok, ?INDEX_RESULTS{keys=Keys}} =
     riakc_pb_socket:get_index_range(Conn, Bucket, SecIndex, LBound, UBound),
     Keys.
+
+get_object_range(Conn, Bucket, SecIndex, LBound, UBound)
+    when is_binary(LBound), is_binary(UBound) ->
+    Input = {index,Bucket,SecIndex,LBound,UBound},
+    Ops = [{map, {modfun, riak_kv_mapreduce, map_identity}, undefined, true}],
+    case riakc_pb_socket:mapred(Conn, Input, Ops) of
+        {ok, []} ->
+            [];
+        {ok, [{0, Objects}]} ->
+            Objects
+    end.
+
 
 get_minimum_key_range_before(RQ, Digest, Before, PageSize) ->
     MinHour = page_minimum_hour(PageSize, Digest),
@@ -2684,3 +2941,68 @@ maybe_min(X, Y) -> min(X, Y).
 maybe_max(undefined, X) -> X;
 maybe_max(X, undefined) -> X;
 maybe_max(X, Y) -> max(X, Y).
+
+
+merge_and_purge_digest_objects(Conn, Start, End, DigestObjects) ->
+    [merge_and_purge_digest_object(Conn, Start, End, DigestObj)
+     || DigestObj <- DigestObjects].
+
+merge_and_purge_digest_object(Conn, Start, End, DigestObj) ->
+    RQ = make_query(Conn, DigestObj),
+    MergedDigestObj = merge_siblings(RQ, DigestObj),
+    Digest = binary_to_term(riakc_obj:get_value(MergedDigestObj)),
+    NewDigest = dig_purge(RQ, Start, End, Digest),
+    riakc_obj:update_value(MergedDigestObj, NewDigest).
+
+merge_and_single_purge_digest_object(Conn, MessID, DigestObj) ->
+    RQ = make_query(Conn, DigestObj),
+    MergedDigestObj = merge_siblings(RQ, DigestObj),
+    Digest = binary_to_term(riakc_obj:get_value(MergedDigestObj)),
+    NewDigest = dig_decrease(Digest, hour(MessID), 1),
+    riakc_obj:update_value(MergedDigestObj, NewDigest).
+
+%% @doc Delete any information from the digest about records
+%%      in the period from `Start' to `End'.
+%% @end
+dig_purge(RQ, Start, End, Digest) ->
+    StartHour = hour(Start),
+    EndHour   = hour(End),
+    BeforeStartDigest = dig_before_hour(StartHour, Digest),
+    AfterEndDigest    = dig_after_hour(EndHour, Digest),
+    NewStartHourCnt = get_hour_key_count_after(RQ, Digest, Start),
+    NewEndHourCnt   = get_hour_key_count_before(RQ, Digest, End),
+    dig_concat([BeforeStartDigest, dig_cell(StartHour, NewStartHourCnt),
+                dig_cell(EndHour, NewEndHourCnt), AfterEndDigest]).
+    
+dig_cell(_,    0  ) -> [];
+dig_cell(Hour, Cnt) -> [{Hour, Cnt}].
+
+sparse_purge(Conn, DeletedMessKeys, DigestKey) ->
+    case riakc_obj:get(Conn, digest_bucket(), DigestKey) of
+        {error, notfound} -> [];
+        {ok, DigestObj} ->
+            [sparse_purge_object(Conn, DeletedMessKeys, DigestObj)]
+    end.
+
+dense_purge(Conn, Start, End, DigestKey) ->
+    case riakc_obj:get(Conn, digest_bucket(), DigestKey) of
+        {error, notfound} -> [];
+        {ok, DigestObj} ->
+            [merge_and_purge_digest_object(Conn, Start, End, DigestObj)]
+    end.
+
+single_purge(Conn, MessID, DigestKey) ->
+    case riakc_obj:get(Conn, digest_bucket(), DigestKey) of
+        {error, notfound} -> [];
+        {ok, DigestObj} ->
+            [merge_and_single_purge_digest_object(Conn, MessID, DigestObj)]
+    end.
+
+sparse_purge_object(Conn, DeletedMessKeys, DigestObj) ->
+    RQ = make_query(Conn, DigestObj),
+    %% Naive implementation (without extracting all records).
+    DeletedDigest = dig_new(DeletedMessKeys),
+    MergedDigestObj = merge_siblings(RQ, DigestObj),
+    Digest = binary_to_term(riakc_obj:get_value(MergedDigestObj)),
+    NewDigest = dig_subtract(Digest, DeletedDigest),
+    riakc_obj:update_value(MergedDigestObj, NewDigest).

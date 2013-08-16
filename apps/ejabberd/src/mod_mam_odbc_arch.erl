@@ -1,7 +1,9 @@
 -module(mod_mam_odbc_arch).
 -export([archive_size/2,
          lookup_messages/9,
-         remove_user_from_db/2]).
+         remove_user_from_db/2,
+         purge_single_message/3,
+         purge_multiple_messages/5]).
 
 %% UID
 -import(mod_mam_utils,
@@ -12,6 +14,7 @@
 -include_lib("exml/include/exml.hrl").
 
 -type filter() :: iolist().
+-type message_id() :: non_neg_integer().
 -type escaped_message_id() :: binary().
 -type escaped_jid() :: binary().
 -type escaped_resource() :: binary().
@@ -83,6 +86,39 @@ remove_user_from_db(LServer, LUser) ->
        "WHERE user_id = '", escape_user_id(UserID), "'"]),
     ok.
 
+-spec purge_single_message(UserJID, MessID, Now) ->
+    ok | {error, 'not-allowed' | 'not-found'} when
+    UserJID :: #jid{},
+    MessID :: message_id(),
+    Now :: unix_timestamp().
+purge_single_message(#jid{lserver = LServer, luser = LUser}, MessID, _Now) ->
+    UserID = mod_mam_cache:user_id(LServer, LUser),
+    Result =
+    ejabberd_odbc:sql_query(
+      LServer,
+      ["DELETE FROM mam_message "
+       "WHERE user_id = '", escape_user_id(UserID), "' "
+       "AND id = '", escape_message_id(MessID), "'"]),
+    case Result of
+        {updated, 0} -> {error, 'not-found'};
+        {updated, 1} -> ok
+    end.
+
+-spec purge_multiple_messages(UserJID, Start, End, Now, WithJID) ->
+    ok | {error, 'not-allowed'} when
+    UserJID :: #jid{},
+    Start   :: unix_timestamp() | undefined,
+    End     :: unix_timestamp() | undefined,
+    Now     :: unix_timestamp(),
+    WithJID :: #jid{} | undefined.
+purge_multiple_messages(UserJID = #jid{lserver=LServer}, Start, End, _Now, WithJID) ->
+    Filter = prepare_filter(UserJID, Start, End, WithJID),
+    {undefined, _} =
+    ejabberd_odbc:sql_query(
+      LServer,
+      ["DELETE FROM mam_message "
+       "WHERE ", Filter]),
+    ok.
 
 %% Each record is a tuple of form 
 %% `{<<"13663125233">>,<<"bob@localhost">>,<<"res1">>,<<binary>>}'.
