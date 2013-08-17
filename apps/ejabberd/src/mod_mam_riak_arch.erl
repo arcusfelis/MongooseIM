@@ -223,7 +223,11 @@ paginate_test_() ->
      {"Last Page",
       ?_assertEqual({6, [7,8,9]},
                     paginate([1,2,3, 4,5,6, 7,8,9],
-                             #rsm_in{direction = before}, 3))}
+                             #rsm_in{direction = before}, 3))},
+     {"Index 6, TotalCount 4.",
+      ?_assertEqual({6, []},
+                    paginate([1,2,3,4],
+                             #rsm_in{index = 6}, 4))}
     ].
 
 -endif.
@@ -691,16 +695,16 @@ analyse_digest_after(RQ, RSM, Start, End, PageSize, AfterKey, Digest) ->
     RSetDigest = dig_between(Start, End, Digest),
     %% Hour in which a message with the passed id was send.
     AfterHour = key_to_hour(AfterKey),
-    %% Top values from `PageDigest' will be on the page.
-    %% `AfterHour' is included.
-    PageDigest = dig_from_hour(AfterHour, RSetDigest),
+    %% Middle values from `PageDigest' will be on the page.
+    %% `AfterHour' is not included.
+    PageDigest = dig_after_hour(AfterHour, RSetDigest),
     KeyPos = key_position(AfterKey, Start, End, RSetDigest),
     Strategy = case {dig_is_empty(RSetDigest),
                      dig_is_empty(PageDigest),
                      is_single_page(PageSize, PageDigest), KeyPos} of
         {true,  _,     _,     _      } -> after_query_all;
         {false, _,     _,     before } -> after_first_page;
-        {false, false, true,  inside } -> after_last_page;
+        {false, _,     true,  inside } -> after_last_page;
         {false, true,  true,  'after'} -> after_recent_only;
         {false, false, false, inside } -> after_middle_page
         end,
@@ -725,7 +729,7 @@ analyse_digest_after(RQ, RSM, Start, End, PageSize, AfterKey, Digest) ->
         RecentCnt = get_recent_key_count(RQ, RSetDigest, End),
         RSetDigestCnt = dig_total(RSetDigest),
         TotalCount = StartHourCnt + RSetDigestCnt + RecentCnt,
-        UHour = tail_page_maximum_hour(PageSize, PageDigest),
+        UHour = page_maximum_hour(PageSize, PageDigest),
         %% Next message id.
         LBound = next_mess_id(key_to_mess_id(AfterKey)),
         UBound = hour_to_max_mess_id(UHour),
@@ -1408,6 +1412,11 @@ dig_to_hour(Hour, [{CurHour, _}=H|T]) when CurHour =< Hour ->
 dig_to_hour(_, _) ->
     [].
 
+dig_total_tail([]) ->
+    0;
+dig_total_tail(Digest) ->
+    dig_total(dig_tail(Digest)).
+
 %% @doc Returns entries for hours lower than `Hour'.
 dig_before_hour(Hour, [{CurHour, _}=H|T]) when CurHour < Hour ->
     [H|dig_before_hour(Hour, T)];
@@ -1761,6 +1770,9 @@ get_message_rows(Conn, Keys) ->
 
 -ifdef(TEST).
 
+datetime_to_mess_id(DateTime) ->
+    microseconds_to_min_mess_id(datetime_to_microseconds(DateTime)).
+
 %% + 2 hours
 test_now() -> mod_mam_utils:now_to_microseconds(now()) + 7200 * 1000000.
 
@@ -1811,6 +1823,12 @@ meck_test_() ->
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
        {generator, fun proper_case/0}}},
+
+     {"RSetDigest is not empty, PageDigest is empty, KeyPos is inside.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       {generator, fun after_last_page_case/0}}},
 
      {"Without index digest.",
       {setup,
@@ -2756,7 +2774,28 @@ only_from_digest_non_empty_hour_offset_case() ->
             get_now(), undefined, 4, true, 256)).
 
 proper_case() ->
+    reset_mock(),
     [].
+
+after_last_page_case() ->
+    reset_mock(),
+    %% after_last_page
+    set_now(datetime_to_microseconds({{2000,1,1},{0,0,0}})),
+    archive_message(id(), incoming, alice(), cat(), cat(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,40,1}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    %% AFTER
+    set_now(datetime_to_microseconds({{2000,1,1},{2,5,51}})),
+    lookup_messages(alice(), undefined, undefined, undefined, get_now(), undefined, 3, true, 256),
+    set_now(datetime_to_microseconds({{2000,1,1},{2,30,52}})),
+    archive_message(id(), incoming, alice(), cat1(), cat1(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{2,33,44}})),
+    assert_keys(3, 2,
+        ["2000-01-01T02:30:52"],
+        lookup_messages(alice(),
+            #rsm_in{direction=aft, id=datetime_to_mess_id({{2000,1,1},{0,49,27}})},
+            undefined, undefined, get_now(), undefined, 1, true, 256)).
+
 
 %% `lists:split/3' that does allow small lists.
 %% `lists:split/2' is already save.
@@ -2807,6 +2846,10 @@ alice() ->
 cat() ->
     #jid{luser = <<"cat">>, lserver = <<"wonderland">>, lresource = <<>>,
           user = <<"cat">>,  server = <<"wonderland">>,  resource = <<>>}.
+
+cat1() ->
+    #jid{luser = <<"cat">>, lserver = <<"wonderland">>, lresource = <<"1">>,
+          user = <<"cat">>,  server = <<"wonderland">>,  resource = <<"1">>}.
 
 hatter() ->
     #jid{luser = <<"hatter">>, lserver = <<"wonderland">>, lresource = <<>>,
