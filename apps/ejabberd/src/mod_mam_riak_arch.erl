@@ -580,14 +580,20 @@ key_position(Key, Start, End, Digest) when is_binary(Key) ->
     MessID = key_to_mess_id(Key),
     StartMessID = maybe_microseconds_to_min_mess_id(Start),
     EndMessID   = maybe_microseconds_to_max_mess_id(End),
-    MinMessID   = dig_minimum_mess_id(Digest),
-    MaxMessID   = dig_maximum_mess_id(Digest),
+    MinMessID   = maybe_dig_minimum_mess_id(Digest),
+    MaxMessID   = maybe_dig_maximum_mess_id(Digest),
     LBoundMessID = maybe_max(MinMessID, StartMessID),
     UBoundMessID = maybe_min(MaxMessID, EndMessID),
     if MessID < LBoundMessID -> before;
        MessID > UBoundMessID -> 'after';
        true -> inside
     end.
+
+maybe_dig_minimum_mess_id([]) -> undefined;
+maybe_dig_minimum_mess_id(Digest) -> dig_minimum_mess_id(Digest).
+
+maybe_dig_maximum_mess_id([]) -> undefined;
+maybe_dig_maximum_mess_id(Digest) -> dig_maximum_mess_id(Digest).
 
 dig_minimum_mess_id(Digest) ->
     hour_to_min_mess_id(dig_first_hour(Digest)).
@@ -805,8 +811,21 @@ choose_strategy(Start, End, Digest) ->
         {'after', 'after'} -> recent_only
     end.
 
-analyse_digest_last_page(RQ, RSM, Start, End, PageSize, Digest) ->
+choose_strategy2(Start, End, Digest) ->
     Strategy = choose_strategy(Start, End, Digest),
+    case Strategy of
+        inside ->
+            %% Maximum RSet
+            RSetDigest = dig_to_hour(hour(End), dig_from_hour(hour(Start), Digest)),
+            case dig_is_empty(RSetDigest) of
+                true -> empty;
+                false -> inside
+            end;
+        _ -> Strategy
+    end.
+
+analyse_digest_last_page(RQ, RSM, Start, End, PageSize, Digest) ->
+    Strategy = choose_strategy2(Start, End, Digest),
     case Strategy of
         empty -> return_empty();
         recent_only -> query_all(RQ, RSM, PageSize);
@@ -821,7 +840,7 @@ analyse_digest_last_page(RQ, RSM, Start, End, PageSize, Digest) ->
             %% Contains records, that will be in RSet for sure
             %% Digest2 does not contain hour(Start).
             Digest2 = dig_after_hour(hour(Start), Digest),
-            case dig_total(Digest2) < PageSize of
+            case dig_total(Digest2) =< PageSize of
             true -> query_all(RQ, RSM, PageSize); %% It is a small range
             false ->
                 StartHourCnt = get_hour_key_count_after(RQ, Digest, Start),
@@ -834,7 +853,7 @@ analyse_digest_last_page(RQ, RSM, Start, End, PageSize, Digest) ->
             end;
         upper_bounded ->
             Digest2 = dig_before_hour(hour(End), Digest),
-            case dig_total(Digest2) < PageSize of
+            case dig_total(Digest2) =< PageSize of
             true -> query_all(RQ, RSM, PageSize); %% It is a small range
             false ->
                 Keys = get_minimum_key_range_before(RQ, Digest2, End, PageSize),
@@ -847,7 +866,7 @@ analyse_digest_last_page(RQ, RSM, Start, End, PageSize, Digest) ->
         bounded ->
             Digest2 = dig_before_hour(hour(End),
                 dig_after_hour(hour(Start), Digest)),
-            case dig_total(Digest2) < PageSize of
+            case dig_total(Digest2) =< PageSize of
             true -> query_all(RQ, RSM, PageSize); %% It is a small range
             false ->
                 StartHourCnt = get_hour_key_count_after(RQ, Digest, Start),
@@ -1834,6 +1853,12 @@ meck_test_() ->
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
        {generator, fun proper_case/0}}},
+
+     {"Selecting messages from a tiny date range. RSet is empty.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       {generator, fun tiny_empty_date_range_lookup_case/0}}},
 
      {"Purge a single message.",
       {setup,
@@ -2824,6 +2849,20 @@ only_from_digest_non_empty_hour_offset_case() ->
 proper_case() ->
     reset_mock(),
     [].
+
+tiny_empty_date_range_lookup_case() ->
+    reset_mock(),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,28,49}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{1,27,47}})),
+    lookup_messages(alice(), undefined, undefined, undefined,
+        get_now(), undefined, 0, true, 256),
+    set_now(datetime_to_microseconds({{2000,1,1},{2,16,51}})),
+    assert_keys(0, 0, [],
+        lookup_messages(alice(), #rsm_in{direction=before},
+            datetime_to_microseconds({{2000,1,1},{0,0,0}}) + 4,
+            datetime_to_microseconds({{2000,1,1},{0,0,0}}) + 17,
+            get_now(), undefined, 0, true, 256)).
 
 purge_single_message_case() ->
     reset_mock(),
