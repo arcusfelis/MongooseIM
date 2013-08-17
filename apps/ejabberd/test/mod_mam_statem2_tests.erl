@@ -183,14 +183,14 @@ delete_message(MessID, MD) when is_integer(MessID) ->
     case dict:find(MessID, MD) of
         {ok, {LocJID, RemJID=#jid{lresource = <<>>}}} ->
             dict:erase(MessID,
-                dict:erase(LocJID,
-                    dict:erase({LocJID, RemJID}, MD)));
+                dict_delete_element(LocJID, MessID,
+                    dict_delete_element({LocJID, RemJID}, MessID, MD)));
         {ok, {LocJID, RemJID}} ->
             BareRemJID = jlib:jid_remove_resource(RemJID),
             dict:erase(MessID,
-                dict:erase(LocJID,
-                    dict:erase({LocJID, RemJID},
-                        dict:erase({LocJID, BareRemJID}, MD))))
+                dict_delete_element(LocJID, MessID,
+                    dict_delete_element({LocJID, RemJID}, MessID,
+                        dict_delete_element({LocJID, BareRemJID}, MessID, MD))))
     end.
     
 find_messages(LocJID, undefined, MD) ->
@@ -203,6 +203,11 @@ find_messages(LocJID, RemJID, MD) ->
         {ok, ML} -> ML;
         error -> []
     end.
+
+dict_delete_element(Key, Elem, Dict) ->
+    Elems = dict:fetch(Key, Dict),
+    NewElems = lists:delete(Elem, Elems),
+    dict:store(Key, NewElems, Dict).
 
 save_message_test_() ->
     [?_assertEqual([1], find_messages(alice(), undefined,

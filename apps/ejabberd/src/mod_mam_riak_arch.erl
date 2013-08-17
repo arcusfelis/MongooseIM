@@ -886,9 +886,22 @@ create_non_empty_digest(Conn, DigestKey, Keys) ->
 create_digest(Conn, DigestKey, Keys) ->
     lager:debug("Creating a digest with ~p keys.", [length(Keys)]),
     Digest = dig_new(Keys),
-    Value = term_to_binary(Digest),
+    Value = digest_to_binary(Digest),
     DigestObj = riakc_obj:new(digest_bucket(), DigestKey, Value),
     riakc_pb_socket:put(Conn, DigestObj).
+
+is_empty_digest_obj(Obj) ->
+    riakc_obj:get_value(Obj) =:= <<>>.
+
+digest_to_binary([]) ->
+    <<>>;
+digest_to_binary(Digest) ->
+    term_to_binary(Digest).
+
+binary_to_digest(<<>>) ->
+    [];
+binary_to_digest(Bin) ->
+    binary_to_term(Bin).
 
 get_actual_digest(Conn, RQ, DigestKey, Now) ->
     case riakc_pb_socket:get(Conn, digest_bucket(), DigestKey) of
@@ -896,7 +909,7 @@ get_actual_digest(Conn, RQ, DigestKey, Now) ->
             {error, notfound};
         {ok, DigestObj} ->
             DigestObj2 = merge_siblings(RQ, DigestObj),
-            Digest2 = binary_to_term(riakc_obj:get_value(DigestObj2)),
+            Digest2 = binary_to_digest(riakc_obj:get_value(DigestObj2)),
             Last = last_modified(DigestObj2),
             case hour(Last) =:= hour(Now) of
                 %% Digest is actual.
@@ -906,7 +919,7 @@ get_actual_digest(Conn, RQ, DigestKey, Now) ->
                     {ok, Digest2};
                 false ->
                     Digest3 = update_digest(RQ, Now, Digest2),
-                    DigestObj3 = riakc_obj:update_value(DigestObj2, term_to_binary(Digest3)),
+                    DigestObj3 = riakc_obj:update_value(DigestObj2, digest_to_binary(Digest3)),
                     riakc_pb_socket:put(Conn, DigestObj3),
                     {ok, Digest3}
             end
@@ -920,9 +933,8 @@ merge_siblings(RQ, DigestObj) ->
         true ->
             DigestObj2 = fix_metadata(DigestObj),
             Values = riakc_obj:get_values(DigestObj),
-            NewValue = dig_merge(
-                RQ, deserialize_values(Values)),
-            riakc_obj:update_value(DigestObj2, NewValue);
+            NewDigest = dig_merge(RQ, deserialize_values(Values)),
+            riakc_obj:update_value(DigestObj2, digest_to_binary(NewDigest));
         false ->
             DigestObj
     end.
@@ -1055,9 +1067,10 @@ purge_single_message(Conn, #jid{lserver = LServer, luser = LUser}, MessID, Now) 
             UserDigestKey = digest_key(BUserID, undefined),
             BareDigestKey = digest_key(BUserID, BBareRemJID),
             FullDigestKey = digest_key(BUserID, BFullRemJID),
-            single_purge(Conn, MessID, UserDigestKey),
-            single_purge(Conn, MessID, BareDigestKey),
-            single_purge(Conn, MessID, FullDigestKey),
+            Updated = single_purge(Conn, MessID, UserDigestKey)
+                   ++ single_purge(Conn, MessID, BareDigestKey)
+                   ++ single_purge(Conn, MessID, FullDigestKey),
+            save_updated_digests(Conn, Updated),
             riakc_pb_socket:delete(Conn, message_bucket(), Key),
             ok
     end.
@@ -1105,9 +1118,8 @@ purge_multiple_messages(Conn, #jid{lserver=LServer, luser=LUser}, Start, End,
         %% Delete information about records from the range from all digests.
         OldDigestObjects = get_all_digest_objects(Conn, LServer, LUser),
         NewDigestObjects = merge_and_purge_digest_objects(Conn, Start, End, OldDigestObjects),
-        [riakc_pb_socket:put(Conn, New) ||
-         {Old, New} <- lists:zip(OldDigestObjects, NewDigestObjects),
-         Old =/= New],
+        Updated = filter_midified_objects(OldDigestObjects, NewDigestObjects),
+        save_updated_digests(Conn, Updated),
         ok;
     bare_jid ->
         %% Delete information about records from the range from per JID digests.
@@ -1119,11 +1131,9 @@ purge_multiple_messages(Conn, #jid{lserver=LServer, luser=LUser}, Start, End,
         Keys = [BareDigestKey | FullDigestKeys],
         OldDigestObjects = to_objects(Conn, Keys),
         NewDigestObjects = merge_and_purge_digest_objects(Conn, Start, End, OldDigestObjects),
-        Updated = sparse_purge(Conn, Keys, UserDigestKey),
-        [riakc_pb_socket:put(Conn, Obj) || Obj <- Updated],
-        [riakc_pb_socket:put(Conn, New) ||
-         {Old, New} <- lists:zip(OldDigestObjects, NewDigestObjects),
-         Old =/= New],
+        Updated = sparse_purge(Conn, Keys, UserDigestKey)
+               ++ filter_midified_objects(OldDigestObjects, NewDigestObjects),
+        save_updated_digests(Conn, Updated),
         ok;
     full_jid ->
         %% We only need to change 3 digests.
@@ -1138,7 +1148,7 @@ purge_multiple_messages(Conn, #jid{lserver=LServer, luser=LUser}, Start, End,
         Updated = sparse_purge(Conn, Keys, UserDigestKey)
                ++ sparse_purge(Conn, Keys, BareDigestKey)
                ++ dense_purge(Conn, Start, End, FullDigestKey),
-        [riakc_pb_socket:put(Conn, Obj) || Obj <- Updated],
+        save_updated_digests(Conn, Updated),
         ok
     end.
 
@@ -1280,6 +1290,9 @@ mess_id_to_binary(MessID) when is_integer(MessID) ->
 %% @doc Transforms microseconds to hours.
 hour(Ms) when is_integer(Ms) ->
     Ms div microseconds_in_hour().
+
+mess_id_to_hour(MessID) when is_integer(MessID) ->
+    hour(mess_id_to_microseconds(MessID)).
 
 hour_to_microseconds(Hour) when is_integer(Hour) ->
     Hour * microseconds_in_hour().
@@ -1822,6 +1835,18 @@ meck_test_() ->
        fun(_) -> unload_mock() end,
        {generator, fun proper_case/0}}},
 
+     {"Purge a single message.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       {generator, fun purge_single_message_case/0}}},
+
+     {"Purge a single message and erase its digest.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       {generator, fun purge_single_message_digest_case/0}}},
+
      {"RSetDigest is not empty, PageDigest is empty, KeyPos is inside.",
       {setup,
        fun() -> load_mock(0) end,
@@ -1955,6 +1980,13 @@ load_mock(DigestThreshold) ->
         end
         end),
     meck:expect(SM, delete, fun(Conn, Bucket, Key) ->
+        ets:delete(Tab, {Bucket, Key}),
+        ets:match_delete(IdxTab, {'_', {Bucket, Key}}),
+        ok
+        end),
+    meck:expect(SM, delete_obj, fun(Conn, Obj) ->
+        Key = proplists:get_value(key, Obj),
+        Bucket = proplists:get_value(bucket, Obj),
         ets:delete(Tab, {Bucket, Key}),
         ets:match_delete(IdxTab, {'_', {Bucket, Key}}),
         ok
@@ -2785,6 +2817,20 @@ only_from_digest_non_empty_hour_offset_case() ->
 
 proper_case() ->
     reset_mock(),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,26,32}})),
+    archive_message(id(), incoming, alice(), cat1(), cat1(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{1,13,13}})),
+    archive_message(id(), outgoing, alice(), cat1(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{2,12,40}})),
+    purge_single_message(alice(),
+        datetime_to_mess_id({{2000,1,1},{1,13,13}}), get_now()),
+    set_now(datetime_to_microseconds({{2000,1,1},{3,7,24}})),
+    assert_keys(1, 0, ["2000-01-01T00:26:32"],
+        lookup_messages(alice(), undefined, undefined, undefined,
+            get_now(), undefined, 2, true, 256)).
+
+purge_single_message_case() ->
+    reset_mock(),
     set_now(datetime_to_microseconds({{2000,1,1},{0,0,0}})),
     archive_message(id(), outgoing, alice(), cat1(), alice(), packet()),
     set_now(datetime_to_microseconds({{2000,1,1},{1,16,51}})),
@@ -2796,6 +2842,27 @@ proper_case() ->
     assert_keys(1, 0, ["2000-01-01T01:16:51"],
         lookup_messages(alice(), #rsm_in{direction=before}, undefined, undefined,
             get_now(), undefined, 4, true, 256)).
+
+purge_single_message_digest_case() ->
+    reset_mock(),
+    %% Add a message.
+    set_now(datetime_to_microseconds({{2000,1,1},{0,1,0}})),
+    archive_message(id(), incoming, alice(), cat1(), cat1(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{1,46,11}})),
+    %% Trigger digest creation.
+    lookup_messages(alice(), undefined, undefined, undefined,
+        get_now(), undefined, 4, true, 256),
+    %% Delete the message, update the digest.
+    set_now(datetime_to_microseconds({{2000,1,1},{5,0,6}})),
+    purge_single_message(alice(),
+        datetime_to_mess_id({{2000,1,1},{0,1,0}}), get_now()),
+    set_now(datetime_to_microseconds({{2000,1,1},{5,26,2}})),
+    %% Use a new digest.
+    assert_keys(0, 0, [],
+        lookup_messages(alice(),
+            #rsm_in{direction=aft,
+                    id=datetime_to_mess_id({{2000,1,1},{4,44,46}})},
+            undefined, undefined, get_now(), undefined, 1, true, 256)).
 
 after_last_page_case() ->
     reset_mock(),
@@ -3017,16 +3084,16 @@ merge_and_purge_digest_objects(Conn, Start, End, DigestObjects) ->
 merge_and_purge_digest_object(Conn, Start, End, DigestObj) ->
     RQ = make_query(Conn, DigestObj),
     MergedDigestObj = merge_siblings(RQ, DigestObj),
-    Digest = binary_to_term(riakc_obj:get_value(MergedDigestObj)),
+    Digest = binary_to_digest(riakc_obj:get_value(MergedDigestObj)),
     NewDigest = dig_purge(RQ, Start, End, Digest),
-    riakc_obj:update_value(MergedDigestObj, NewDigest).
+    riakc_obj:update_value(MergedDigestObj, digest_to_binary(NewDigest)).
 
 merge_and_single_purge_digest_object(Conn, MessID, DigestObj) ->
     RQ = make_query(Conn, DigestObj),
     MergedDigestObj = merge_siblings(RQ, DigestObj),
-    Digest = binary_to_term(riakc_obj:get_value(MergedDigestObj)),
-    NewDigest = dig_decrease(Digest, hour(MessID), 1),
-    riakc_obj:update_value(MergedDigestObj, NewDigest).
+    Digest = binary_to_digest(riakc_obj:get_value(MergedDigestObj)),
+    NewDigest = dig_decrease(Digest, mess_id_to_hour(MessID), 1),
+    riakc_obj:update_value(MergedDigestObj, digest_to_binary(NewDigest)).
 
 %% @doc Delete any information from the digest about records
 %%      in the period from `Start' to `End'.
@@ -3070,6 +3137,16 @@ sparse_purge_object(Conn, DeletedMessKeys, DigestObj) ->
     %% Naive implementation (without extracting all records).
     DeletedDigest = dig_new(DeletedMessKeys),
     MergedDigestObj = merge_siblings(RQ, DigestObj),
-    Digest = binary_to_term(riakc_obj:get_value(MergedDigestObj)),
+    Digest = binary_to_digest(riakc_obj:get_value(MergedDigestObj)),
     NewDigest = dig_subtract(Digest, DeletedDigest),
     riakc_obj:update_value(MergedDigestObj, NewDigest).
+
+save_updated_digests(Conn, ModifiedObjects) ->
+    {Deleted, Updated} = lists:partition(fun is_empty_digest_obj/1, ModifiedObjects),
+    [riakc_pb_socket:put(Conn, Obj) || Obj <- Updated],
+    [riakc_pb_socket:delete_obj(Conn, Obj) || Obj <- Deleted],
+    ok.
+
+filter_midified_objects(OldDigestObjects, NewDigestObjects) ->
+    [New || {Old, New} <- lists:zip(OldDigestObjects, NewDigestObjects),
+     Old =/= New].
