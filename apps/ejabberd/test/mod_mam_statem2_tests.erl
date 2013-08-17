@@ -108,8 +108,12 @@ command(S) ->
            [S#state.next_mess_id, outgoing, LocJID, RemJID, LocJID, packet()]}),
     {call, ?M, lookup_messages,
      [alice(), rsm(mess_id(S)), undefined, undefined,
-      S#state.next_now, maybe_user_jid(), page_size(), true, 256]}
-    ]).
+      S#state.next_now, maybe_user_jid(), page_size(), true, 256]}] ++
+    case S#state.mess_ids of [] -> []; MessIDs -> [
+        {call, ?M, purge_single_message,
+            [alice(), oneof(MessIDs), S#state.next_now]}
+    ]
+    end).
 
 next_state(S, _V, {call, ?M, archive_message,
                    [MessID, _, LocJID, RemJID, _, _]}) ->
@@ -117,10 +121,17 @@ next_state(S, _V, {call, ?M, archive_message,
         messages=save_message(MessID, LocJID, RemJID, S#state.messages),
         mess_ids=[MessID|S#state.mess_ids]});
 next_state(S, _V, {call, ?M, lookup_messages, _}) ->
-    next_now(S#state{});
-next_state(S, _V, _) ->
-    S.
+    next_now(S);
+next_state(S, _V, {call, ?M, purge_single_message, [LocJID, MessID, _]}) ->
+    #state{messages=MD, mess_ids=MessIDs} = S,
+    next_now(S#state{
+        messages=delete_message(MessID, MD),
+        mess_ids=lists:delete(MessID, MessIDs)
+    }).
 
+precondition(#state{mess_ids=MessIDs},
+    {call, ?M, purge_single_message, [LocJID, MessID, _]}) ->
+    lists:member(MessID, MessIDs);
 precondition(_S, _C) ->
     true.
 
@@ -145,6 +156,8 @@ postcondition(S,
         ?debugVal(RSM),
         false
     end;
+postcondition(_, {call, ?M, purge_single_message, [_, _, _]}, Res) ->
+    Res =:= ok;
 postcondition(_S, _C, _R) ->
     true.
 
@@ -156,14 +169,30 @@ init_mess_dict() ->
     dict:new().
 
 save_message(MessID, LocJID, RemJID=#jid{lresource = <<>>}, MD) ->
-    dict:append(LocJID, MessID,
-        dict:append({LocJID, RemJID}, MessID, MD));
+    dict:store(MessID, {LocJID, RemJID},
+        dict:append(LocJID, MessID,
+            dict:append({LocJID, RemJID}, MessID, MD)));
 save_message(MessID, LocJID, RemJID, MD) ->
     BareRemJID = jlib:jid_remove_resource(RemJID),
-    dict:append(LocJID, MessID,
-        dict:append({LocJID, RemJID}, MessID,
-            dict:append({LocJID, BareRemJID}, MessID, MD))).
+    dict:store(MessID, {LocJID, RemJID},
+        dict:append(LocJID, MessID,
+            dict:append({LocJID, RemJID}, MessID,
+                dict:append({LocJID, BareRemJID}, MessID, MD)))).
 
+delete_message(MessID, MD) when is_integer(MessID) ->
+    case dict:find(MessID, MD) of
+        {ok, {LocJID, RemJID=#jid{lresource = <<>>}}} ->
+            dict:erase(MessID,
+                dict:erase(LocJID,
+                    dict:erase({LocJID, RemJID}, MD)));
+        {ok, {LocJID, RemJID}} ->
+            BareRemJID = jlib:jid_remove_resource(RemJID),
+            dict:erase(MessID,
+                dict:erase(LocJID,
+                    dict:erase({LocJID, RemJID},
+                        dict:erase({LocJID, BareRemJID}, MD))))
+    end.
+    
 find_messages(LocJID, undefined, MD) ->
     case dict:find(LocJID, MD) of
         {ok, ML} -> ML;
@@ -262,6 +291,10 @@ pretty_print_result([{set, _,
      [LocJID, RSM, _, _, Now, _, PageSize, _, _]}}|T]) ->
     [pretty_print_lookup_messages(LocJID, RSM, Now, PageSize)
     |pretty_print_result(T)];
+pretty_print_result([{set, _,
+    {call, ?M, purge_single_message, [LocJID, MessID, Now]}}|T]) ->
+    [pretty_print_purge_single_message(LocJID, MessID, Now)
+    |pretty_print_result(T)];
 pretty_print_result([_|T]) ->
     ["% skipped\n"|pretty_print_result(T)];
 pretty_print_result([]) ->
@@ -288,6 +321,17 @@ pretty_print_lookup_messages(LocJID, RSM, Now, PageSize) ->
          pretty_print_jid(LocJID),
          pretty_print_rsm(RSM),
          PageSize]).
+
+pretty_print_purge_single_message(LocJID, MessID, Now) ->
+    DateTime = microseconds_to_datetime(Now),
+    {MessMicroseconds, _} = mod_mam_utils:decode_compact_uuid(MessID),
+    MessDateTime = microseconds_to_datetime(MessMicroseconds),
+    io_lib:format(
+        "set_now(datetime_to_microseconds(~p)),~n"
+        "purge_single_message(~s, datetime_to_mess_id(~p), get_now()),~n",
+        [DateTime,
+         pretty_print_jid(LocJID),
+         MessDateTime]).
 
 pretty_print_jid(#jid{luser = <<"alice">>}) -> "alice()";
 pretty_print_jid(#jid{luser = <<"cat">>, lresource = <<"1">>})   -> "cat1()";

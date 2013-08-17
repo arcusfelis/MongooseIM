@@ -1033,7 +1033,8 @@ remove_user_from_db(LServer, LUser) ->
     UserJID :: #jid{},
     MessID :: message_id(),
     Now :: unix_timestamp().
-purge_single_message(UserJID=#jid{lserver = LServer}, MessID, Now) ->
+purge_single_message(UserJID=#jid{lserver = LServer}, MessID, Now)
+    when is_integer(MessID), is_integer(Now) ->
     with_connection(LServer, fun(Conn) ->
         purge_single_message(Conn, UserJID, MessID, Now)
         end).
@@ -1259,8 +1260,8 @@ set_index(Obj, BUserIDFullRemJIDMessID, BUserIDBareRemJIDMessID) ->
 
 extract_bin_remote_jids(Obj) ->
     MD = riakc_obj:get_metadata(Obj),
-    BareSecIdx = riakc_obj:get_secondary_index(MD, user_id_bare_remote_jid_index()),
-    FullSecIdx = riakc_obj:get_secondary_index(MD, user_id_full_remote_jid_index()),
+    [BareSecIdx] = riakc_obj:get_secondary_index(MD, user_id_bare_remote_jid_index()),
+    [FullSecIdx] = riakc_obj:get_secondary_index(MD, user_id_full_remote_jid_index()),
     BBareJID = user_remote_jid_message_id_to_bjid(BareSecIdx),
     BFullJID = user_remote_jid_message_id_to_bjid(FullSecIdx),
     {BBareJID, BFullJID}.
@@ -1319,7 +1320,7 @@ user_remote_jid_message_id(BUserID, BMessID, BJID)
     when is_binary(BUserID), is_binary(BMessID), is_binary(BJID) ->
     <<BUserID/binary, BJID/binary, 0, BMessID/binary>>.
 
-user_remote_jid_message_id_to_bjid(SecIndex) when is_integer(SecIndex) ->
+user_remote_jid_message_id_to_bjid(SecIndex) when is_binary(SecIndex) ->
     %% `Delete' `BUserID', `0' and `BMessID'.
     binary:part(SecIndex, 8, byte_size(SecIndex) - 17).
     
@@ -1770,9 +1771,6 @@ get_message_rows(Conn, Keys) ->
 
 -ifdef(TEST).
 
-datetime_to_mess_id(DateTime) ->
-    microseconds_to_min_mess_id(datetime_to_microseconds(DateTime)).
-
 %% + 2 hours
 test_now() -> mod_mam_utils:now_to_microseconds(now()) + 7200 * 1000000.
 
@@ -1956,11 +1954,19 @@ load_mock(DigestThreshold) ->
             []        -> {error, notfound}
         end
         end),
+    meck:expect(SM, delete, fun(Conn, Bucket, Key) ->
+        ets:delete(Tab, {Bucket, Key}),
+        ets:match_delete(IdxTab, {'_', {Bucket, Key}}),
+        ok
+        end),
     OM = riakc_obj,
     meck:new(OM),
     meck:expect(OM, new, fun(Bucket, Key, Value) ->
         Md = [],
         [{bucket, Bucket}, {key, Key}, {value, Value}, {metadata, Md}]
+        end),
+    meck:expect(OM, key, fun(Obj) ->
+        proplists:get_value(key, Obj, [])
         end),
     meck:expect(OM, get_metadata, fun(Obj) ->
         proplists:get_value(metadata, Obj, [])
@@ -1983,6 +1989,10 @@ load_mock(DigestThreshold) ->
     meck:expect(OM, set_secondary_index, fun(Md, Is) ->
         Idx = proplists:get_value(secondary_index, Md, []),
         [{secondary_index, Is ++ Idx}|Md]
+        end),
+    meck:expect(OM, get_secondary_index, fun(Md, IdxName) ->
+        Idx = proplists:get_value(secondary_index, Md, []),
+        proplists:get_value(IdxName, Idx)
         end),
     PM = riak_pool,
     meck:new(PM),
@@ -2775,7 +2785,17 @@ only_from_digest_non_empty_hour_offset_case() ->
 
 proper_case() ->
     reset_mock(),
-    [].
+    set_now(datetime_to_microseconds({{2000,1,1},{0,0,0}})),
+    archive_message(id(), outgoing, alice(), cat1(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{1,16,51}})),
+    archive_message(id(), outgoing, alice(), cat1(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{1,27,31}})),
+    ?assertEqual(ok, purge_single_message(alice(),
+        datetime_to_mess_id({{2000,1,1},{0,0,0}}), get_now())),
+    set_now(datetime_to_microseconds({{2000,1,1},{2,10,35}})),
+    assert_keys(1, 0, ["2000-01-01T01:16:51"],
+        lookup_messages(alice(), #rsm_in{direction=before}, undefined, undefined,
+            get_now(), undefined, 4, true, 256)).
 
 after_last_page_case() ->
     reset_mock(),
@@ -2898,12 +2918,16 @@ message(Text) when is_binary(Text) ->
             }]
     }.
 
+id() ->
+    Microseconds = get_now(),
+    encode_compact_uuid(Microseconds, 1).
+
 id(Date) when is_binary(Date) ->
     Microseconds = mod_mam_utils:maybe_microseconds(Date),
     encode_compact_uuid(Microseconds, 1).
 
-id() ->
-    Microseconds = get_now(),
+datetime_to_mess_id(DateTime) ->
+    Microseconds = datetime_to_microseconds(DateTime),
     encode_compact_uuid(Microseconds, 1).
     
 
@@ -3021,21 +3045,21 @@ dig_cell(_,    0  ) -> [];
 dig_cell(Hour, Cnt) -> [{Hour, Cnt}].
 
 sparse_purge(Conn, DeletedMessKeys, DigestKey) ->
-    case riakc_obj:get(Conn, digest_bucket(), DigestKey) of
+    case riakc_pb_socket:get(Conn, digest_bucket(), DigestKey) of
         {error, notfound} -> [];
         {ok, DigestObj} ->
             [sparse_purge_object(Conn, DeletedMessKeys, DigestObj)]
     end.
 
 dense_purge(Conn, Start, End, DigestKey) ->
-    case riakc_obj:get(Conn, digest_bucket(), DigestKey) of
+    case riakc_pb_socket:get(Conn, digest_bucket(), DigestKey) of
         {error, notfound} -> [];
         {ok, DigestObj} ->
             [merge_and_purge_digest_object(Conn, Start, End, DigestObj)]
     end.
 
 single_purge(Conn, MessID, DigestKey) ->
-    case riakc_obj:get(Conn, digest_bucket(), DigestKey) of
+    case riakc_pb_socket:get(Conn, digest_bucket(), DigestKey) of
         {error, notfound} -> [];
         {ok, DigestObj} ->
             [merge_and_single_purge_digest_object(Conn, MessID, DigestObj)]
