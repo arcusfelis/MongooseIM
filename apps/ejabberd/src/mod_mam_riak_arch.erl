@@ -1589,9 +1589,9 @@ dig_subtract([], []) ->
 dig_decrease([{Hour, Cnt}|T], Hour, Cnt) ->
     T;
 dig_decrease([{Hour, Cnt}|T], Hour, SubCnt) ->
-    [{Hour, Cnt - 1}|T];
+    [{Hour, Cnt - SubCnt}|T];
 dig_decrease([{Hour, Cnt}|T], SubHour, SubCnt) when Hour < SubHour ->
-    [{Hour, Cnt}|dig_decrease(T, Hour, Cnt)];
+    [{Hour, Cnt}|dig_decrease(T, SubHour, SubCnt)];
 dig_decrease(T, _, _) ->
     T.
 
@@ -1846,6 +1846,12 @@ meck_test_() ->
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
        {generator, fun purge_single_message_digest_case/0}}},
+
+     {"Purge a single message and erase its digest. PageSize = 0.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       {generator, fun purge_single_message_digest_zero_page_size_case/0}}},
 
      {"RSetDigest is not empty, PageDigest is empty, KeyPos is inside.",
       {setup,
@@ -2817,17 +2823,7 @@ only_from_digest_non_empty_hour_offset_case() ->
 
 proper_case() ->
     reset_mock(),
-    set_now(datetime_to_microseconds({{2000,1,1},{0,26,32}})),
-    archive_message(id(), incoming, alice(), cat1(), cat1(), packet()),
-    set_now(datetime_to_microseconds({{2000,1,1},{1,13,13}})),
-    archive_message(id(), outgoing, alice(), cat1(), alice(), packet()),
-    set_now(datetime_to_microseconds({{2000,1,1},{2,12,40}})),
-    purge_single_message(alice(),
-        datetime_to_mess_id({{2000,1,1},{1,13,13}}), get_now()),
-    set_now(datetime_to_microseconds({{2000,1,1},{3,7,24}})),
-    assert_keys(1, 0, ["2000-01-01T00:26:32"],
-        lookup_messages(alice(), undefined, undefined, undefined,
-            get_now(), undefined, 2, true, 256)).
+    [].
 
 purge_single_message_case() ->
     reset_mock(),
@@ -2863,6 +2859,27 @@ purge_single_message_digest_case() ->
             #rsm_in{direction=aft,
                     id=datetime_to_mess_id({{2000,1,1},{4,44,46}})},
             undefined, undefined, get_now(), undefined, 1, true, 256)).
+
+purge_single_message_digest_zero_page_size_case() ->
+    %% analyse_digest_before_case/0
+    %% Strategy whole_digest_and_recent
+    reset_mock(),
+    set_now(datetime_to_microseconds({{2000,1,1},{1,24,43}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{2,9,27}})),
+    archive_message(id(), outgoing, alice(), cat1(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{3,11,32}})),
+    %% Build user's digest.
+    lookup_messages(alice(), #rsm_in{index=5}, undefined, undefined,
+        get_now(), undefined, 3, true, 256),
+    set_now(datetime_to_microseconds({{2000,1,1},{3,20,55}})),
+    purge_single_message(alice(),
+        datetime_to_mess_id({{2000,1,1},{2,9,27}}), get_now()),
+    set_now(datetime_to_microseconds({{2000,1,1},{6,55,58}})),
+    %% Offset is undefined.
+    assert_keys(1, 1, [],
+        lookup_messages(alice(), #rsm_in{direction=before},
+            undefined, undefined, get_now(), undefined, 0, true, 256)).
 
 after_last_page_case() ->
     reset_mock(),
@@ -3006,8 +3023,12 @@ date_to_hour(DateTime) when is_binary(DateTime) ->
     hour(Microseconds).
 
 sublist_r_test_() ->
-    [?_assertEqual([4,5], sublist_r([1,2,3,4,5], 2)),
-     ?_assertEqual([1,2,3,4,5], sublist_r([1,2,3,4,5], 5))].
+    [?_assertEqual([], sublist_r([], 1)),
+     ?_assertEqual([1], sublist_r([1], 1)),
+     ?_assertEqual([4,5], sublist_r([1,2,3,4,5], 2)),
+     ?_assertEqual([1,2,3], sublist_r([1,2,3], 5)),
+     ?_assertEqual([1,2,3,4,5], sublist_r([1,2,3,4,5], 5))
+    ].
 
 dig_before_hour_test_() ->
     [?_assertEqual([{2, 10}, {3, 15}], dig_before_hour(5, [{2, 10}, {3, 15}])),
@@ -3033,13 +3054,15 @@ page_minimum_hour_test_() ->
      ?_assertEqual(1, page_minimum_hour(20, [{1, 6}, {2, 5}, {3, 8}]))
     ].
 
-
-
 save_sublist_test_() ->
     [?_assertEqual(save_sublist([1,2,3], 1, 10), [1,2,3])
     ,?_assertEqual(save_sublist([1,2,3], 2, 10), [2,3])
     ,?_assertEqual(save_sublist([1,2,3], 3, 10), [3])
     ,?_assertEqual(save_sublist([1,2,3], 4, 10), [])
+    ].
+
+dig_decrease_test_() ->
+    [?_assertEqual([{262969,1}], dig_decrease([{262969,1},{262970,1}], 262970, 1))
     ].
 
 -endif.
@@ -3088,7 +3111,8 @@ merge_and_purge_digest_object(Conn, Start, End, DigestObj) ->
     NewDigest = dig_purge(RQ, Start, End, Digest),
     riakc_obj:update_value(MergedDigestObj, digest_to_binary(NewDigest)).
 
-merge_and_single_purge_digest_object(Conn, MessID, DigestObj) ->
+merge_and_single_purge_digest_object(Conn, MessID, DigestObj)
+    when is_integer(MessID) ->
     RQ = make_query(Conn, DigestObj),
     MergedDigestObj = merge_siblings(RQ, DigestObj),
     Digest = binary_to_digest(riakc_obj:get_value(MergedDigestObj)),
