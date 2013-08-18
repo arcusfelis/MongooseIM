@@ -169,7 +169,7 @@ delete_messages(Start, End, S) ->
 paginate(undefined, ML) ->
     ML;
 paginate(#rsm_in{index=Offset}, ML) when is_integer(Offset) ->
-    save_nthtail(Offset, ML);
+    safe_nthtail(Offset, ML);
 paginate(#rsm_in{direction = before, id = undefined}, ML) ->
     ML;
 paginate(#rsm_in{direction = before, id = BeforeMessID}, ML) ->
@@ -180,9 +180,9 @@ paginate(#rsm_in{direction = aft, id = AfterMessID}, ML) ->
 
 %% @doc This is variant of `lists:nthtail/2', that returns `[]',
 %% when `N' is greater then length of the list.
-save_nthtail(N, [_|T]) when N > 0 ->
-    save_nthtail(N-1, T);
-save_nthtail(_, L) when is_list(L) ->
+safe_nthtail(N, [_|T]) when N > 0 ->
+    safe_nthtail(N-1, T);
+safe_nthtail(_, L) when is_list(L) ->
     L.
 
 %% @doc Returns first `N' elements.
@@ -313,7 +313,7 @@ pretty_print_purge_messages(LocJID, Start, End, Now, WithJID) ->
          pretty_print_jid(LocJID),
          pretty_print_maybe_microseconds(Start),
          pretty_print_maybe_microseconds(End),
-         pretty_print_jid(LocJID)]).
+         pretty_print_jid(WithJID)]).
 
 pretty_print_jid(#jid{luser = <<"alice">>}) -> "alice()";
 pretty_print_jid(#jid{luser = <<"cat">>, lresource = <<"1">>})   -> "cat1()";

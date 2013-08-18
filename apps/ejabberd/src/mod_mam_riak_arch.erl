@@ -175,7 +175,7 @@ paginate(Keys, undefined, PageSize) ->
 %% Skip first KeysBeforeCnt keys.
 paginate(Keys, #rsm_in{direction = undefined, index = KeysBeforeCnt}, PageSize)
     when is_integer(KeysBeforeCnt), KeysBeforeCnt >= 0 ->
-    {KeysBeforeCnt, save_sublist(Keys, KeysBeforeCnt + 1, PageSize)};
+    {KeysBeforeCnt, safe_sublist(Keys, KeysBeforeCnt + 1, PageSize)};
 %% Requesting the Last Page in a Result Set
 paginate(Keys, #rsm_in{direction = before, id = undefined}, PageSize) ->
     TotalCount = length(Keys),
@@ -227,13 +227,13 @@ page_minimum_hour_test_() ->
      ?_assertEqual(1, page_minimum_hour(20, [{1, 6}, {2, 5}, {3, 8}]))
     ].
 
-save_sublist_test_() ->
-    [?_assertEqual([1,2,3], save_sublist([1,2,3], 1, 10))
-    ,?_assertEqual([2,3],   save_sublist([1,2,3], 2, 10))
-    ,?_assertEqual([3],     save_sublist([1,2,3], 3, 10))
-    ,?_assertEqual([],      save_sublist([1,2,3], 4, 10))
-    ,?_assertEqual([],      save_sublist([], 1, 1))
-    ,?_assertEqual([],      save_sublist([], 1, 2))
+safe_sublist_test_() ->
+    [?_assertEqual([1,2,3], safe_sublist([1,2,3], 1, 10))
+    ,?_assertEqual([2,3],   safe_sublist([1,2,3], 2, 10))
+    ,?_assertEqual([3],     safe_sublist([1,2,3], 3, 10))
+    ,?_assertEqual([],      safe_sublist([1,2,3], 4, 10))
+    ,?_assertEqual([],      safe_sublist([], 1, 1))
+    ,?_assertEqual([],      safe_sublist([], 1, 2))
     ].
 
 dig_decrease_test_() ->
@@ -447,7 +447,7 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
             %% Left to skip
             LeftOffset = Offset - DigestCnt,
             Keys = get_recent_keys(RQ, Digest, End),
-            MatchedKeys = save_sublist(Keys, LeftOffset+1, PageSize),
+            MatchedKeys = safe_sublist(Keys, LeftOffset+1, PageSize),
             TotalCount = DigestCnt + length(Keys),
             return_matched_keys(TotalCount, Offset, MatchedKeys);
         part_from_digest ->
@@ -459,7 +459,7 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
             LBound = hour_to_min_mess_id(LHour),
             UBound = maybe_microseconds_to_max_mess_id(End),
             Keys = request_keys(set_bounds(LBound, UBound, RQ)),
-            MatchedKeys = save_sublist(Keys, FirstHourOffset+1, PageSize),
+            MatchedKeys = safe_sublist(Keys, FirstHourOffset+1, PageSize),
             TotalCount = Offset + length(Keys) - FirstHourOffset,
             return_matched_keys(TotalCount, Offset, MatchedKeys);
         only_from_digest ->
@@ -478,7 +478,7 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
             LBound = hour_to_min_mess_id(LHour),
             UBound = hour_to_max_mess_id(UHour),
             Keys = request_keys(set_bounds(LBound, UBound, RQ)),
-            MatchedKeys = save_sublist(Keys, FirstHourOffset+1, PageSize),
+            MatchedKeys = safe_sublist(Keys, FirstHourOffset+1, PageSize),
             RecentCnt = get_recent_key_count(RQ, Digest, End),
             TotalCount = DigestCnt + RecentCnt,
             return_matched_keys(TotalCount, Offset, MatchedKeys)
@@ -507,7 +507,7 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
         SkippedCnt = dig_total(dig_before_hour(LHour, RSetDigest)),
         %% How many unwanted keys were extracted.
         PageOffset = RSetOffset - SkippedCnt,
-        MatchedKeys = save_sublist(Keys, PageOffset+1, PageSize),
+        MatchedKeys = safe_sublist(Keys, PageOffset+1, PageSize),
         RecentCnt = case UBoundPos of
             inside ->  get_recent_key_count(RQ, Digest, End);
             'after' -> filter_and_count_keys_before_digest(Keys, Digest)
@@ -540,7 +540,7 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
             UBound = hour_to_max_mess_id(UHour),
             Keys = request_keys(set_bounds(LBound, UBound, RQ)),
             PageOffset = dig_total(dig_before_hour(LHour, RSetDigest)),
-            MatchedKeys = save_sublist(Keys, PageOffset+1, PageSize),
+            MatchedKeys = safe_sublist(Keys, PageOffset+1, PageSize),
             AfterHourCnt = get_hour_key_count_after(RQ, Digest, End),
             TotalCount = RSetDigestCnt - AfterHourCnt,
             return_matched_keys(TotalCount, Offset, MatchedKeys);
@@ -552,7 +552,7 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
             Keys = request_keys(set_bounds(LBound, UBound, RQ)),
             BeforeCnt = dig_total(dig_before_hour(LHour, RSetDigest)),
             PageOffset = Offset - BeforeCnt,
-            MatchedKeys = save_sublist(Keys, PageOffset+1, PageSize),
+            MatchedKeys = safe_sublist(Keys, PageOffset+1, PageSize),
             EndHourCnt = filter_and_count_hour_keys(hour(End), Keys),
             AfterHourCnt = dig_calc_volume(hour(End), RSetDigest) - EndHourCnt,
             TotalCount = RSetDigestCnt - AfterHourCnt,
@@ -588,7 +588,7 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
             LBound = microseconds_to_min_mess_id(Start),
             UBound = hour_to_max_mess_id(UHour),
             Keys = request_keys(set_bounds(LBound, UBound, RQ)),
-            MatchedKeys = save_sublist(Keys, Offset+1, PageSize),
+            MatchedKeys = safe_sublist(Keys, Offset+1, PageSize),
             StartHourCnt = filter_and_count_hour_keys(hour(Start), Keys),
             AfterHourCnt = get_hour_key_count_after(RQ, Digest, End),
             StartHourOffset = HeadCnt - StartHourCnt,
@@ -610,7 +610,7 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
                 UBound = microseconds_to_max_mess_id(End),
                 Keys = request_keys(set_bounds(LBound, UBound, RQ)),
                 PageOffset = RSetOffset + dig_total(dig_before_hour(LHour, RSetDigest)),
-                MatchedKeys = save_sublist(Keys, PageOffset+1, PageSize),
+                MatchedKeys = safe_sublist(Keys, PageOffset+1, PageSize),
                 LastHourCnt = filter_and_count_hour_keys(hour(End), Keys),
                 %% expected - real
                 AfterHourCnt = LastCnt - LastHourCnt,
@@ -628,7 +628,7 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
             UBound = hour_to_max_mess_id(UHour),
             Keys = request_keys(set_bounds(LBound, UBound, RQ)),
             PageOffset = RSetOffset + dig_total(dig_before_hour(LHour, RSetDigest)),
-            MatchedKeys = save_sublist(Keys, PageOffset+1, PageSize),
+            MatchedKeys = safe_sublist(Keys, PageOffset+1, PageSize),
             return_matched_keys(TotalCount, Offset, MatchedKeys)
         end
     end.
@@ -1920,139 +1920,151 @@ meck_test_() ->
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
-       {generator, fun digest_update_case/0}}},
+       safe_generator(fun digest_update_case/0)}},
 
      {"With recent messages by index.",
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
-       {generator, fun index_nothing_from_digest_case/0}}},
+       safe_generator(fun index_nothing_from_digest_case/0)}},
 
      {"Paginate by index without digest (it is not yet generated).",
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
-       {generator, fun index_pagination_case/0}}},
+       safe_generator(fun index_pagination_case/0)}},
 
      {"Paginate by index. All entries are in digest. "
       "PageDigest begins in the middle of an hour.",
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
-       {generator, fun only_from_digest_non_empty_hour_offset_case/0}}},
+       safe_generator(fun only_from_digest_non_empty_hour_offset_case/0)}},
 
      {"From proper.",
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
-       {generator, fun proper_case/0}}},
+       safe_generator(fun proper_case/0)}},
+
+     {"Try to purge multiple messages.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       safe_generator(fun purge_multiple_messages_upper_bounded_case/0)}},
+
+     {"Try to purge multiple messages.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       safe_generator(fun purge_multiple_messages_lower_bounded_case/0)}},
 
      {"Index=6, PageSize=1, Start and End defined.",
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
-       {generator, fun index_bounded_last_page_case/0}}},
+       safe_generator(fun index_bounded_last_page_case/0)}},
 
      {"Index = 0, PageSize = 0, Start and End are defined.",
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
-       {generator, fun bounded_first_page_case/0}}},
+       safe_generator(fun bounded_first_page_case/0)}},
 
      {"Index=0, PageSize=1, End is defined.",
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
-       {generator, fun index_upper_bounded_last_page_case/0}}},
+       safe_generator(fun index_upper_bounded_last_page_case/0)}},
 
      {"Index = 2, PageSize = 1, Start is defined.",
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
-       {generator, fun index_upper_bounded_last_page2_case/0}}},
+       safe_generator(fun index_upper_bounded_last_page2_case/0)}},
 
      {"Selecting messages from a tiny date range. RSet is empty.",
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
-       {generator, fun tiny_empty_date_range_lookup_case/0}}},
+       safe_generator(fun tiny_empty_date_range_lookup_case/0)}},
 
      {"Selecting messages from a tiny date range. RSet is empty (2).",
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
-       {generator, fun tiny_empty_date_range_lookup2_case/0}}},
+       safe_generator(fun tiny_empty_date_range_lookup2_case/0)}},
 
      {"Selecting messages from a tiny date range. RSet is not empty (3).",
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
-       {generator, fun tiny_not_empty_date_range_lookup_case/0}}},
+       safe_generator(fun tiny_not_empty_date_range_lookup_case/0)}},
 
      {"Purge a single message.",
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
-       {generator, fun purge_single_message_case/0}}},
+       safe_generator(fun purge_single_message_case/0)}},
 
      {"Purge a single message and erase its digest.",
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
-       {generator, fun purge_single_message_digest_case/0}}},
+       safe_generator(fun purge_single_message_digest_case/0)}},
 
      {"Purge a single message and erase its digest. PageSize = 0.",
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
-       {generator, fun purge_single_message_digest_zero_page_size_case/0}}},
+       safe_generator(fun purge_single_message_digest_zero_page_size_case/0)}},
 
      {"RSetDigest is not empty, PageDigest is empty, KeyPos is inside.",
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
-       {generator, fun after_last_page_case/0}}},
+       safe_generator(fun after_last_page_case/0)}},
 
      {"Without index digest.",
       {setup,
        fun() -> load_mock(10000), load_data() end,
        fun(_) -> unload_mock() end,
-       {timeout, 60, {generator, fun long_case/0 }}}},
+       {timeout, 60, safe_generator(fun long_case/0)}}},
      {"With index digest.",
       {setup,
        fun() -> load_mock(0), load_data() end,
        fun(_) -> unload_mock() end,
-       {timeout, 60, {generator, fun long_case/0}}}},
+       {timeout, 60, safe_generator(fun long_case/0)}}},
      {"Without index digest.",
       {setup,
        fun() -> load_mock(10000), load_data2() end,
        fun(_) -> unload_mock() end,
-       {timeout, 60, {generator, fun short_case/0}}}},
+       {timeout, 60, safe_generator(fun short_case/0)}}},
      {"With index digest.",
       {setup,
        fun() -> load_mock(0), load_data2() end,
        fun(_) -> unload_mock() end,
-       {timeout, 60, {generator, fun short_case/0}}}},
+       {timeout, 60, safe_generator(fun short_case/0)}}},
      {"Without index digest.",
       {setup,
        fun() -> load_mock(10000), load_data3() end,
        fun(_) -> unload_mock() end,
-       {timeout, 60, {generator, fun incremental_pagination_case/0}}}},
+       {timeout, 60, safe_generator(fun incremental_pagination_case/0)}}},
      {"With index digest.",
       {setup,
        fun() -> load_mock(0), load_data3() end,
        fun(_) -> unload_mock() end,
-       {timeout, 60, {generator, fun incremental_pagination_case/0}}}},
+       {timeout, 60, safe_generator(fun incremental_pagination_case/0)}}},
      {"Without index digest.",
       {setup,
        fun() -> load_mock(10000), load_data3() end,
        fun(_) -> unload_mock() end,
-       {timeout, 60, {generator, fun decremental_pagination_case/0}}}},
+       {timeout, 60, safe_generator(fun decremental_pagination_case/0)}}},
      {"With index digest.",
       {setup,
        fun() -> load_mock(0), load_data3() end,
        fun(_) -> unload_mock() end,
-       {timeout, 60, {generator, fun decremental_pagination_case/0}}}}
+       {timeout, 60, safe_generator(fun decremental_pagination_case/0)}}}
     ]}.
 
 all_keys(Bucket) ->
@@ -2814,7 +2826,7 @@ incremental_pagination_gen(
         undefined, undefined, test_now(), undefined,
         PageSize, true, PageSize),
     ResultMessIDs = [message_row_to_mess_id(Row) || Row <- ResultRows],
-    {PageMessIDs, LeftMessIDs} = save_split(PageSize, MessIDs),
+    {PageMessIDs, LeftMessIDs} = safe_split(PageSize, MessIDs),
     NewOffset = Offset + length(ResultRows),
     NewLastMessID = lists:last(PageMessIDs),
     [{"Page " ++ integer_to_list(PageNum),
@@ -2824,10 +2836,10 @@ incremental_pagination_gen(
     | case NewOffset >= TotalCount of
         true -> [];
         false ->
-            {generator, fun() -> incremental_pagination_gen(
+            safe_generator(fun() -> incremental_pagination_gen(
                 NewLastMessID, PageNum + 1, PageSize,
                 NewOffset, LeftMessIDs,  TotalCount)
-             end}
+             end)
       end].
 
 decremental_pagination_case() ->
@@ -2852,7 +2864,7 @@ decremental_pagination_gen(
         undefined, undefined, test_now(), undefined,
         PageSize, true, PageSize),
     ResultMessIDs = [message_row_to_mess_id(Row) || Row <- ResultRows],
-    {LeftMessIDs, PageMessIDs} = save_split(Offset, MessIDs),
+    {LeftMessIDs, PageMessIDs} = safe_split(Offset, MessIDs),
     NewOffset = Offset - length(ResultRows),
     NewBeforeMessID = hd(PageMessIDs),
     [{"Page " ++ integer_to_list(PageNum),
@@ -2862,10 +2874,10 @@ decremental_pagination_gen(
     | case NewOffset =< 0 of
         true -> [];
         false ->
-            {generator, fun() -> decremental_pagination_gen(
+            safe_generator(fun() -> decremental_pagination_gen(
                 NewBeforeMessID, PageNum - 1, PageSize,
                 NewOffset, LeftMessIDs,  TotalCount)
-             end}
+             end)
       end].
 
 
@@ -2976,6 +2988,26 @@ only_from_digest_non_empty_hour_offset_case() ->
 
 proper_case() ->
     reset_now(),
+    [].
+
+purge_multiple_messages_lower_bounded_case() ->
+    reset_now(),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,41,49}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{1,9,18}})),
+    purge_multiple_messages(alice(),
+        datetime_to_microseconds({{2000,1,1},{0,0,0}}), undefined,
+        get_now(), cat()),
+    [].
+
+purge_multiple_messages_upper_bounded_case() ->
+    reset_now(),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,41,49}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{1,9,18}})),
+    purge_multiple_messages(alice(),
+        undefined, datetime_to_microseconds({{2000,1,1},{0,0,0}}),
+        get_now(), cat()),
     [].
 
 index_bounded_last_page_case() ->
@@ -3177,12 +3209,23 @@ after_last_page_case() ->
 
 
 %% `lists:split/3' that does allow small lists.
-%% `lists:split/2' is already save.
-save_split(N, L) when length(L) < N ->
+%% `lists:split/2' is already safe.
+safe_split(N, L) when length(L) < N ->
     {L, []};
-save_split(N, L) ->
+safe_split(N, L) ->
     lists:split(N, L).
 
+safe_generator(F) ->
+    {generator, fun() -> run_safe_generator(F) end}.
+
+run_safe_generator(F) ->
+    try
+        F()
+    catch error:Reason ->
+        T = erlang:get_stacktrace(),
+        ?debugVal(T),
+        [?_assertEqual('BAD GENERATOR', Reason)]
+    end.
 
 message_row_to_mess_id({MessId, _, _}) -> MessId.
 
@@ -3313,9 +3356,9 @@ calc_range(_,   Start, End)       -> End - Start.
 sublist_r(Keys, N) ->
     lists:sublist(Keys, max(0, length(Keys) - N) + 1, N).
 
-save_sublist(L, S, C) when S =< length(L), S > 0 ->
+safe_sublist(L, S, C) when S =< length(L), S > 0 ->
     lists:sublist(L, S, C);
-save_sublist(_, _, _) ->
+safe_sublist(_, _, _) ->
     [].
 
 is_single_page(PageSize, PageDigest) ->
