@@ -543,8 +543,7 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
             UBound = hour_to_max_mess_id(UHour),
             Keys = request_keys(set_bounds(LBound, UBound, RQ)),
             MatchedKeys = save_sublist(Keys, Offset+1, PageSize),
-            %% FIXME
-            StartHourCnt = filter_after_timestamp(hour_to_max_microseconds(hour(Start))+1, Keys),
+            StartHourCnt = filter_and_count_hour_keys(hour(Start), Keys),
             AfterHourCnt = get_hour_key_count_after(RQ, Digest, End),
             StartHourOffset = HeadCnt - StartHourCnt,
             TotalCount = RSetDigestCnt - StartHourOffset - AfterHourCnt,
@@ -566,7 +565,7 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
                 Keys = request_keys(set_bounds(LBound, UBound, RQ)),
                 PageOffset = RSetOffset + dig_total(dig_before_hour(LHour, RSetDigest)),
                 MatchedKeys = save_sublist(Keys, PageOffset+1, PageSize),
-                LastHourCnt = filter_after_timestamp(hour_to_min_microseconds(hour(End)), Keys),
+                LastHourCnt = filter_and_count_hour_keys(hour(End), Keys),
                 %% expected - real
                 AfterHourCnt = LastCnt - LastHourCnt,
                 TotalCount = RSetDigestCnt - StartHourOffset - AfterHourCnt,
@@ -1509,16 +1508,6 @@ filter_after(AfterKey, [Key|Keys]) when Key =< AfterKey ->
     filter_after(AfterKey, Keys);
 filter_after(_, Keys) -> Keys.
 
-%% Start included
-filter_after_timestamp(Start, Keys) ->
-    filter_after_mess_id(hour_to_min_microseconds(Start), Keys).
-
-filter_after_mess_id(_, []) ->
-    [];
-filter_after_mess_id(MessID, Keys) ->
-    AfterKey = replace_mess_id(MessID, hd(Keys)),
-    filter_after(AfterKey, Keys).
-
 filter_and_count_hour_keys(Hour, Keys) ->
     length(filter_hour_keys(Hour, Keys)).
 
@@ -1911,6 +1900,12 @@ meck_test_() ->
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
        {generator, fun proper_case/0}}},
+
+     {"Index = 0, PageSize = 0, Start and End are defined.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       {generator, fun bounded_first_page_case/0}}},
 
      {"Index = 2, PageSize = 1, Start is defined.",
       {setup,
@@ -2924,6 +2919,21 @@ only_from_digest_non_empty_hour_offset_case() ->
 proper_case() ->
     reset_now(),
     [].
+
+bounded_first_page_case() ->
+    %% bounded_first_page
+    reset_now(),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,46,27}})),
+    archive_message(id(), incoming, alice(), cat(), cat(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{2,15,6}})),
+    lookup_messages(alice(), undefined, undefined, undefined,
+        get_now(), undefined, 4, true, 256),
+    set_now(datetime_to_microseconds({{2000,1,1},{6,0,37}})),
+    assert_keys(0, 0, [],
+        lookup_messages(alice(), #rsm_in{index=0},
+            datetime_to_microseconds({{2000,1,1},{0,0,0}}) + 14,
+            datetime_to_microseconds({{2000,1,1},{0,0,0}}) + 28,
+            get_now(), undefined, 0, true, 256)).
 
 index_upper_bounded_last_page_case() ->
     %% index_upper_bounded_last_page
