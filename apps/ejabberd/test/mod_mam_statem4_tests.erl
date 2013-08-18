@@ -313,7 +313,10 @@ pretty_print_purge_messages(LocJID, Start, End, Now, WithJID) ->
          pretty_print_jid(LocJID),
          pretty_print_maybe_microseconds(Start),
          pretty_print_maybe_microseconds(End),
-         pretty_print_jid(WithJID)]).
+         maybe_pretty_print_jid(WithJID)]).
+
+maybe_pretty_print_jid(undefined) -> "undefined";
+maybe_pretty_print_jid(JID) -> pretty_print_jid(JID).
 
 pretty_print_jid(#jid{luser = <<"alice">>}) -> "alice()";
 pretty_print_jid(#jid{luser = <<"cat">>, lresource = <<"1">>})   -> "cat1()";

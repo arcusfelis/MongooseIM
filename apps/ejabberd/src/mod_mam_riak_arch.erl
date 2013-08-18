@@ -1963,6 +1963,12 @@ meck_test_() ->
        fun(_) -> unload_mock() end,
        safe_generator(fun purge_multiple_messages_upper_bounded_case/0)}},
 
+     {"Try to purge multiple messages (upper bounded, WithJID is undefined).",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       safe_generator(fun purge_multiple_messages_upper_bounded_undefined_with_jid_case/0)}},
+
      {"Index=6, PageSize=1, Start and End defined.",
       {setup,
        fun() -> load_mock(0) end,
@@ -2116,7 +2122,13 @@ load_mock(DigestThreshold) ->
             Keys = ets:select(IdxTab, MS),
             {ok, ?INDEX_RESULTS{keys=Keys}}
         end),
-    meck:expect(SM, mapred, fun(Conn, Keys, Ops) ->
+    meck:expect(SM, mapred, fun
+        (Conn, {index, Bucket, Key, LBound, UBound}, Ops) ->
+            {ok, ?INDEX_RESULTS{keys=Keys}} =
+                riakc_pb_socket:get_index_range(Conn, Bucket, Key, LBound, UBound),
+            riakc_pb_socket:mapred(Conn, Keys, Ops);
+
+        (Conn, Keys, Ops) ->
         case Ops of
         %% Get values
         %% see `to_values/2'
@@ -2998,7 +3010,6 @@ only_from_digest_non_empty_hour_offset_case() ->
             get_now(), undefined, 4, true, 256)).
 
 proper_case() ->
-    reset_now(),
     [].
 
 purge_multiple_messages_lower_bounded_case() ->
@@ -3019,6 +3030,15 @@ purge_multiple_messages_upper_bounded_case() ->
     purge_multiple_messages(alice(),
         undefined, datetime_to_microseconds({{2000,1,1},{0,0,0}}),
         get_now(), cat()),
+    [].
+
+purge_multiple_messages_upper_bounded_undefined_with_jid_case() ->
+    reset_now(),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,0,0}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{1,37,41}})),
+    purge_multiple_messages(alice(), undefined,
+        datetime_to_microseconds({{2000,1,1},{0,0,0}}), get_now(), undefined),
     [].
 
 index_bounded_last_page_case() ->
