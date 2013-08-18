@@ -236,6 +236,18 @@ safe_sublist_test_() ->
     ,?_assertEqual([],      safe_sublist([], 1, 2))
     ].
 
+dig_subtract_test_() ->
+    [{"Delete the tail.",
+      ?_assertEqual([{262969,1}],
+                    dig_decrease([{262969,1},{262970,1}], [{262970,1}])}
+    ,{"Delete the head.",
+      ?_assertEqual([{262970,1}],
+                   dig_decrease([{262969,1},{262970,1}], [{262969,1}])}
+    ,{"DeletedDigest contains recent entries.",
+      ?_assertEqual([],
+                    dig_decrease([{262969,1}], [{262969,1},{262970,1}])}
+    ].
+
 dig_decrease_test_() ->
     [?_assertEqual([{262969,1}], dig_decrease([{262969,1},{262970,1}], 262970, 1))
     ].
@@ -978,7 +990,7 @@ digest_to_binary(Digest) ->
 
 binary_to_digest(<<>>) ->
     [];
-binary_to_digest(Bin) ->
+binary_to_digest(Bin) when is_binary(Bin) ->
     binary_to_term(Bin).
 
 get_actual_digest(Conn, RQ, DigestKey, Now) ->
@@ -1659,8 +1671,9 @@ dig_subtract([{Hour1, _}=H1|T1], [{Hour2, _}|_]=T2) when Hour1 < Hour2 ->
     %% Hour2 | ? | Hour2 |
     %% unexpected, ignore
     [H1|dig_subtract(T1, T2)];
-dig_subtract([], []) ->
-    [].
+dig_subtract(T, _) ->
+    %% Ignore `SubDigest''s tail.
+    T.
 
 %% @doc Decrease a counter for a specified hour.
 dig_decrease([{Hour, Cnt}|T], Hour, Cnt) ->
@@ -1977,6 +1990,18 @@ meck_test_() ->
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
        safe_generator(fun purge_multiple_messages_upper_from_digest_case/0)}},
+
+     {"Try to purge multiple messages from the old (non-actual) digest.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       safe_generator(fun purge_multiple_messages_from_old_digest_case/0)}},
+
+     {"Try to purge multiple messages from the head of the digest.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       safe_generator(fun purge_multiple_messages_drop_digest_head_case/0)}},
 
      {"Index=6, PageSize=1, Start and End defined.",
       {setup,
@@ -3055,12 +3080,43 @@ purge_multiple_messages_upper_from_digest_case() ->
     set_now(datetime_to_microseconds({{2000,1,1},{2,54,12}})),
     archive_message(id(), incoming, alice(), cat(), cat(), packet()),
     set_now(datetime_to_microseconds({{2000,1,1},{3,15,31}})),
-    lookup_messages(alice(), #rsm_in{index=10}, undefined,
-        datetime_to_microseconds({{2000,1,1},{0,0,0}}),
+    lookup_messages(alice(), undefined, undefined, undefined,
         get_now(), cat(), 3, true, 256),
     set_now(datetime_to_microseconds({{2000,1,1},{4,9,44}})),
     purge_multiple_messages(alice(),
         datetime_to_microseconds({{2000,1,1},{0,0,0}}), undefined,
+        get_now(), cat()),
+    [].
+
+purge_multiple_messages_from_old_digest_case() ->
+    reset_now(),
+    set_now(datetime_to_microseconds({{2000,1,1},{1,46,23}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{2,20,28}})),
+    lookup_messages(alice(), undefined, undefined, undefined,
+        get_now(), undefined, 3, true, 256),
+    set_now(datetime_to_microseconds({{2000,1,1},{2,54,45}})),
+    archive_message(id(), incoming, alice(), cat(), cat(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{4,31,38}})),
+    purge_multiple_messages(alice(),
+        datetime_to_microseconds({{2000,1,1},{0,0,0}}),
+        datetime_to_microseconds({{2000,1,1},{2,54,45}}),
+        get_now(), cat()),
+    [].
+
+purge_multiple_messages_drop_digest_head_case() ->
+    reset_now(),
+    set_now(datetime_to_microseconds({{2000,1,1},{1,6,5}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{2,56,28}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{3,11,27}})),
+    lookup_messages(alice(), undefined, undefined, undefined,
+        get_now(), undefined, 5, true, 256),
+    set_now(datetime_to_microseconds({{2000,1,1},{4,42,30}})),
+    purge_multiple_messages(alice(),
+        datetime_to_microseconds({{2000,1,1},{0,0,0}}),
+        datetime_to_microseconds({{2000,1,1},{1,6,5}}),
         get_now(), cat()),
     [].
 
@@ -3500,8 +3556,9 @@ sparse_purge_object(Conn, DeletedMessKeys, DigestObj) ->
     DeletedDigest = dig_new(DeletedMessKeys),
     MergedDigestObj = merge_siblings(RQ, DigestObj),
     Digest = binary_to_digest(riakc_obj:get_value(MergedDigestObj)),
+    %% `DeletedDigest' CAN contain new values (top hours).
     NewDigest = dig_subtract(Digest, DeletedDigest),
-    riakc_obj:update_value(MergedDigestObj, NewDigest).
+    riakc_obj:update_value(MergedDigestObj, digest_to_binary(NewDigest)).
 
 save_updated_digests(Conn, ModifiedObjects) ->
     {Deleted, Updated} = lists:partition(fun is_empty_digest_obj/1, ModifiedObjects),
