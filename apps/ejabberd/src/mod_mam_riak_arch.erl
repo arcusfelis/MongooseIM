@@ -1206,8 +1206,8 @@ purge_multiple_messages(Conn, #jid{lserver=LServer, luser=LUser}, Start, End,
         BareDigestKey = digest_key(BUserID, BWithJID),
         FullDigestKeys = get_full_jid_digest_keys(Conn, LServer, LUser, BWithJID),
         %% Delete all entries in the range for next digests.
-        Keys = [BareDigestKey | FullDigestKeys],
-        OldDigestObjects = to_objects(Conn, Keys),
+        DigestKeys = [BareDigestKey | FullDigestKeys],
+        OldDigestObjects = to_digest_objects(Conn, DigestKeys),
         NewDigestObjects = merge_and_purge_digest_objects(Conn, Start, End, OldDigestObjects),
         Updated = sparse_purge(Conn, Keys, UserDigestKey)
                ++ filter_midified_objects(OldDigestObjects, NewDigestObjects),
@@ -1723,6 +1723,10 @@ to_values(Conn, Keys) ->
             Values
     end.
 
+to_digest_objects(Conn, Keys) ->
+    FullKeys = [{digest_bucket(), Key} || Key <- Keys],
+    to_objects(Conn, FullKeys).
+
 to_objects(Conn, Keys) ->
     [assert_valid_key(Key) || Key <- Keys],
     Ops = [{map, {modfun, riak_kv_mapreduce, map_identity}, undefined, true}],
@@ -1947,17 +1951,17 @@ meck_test_() ->
        fun(_) -> unload_mock() end,
        safe_generator(fun proper_case/0)}},
 
-     {"Try to purge multiple messages.",
-      {setup,
-       fun() -> load_mock(0) end,
-       fun(_) -> unload_mock() end,
-       safe_generator(fun purge_multiple_messages_upper_bounded_case/0)}},
-
-     {"Try to purge multiple messages.",
+     {"Try to purge multiple messages (lower bounded).",
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
        safe_generator(fun purge_multiple_messages_lower_bounded_case/0)}},
+
+     {"Try to purge multiple messages (upper bounded).",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       safe_generator(fun purge_multiple_messages_upper_bounded_case/0)}},
 
      {"Index=6, PageSize=1, Start and End defined.",
       {setup,
@@ -2118,6 +2122,13 @@ load_mock(DigestThreshold) ->
         %% see `to_values/2'
         [{map, {modfun, riak_kv_mapreduce, map_object_value}, undefined, true}] ->
             case [proplists:get_value(value, Obj)
+                 || Key <- Keys,
+                    {Key, Obj} <- ets:lookup(Tab, Key)] of
+                []     -> {ok, []};
+                Values -> {ok, [{0, Values}]}
+            end;
+        [{map, {modfun, riak_kv_mapreduce, map_identity}, undefined, true}] ->
+            case [Obj
                  || Key <- Keys,
                     {Key, Obj} <- ets:lookup(Tab, Key)] of
                 []     -> {ok, []};
