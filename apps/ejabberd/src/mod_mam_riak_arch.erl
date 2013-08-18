@@ -511,6 +511,7 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
             return_matched_keys(TotalCount, Offset, MatchedKeys)
         end;
     bounded ->
+        %% `Start' and `End' hours are included.
         RSetDigest = dig_to_hour(hour(End), dig_from_hour(hour(Start), Digest)),
         %% Expected size of the Result Set in best-cast scenario (maximim)
         RSetDigestCnt = dig_total(RSetDigest),
@@ -547,17 +548,26 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
         bounded_last_page ->
             StartHourOffset = get_hour_key_count_before(RQ, Digest, Start),
             RSetOffset = HeadCnt + Offset - StartHourOffset,
-            LHour = dig_nth(RSetOffset, RSetDigest),
-            LBound = hour_to_min_mess_id(LHour),
-            UBound = microseconds_to_max_mess_id(End),
-            Keys = request_keys(set_bounds(LBound, UBound, RQ)),
-            PageOffset = RSetOffset + dig_total(dig_before_hour(LHour, RSetDigest)),
-            MatchedKeys = save_sublist(Keys, PageOffset+1, PageSize),
-            LastHourCnt = filter_after_timestamp(hour_to_min_microseconds(hour(End)), Keys),
-            %% expected - real
-            AfterHourCnt = LastCnt - LastHourCnt,
-            TotalCount = RSetDigestCnt - StartHourOffset - AfterHourCnt,
-            return_matched_keys(TotalCount, Offset, MatchedKeys);
+            RSetDigestCnt = dig_total(RSetDigest),
+            case RSetOffset >= RSetDigestCnt of
+            true -> 
+%               true = hour(Start) =/= hour(End),
+                AfterHourCnt = get_hour_key_count_after(RQ, Digest, End),
+                TotalCount = RSetDigestCnt - StartHourOffset - AfterHourCnt,
+                {ok, {TotalCount, Offset, []}};
+            false ->
+                LHour = dig_nth(RSetOffset, RSetDigest),
+                LBound = hour_to_min_mess_id(LHour),
+                UBound = microseconds_to_max_mess_id(End),
+                Keys = request_keys(set_bounds(LBound, UBound, RQ)),
+                PageOffset = RSetOffset + dig_total(dig_before_hour(LHour, RSetDigest)),
+                MatchedKeys = save_sublist(Keys, PageOffset+1, PageSize),
+                LastHourCnt = filter_after_timestamp(hour_to_min_microseconds(hour(End)), Keys),
+                %% expected - real
+                AfterHourCnt = LastCnt - LastHourCnt,
+                TotalCount = RSetDigestCnt - StartHourOffset - AfterHourCnt,
+                return_matched_keys(TotalCount, Offset, MatchedKeys)
+            end;
         bounded_middle_page ->
             AfterHourCnt = get_hour_key_count_after(RQ, Digest, End),
             StartHourOffset = get_hour_key_count_before(RQ, Digest, Start),
@@ -843,7 +853,7 @@ analyse_digest_last_page(RQ, RSM, Start, End, PageSize, Digest) ->
             case dig_total(Digest2) =< PageSize of
             true -> query_all(RQ, RSM, PageSize); %% It is a small range
             false ->
-                StartHourCnt = get_hour_key_count_after(RQ, Digest, Start),
+                StartHourCnt = get_hour_key_count_from(RQ, Digest, Start),
                 Keys = get_minimum_key_range_before(RQ, Digest2, End, PageSize),
                 RecentCnt = filter_and_count_recent_keys(Keys, Digest2),
                 TotalCount = StartHourCnt + dig_total(Digest2) + RecentCnt,
@@ -869,7 +879,7 @@ analyse_digest_last_page(RQ, RSM, Start, End, PageSize, Digest) ->
             case dig_total(Digest2) =< PageSize of
             true -> query_all(RQ, RSM, PageSize); %% It is a small range
             false ->
-                StartHourCnt = get_hour_key_count_after(RQ, Digest, Start),
+                StartHourCnt = get_hour_key_count_from(RQ, Digest, Start),
                 Keys = get_minimum_key_range_before(RQ, Digest2, End, PageSize),
                 LastHourCnt = filter_and_count_recent_keys(Keys, Digest2),
                 TotalCount = StartHourCnt + dig_total(Digest2) + LastHourCnt,
@@ -1691,6 +1701,34 @@ get_key_count_between(_, _, _, _) ->
     0.
 
 
+maybe_get_hour_key_count_from(_RQ, _Digest, undefined) ->
+    0;
+maybe_get_hour_key_count_from(RQ, Digest, Microseconds) ->
+    get_hour_key_count_from(RQ, Digest, Microseconds).
+
+get_hour_key_count_from(RQ, Digest, Microseconds) ->
+    case dig_is_skipped(hour(Microseconds), Digest) of
+    true -> 0;
+    false -> request_hour_key_count_from(RQ, Microseconds)
+    end.
+
+request_hour_key_count_from(RQ, Microseconds) ->
+    LBound = microseconds_to_min_mess_id(Microseconds),
+    UBound = hour_to_max_mess_id(hour(Microseconds)),
+    request_key_count(set_bounds(LBound, UBound, RQ)).
+
+get_hour_key_count_to(RQ, Digest, Microseconds) ->
+    case dig_is_skipped(hour(Microseconds), Digest) of
+    true -> 0;
+    false -> request_hour_key_count_to(RQ, Microseconds)
+    end.
+
+request_hour_key_count_to(RQ, Microseconds) ->
+    LBound = hour_to_min_mess_id(hour(Microseconds)),
+    UBound = microseconds_to_max_mess_id(Microseconds),
+    request_key_count(set_bounds(LBound, UBound, RQ)).
+
+
 maybe_get_hour_key_count_after(_RQ, _Digest, undefined) ->
     0;
 maybe_get_hour_key_count_after(RQ, Digest, Microseconds) ->
@@ -1703,9 +1741,14 @@ get_hour_key_count_after(RQ, Digest, Microseconds) ->
     end.
 
 request_hour_key_count_after(RQ, Microseconds) ->
-    LBound = microseconds_to_min_mess_id(Microseconds),
-    UBound = hour_to_max_mess_id(hour(Microseconds)),
-    request_key_count(set_bounds(LBound, UBound, RQ)).
+    case hour(Microseconds) =:= hour(Microseconds+1) of
+    %% Microseconds has a zero hour offset.
+    false -> 0;
+    true ->
+        LBound = microseconds_to_min_mess_id(Microseconds+1),
+        UBound = hour_to_max_mess_id(hour(Microseconds)),
+        request_key_count(set_bounds(LBound, UBound, RQ))
+    end.
 
 get_hour_key_count_before(RQ, Digest, Microseconds) ->
     case dig_is_skipped(hour(Microseconds), Digest) of
@@ -1714,9 +1757,14 @@ get_hour_key_count_before(RQ, Digest, Microseconds) ->
     end.
 
 request_hour_key_count_before(RQ, Microseconds) ->
-    LBound = hour_to_min_mess_id(hour(Microseconds)),
-    UBound = microseconds_to_max_mess_id(Microseconds),
-    request_key_count(set_bounds(LBound, UBound, RQ)).
+    case hour(Microseconds) =:= hour(Microseconds-1) of
+    %% Microseconds has a zero hour offset.
+    false -> 0;
+    true ->
+        LBound = hour_to_min_mess_id(hour(Microseconds)),
+        UBound = microseconds_to_max_mess_id(Microseconds-1),
+        request_key_count(set_bounds(LBound, UBound, RQ))
+    end.
 
 get_hour_key_count(RQ, Hour) ->
     LBound = hour_to_min_mess_id(Hour),
@@ -1859,6 +1907,18 @@ meck_test_() ->
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
        {generator, fun tiny_empty_date_range_lookup_case/0}}},
+
+     {"Selecting messages from a tiny date range. RSet is empty (2).",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       {generator, fun tiny_empty_date_range_lookup2_case/0}}},
+
+     {"Selecting messages from a tiny date range. RSet is not empty (3).",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       {generator, fun tiny_not_empty_date_range_lookup_case/0}}},
 
      {"Purge a single message.",
       {setup,
@@ -2249,9 +2309,8 @@ long_case() ->
                     undefined, test_now(), undefined,
                     5, true, 5))},
 
-    %% upper_bounded
     {"Last 5 from both conversations with an upper bound.",
-    %% lower_bounded
+    %% upper_bounded
     ?_assertKeys(28, 23,
                 [join_date_time("2000-07-22", Time)
                  || Time <- ["06:49:50", "06:50:05", "06:50:10",
@@ -2864,6 +2923,38 @@ tiny_empty_date_range_lookup_case() ->
             datetime_to_microseconds({{2000,1,1},{0,0,0}}) + 17,
             get_now(), undefined, 0, true, 256)).
 
+tiny_empty_date_range_lookup2_case() ->
+    reset_mock(),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,0,0}})),
+    archive_message(id(), incoming, alice(), cat(), cat(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,38,30}})),
+    archive_message(id(), incoming, alice(), cat(), cat(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{3,11,47}})),
+    lookup_messages(alice(), undefined, undefined, undefined,
+        get_now(), undefined, 0, true, 256),
+    set_now(datetime_to_microseconds({{2000,1,1},{4,12,49}})),
+    assert_keys(0, 2, [],
+        lookup_messages(alice(), #rsm_in{index=2},
+            datetime_to_microseconds({{2000,1,1},{0,0,0}}) + 4,
+            datetime_to_microseconds({{2000,1,1},{0,0,0}}) + 17,
+            get_now(), undefined, 0, true, 256)).
+
+tiny_not_empty_date_range_lookup_case() ->
+    reset_mock(),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,0,0}})),
+    archive_message(id(), incoming, alice(), cat(), cat(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,38,30}})),
+    archive_message(id(), incoming, alice(), cat(), cat(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{3,11,47}})),
+    lookup_messages(alice(), undefined, undefined, undefined,
+        get_now(), undefined, 0, true, 256),
+    set_now(datetime_to_microseconds({{2000,1,1},{4,12,49}})),
+    assert_keys(1, 2, [],
+        lookup_messages(alice(), #rsm_in{index=2},
+            datetime_to_microseconds({{2000,1,1},{0,0,0}}),
+            datetime_to_microseconds({{2000,1,1},{0,0,0}}) + 17,
+            get_now(), undefined, 0, true, 256)).
+
 purge_single_message_case() ->
     reset_mock(),
     set_now(datetime_to_microseconds({{2000,1,1},{0,0,0}})),
@@ -3166,8 +3257,8 @@ dig_purge(RQ, Start, End, Digest) ->
     EndHour   = hour(End),
     BeforeStartDigest = dig_before_hour(StartHour, Digest),
     AfterEndDigest    = dig_after_hour(EndHour, Digest),
-    NewStartHourCnt = get_hour_key_count_after(RQ, Digest, Start),
-    NewEndHourCnt   = get_hour_key_count_before(RQ, Digest, End),
+    NewStartHourCnt = get_hour_key_count_from(RQ, Digest, Start),
+    NewEndHourCnt   = get_hour_key_count_to(RQ, Digest, End),
     dig_concat([BeforeStartDigest, dig_cell(StartHour, NewStartHourCnt),
                 dig_cell(EndHour, NewEndHourCnt), AfterEndDigest]).
     
