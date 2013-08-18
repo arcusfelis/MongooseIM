@@ -565,10 +565,11 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
         RSetDigestCnt = dig_total(RSetDigest),
         HeadCnt = dig_first_count(RSetDigest),
         LastCnt = dig_last_count(RSetDigest),
+        MinRSetDigestCnt = RSetDigestCnt - LastCnt - HeadCnt,
         Strategy2 =
         case {Offset + PageSize > RSetDigestCnt,
               Offset < HeadCnt,
-              Offset + PageSize > RSetDigestCnt - LastCnt} of
+              Offset + PageSize > MinRSetDigestCnt} of
         {true, _, _} -> bounded_count_only;
         {false, true, true} -> bounded_query_all;
         {false, true, false} -> bounded_first_page;
@@ -1946,6 +1947,12 @@ meck_test_() ->
        fun(_) -> unload_mock() end,
        {generator, fun proper_case/0}}},
 
+     {"Index=6, PageSize=1, Start and End defined.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       {generator, fun index_bounded_last_page_case/0}}},
+
      {"Index = 0, PageSize = 0, Start and End are defined.",
       {setup,
        fun() -> load_mock(0) end,
@@ -2970,6 +2977,35 @@ only_from_digest_non_empty_hour_offset_case() ->
 proper_case() ->
     reset_now(),
     [].
+
+index_bounded_last_page_case() ->
+    %% bounded_last_page
+    reset_now(),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,0,0}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,45,22}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{2,16,32}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{2,57,0}})),
+    archive_message(id(), incoming, alice(), cat(), cat(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{4,16,0}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{4,55,3}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{5,31,3}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{6,4,12}})),
+    archive_message(id(), incoming, alice(), cat(), cat(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{7,58,47}})),
+    lookup_messages(alice(), undefined, undefined, undefined,
+        get_now(), undefined, 2, true, 256),
+    set_now(datetime_to_microseconds({{2000,1,1},{9,11,18}})),
+    assert_keys(8, 6, [],
+        lookup_messages(alice(), #rsm_in{index=6},
+            datetime_to_microseconds({{2000,1,1},{0,0,0}}),
+            datetime_to_microseconds({{2000,1,1},{6,4,12}}),
+            get_now(), undefined, 1, true, 256)).
 
 index_upper_bounded_last_page_case() ->
     %% index_upper_bounded_last_page

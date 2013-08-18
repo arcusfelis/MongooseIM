@@ -42,8 +42,18 @@ cat() ->
 maybe_cat() ->
     oneof([undefined, cat()]).
 
-random_microseconds(#state{next_now=Now}) ->
+random_microseconds(S=#state{mess_ids=[]}) ->
+    random_microseconds_v1(S);
+random_microseconds(S=#state{mess_ids=[_|_]}) ->
+    oneof([random_microseconds_v1(S), random_microseconds_v2(S)]).
+
+%% @doc Random timestamp.
+random_microseconds_v1(#state{next_now=Now}) ->
     integer(init_now(), Now).
+
+%% @doc Timestamp of an existing message.
+random_microseconds_v2(#state{mess_ids=MessIDs}) ->
+    ?LET(MessID, oneof(MessIDs), mess_id_to_microseconds(MessID)).
 
 maybe_start_and_end(S) ->
     oneof([
@@ -59,6 +69,9 @@ init_now() ->
 
 microseconds_to_mess_id(Microseconds) when is_integer(Microseconds) ->
     Microseconds * 256.
+
+mess_id_to_microseconds(MessID) when is_integer(MessID) ->
+    MessID div 256.
 
 next_now(S=#state{next_now=PrevNow}) ->
     set_next_now(PrevNow + random_microsecond_delay(), S).
