@@ -268,8 +268,8 @@ pretty_print_result([{set, _,
     |pretty_print_result(T)];
 pretty_print_result([{set, _,
     {call, _, lookup_messages,
-     [LocJID, RSM, Start, End, Now, _, PageSize, _, _]}}|T]) ->
-    [pretty_print_lookup_messages(LocJID, RSM, Start, End, Now, PageSize)
+     [LocJID, RSM, Start, End, Now, WithJID, PageSize, _, _]}}|T]) ->
+    [pretty_print_lookup_messages(LocJID, RSM, Start, End, Now, WithJID, PageSize)
     |pretty_print_result(T)];
 
 pretty_print_result([{set, _,
@@ -293,16 +293,17 @@ pretty_print_archive_message(MessID, Dir, LocJID, RemJID, SrcJID) ->
          pretty_print_jid(RemJID),
          pretty_print_jid(SrcJID)]).
 
-pretty_print_lookup_messages(LocJID, RSM, Start, End, Now, PageSize) ->
+pretty_print_lookup_messages(LocJID, RSM, Start, End, Now, WithJID, PageSize) ->
     io_lib:format(
         "set_now(~s),~n"
         "lookup_messages(~s, ~s, ~s, ~s, "
-        "get_now(), undefined, ~p, true, 256),~n",
+        "get_now(), ~s, ~p, true, 256),~n",
         [pretty_print_microseconds(Now),
          pretty_print_jid(LocJID),
          pretty_print_rsm(RSM),
          pretty_print_maybe_microseconds(Start),
          pretty_print_maybe_microseconds(End),
+         maybe_pretty_print_jid(WithJID),
          PageSize]).
 
 pretty_print_purge_messages(LocJID, Start, End, Now, WithJID) ->

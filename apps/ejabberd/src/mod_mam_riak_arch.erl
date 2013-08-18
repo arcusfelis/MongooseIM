@@ -1615,6 +1615,9 @@ dig_merge(RQ, Digests) ->
 dig_concat(Digests) ->
     [Hour2Count || Digest <- Digests, Hour2Count <- Digest].
 
+dig_concat(Digest1, Digest2) ->
+    Digest1 ++ Digest2.
+
 merge_digest(RQ, Hour, Cnts, SiblingCnt) ->
     case all_equal(Cnts) andalso length(Cnts) =:= SiblingCnt of
         true -> [{Hour, hd(Cnts)}]; %% good value
@@ -1968,6 +1971,12 @@ meck_test_() ->
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
        safe_generator(fun purge_multiple_messages_upper_bounded_undefined_with_jid_case/0)}},
+
+     {"Try to purge multiple messages from the digest.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       safe_generator(fun purge_multiple_messages_upper_from_digest_case/0)}},
 
      {"Index=6, PageSize=1, Start and End defined.",
       {setup,
@@ -3041,6 +3050,20 @@ purge_multiple_messages_upper_bounded_undefined_with_jid_case() ->
         datetime_to_microseconds({{2000,1,1},{0,0,0}}), get_now(), undefined),
     [].
 
+purge_multiple_messages_upper_from_digest_case() ->
+    reset_now(),
+    set_now(datetime_to_microseconds({{2000,1,1},{2,54,12}})),
+    archive_message(id(), incoming, alice(), cat(), cat(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{3,15,31}})),
+    lookup_messages(alice(), #rsm_in{index=10}, undefined,
+        datetime_to_microseconds({{2000,1,1},{0,0,0}}),
+        get_now(), cat(), 3, true, 256),
+    set_now(datetime_to_microseconds({{2000,1,1},{4,9,44}})),
+    purge_multiple_messages(alice(),
+        datetime_to_microseconds({{2000,1,1},{0,0,0}}), undefined,
+        get_now(), cat()),
+    [].
+
 index_bounded_last_page_case() ->
     %% bounded_last_page
     reset_now(),
@@ -3414,7 +3437,7 @@ merge_and_purge_digest_object(Conn, Start, End, DigestObj) ->
     RQ = make_query(Conn, DigestObj),
     MergedDigestObj = merge_siblings(RQ, DigestObj),
     Digest = binary_to_digest(riakc_obj:get_value(MergedDigestObj)),
-    NewDigest = dig_purge(RQ, Start, End, Digest),
+    NewDigest = dig_purge(Start, End, RQ, Digest),
     riakc_obj:update_value(MergedDigestObj, digest_to_binary(NewDigest)).
 
 merge_and_single_purge_digest_object(Conn, MessID, DigestObj)
@@ -3428,15 +3451,24 @@ merge_and_single_purge_digest_object(Conn, MessID, DigestObj)
 %% @doc Delete any information from the digest about records
 %%      in the period from `Start' to `End'.
 %% @end
-dig_purge(RQ, Start, End, Digest) ->
+dig_purge(Start, End, RQ, Digest) ->
+    dig_purge_after(End, RQ, dig_purge_before(Start, RQ, Digest)).
+
+dig_purge_before(undefined, _, Digest) ->
+    Digest;
+dig_purge_before(Start, RQ, Digest) ->
     StartHour = hour(Start),
-    EndHour   = hour(End),
     BeforeStartDigest = dig_before_hour(StartHour, Digest),
-    AfterEndDigest    = dig_after_hour(EndHour, Digest),
     NewStartHourCnt = get_hour_key_count_from(RQ, Digest, Start),
-    NewEndHourCnt   = get_hour_key_count_to(RQ, Digest, End),
-    dig_concat([BeforeStartDigest, dig_cell(StartHour, NewStartHourCnt),
-                dig_cell(EndHour, NewEndHourCnt), AfterEndDigest]).
+    dig_concat(BeforeStartDigest, dig_cell(StartHour, NewStartHourCnt)).
+
+dig_purge_after(undefined, _, Digest) ->
+    Digest;
+dig_purge_after(End, RQ, Digest) ->
+    EndHour = hour(End),
+    AfterEndDigest = dig_after_hour(EndHour, Digest),
+    NewEndHourCnt = get_hour_key_count_to(RQ, Digest, End),
+    dig_concat(dig_cell(EndHour, NewEndHourCnt), AfterEndDigest).
     
 dig_cell(_,    0  ) -> [];
 dig_cell(Hour, Cnt) -> [{Hour, Cnt}].
