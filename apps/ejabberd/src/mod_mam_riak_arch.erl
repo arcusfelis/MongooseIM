@@ -195,6 +195,51 @@ paginate(Keys, _, PageSize) ->
 
 -ifdef(TEST).
 
+sublist_r_test_() ->
+    [?_assertEqual([], sublist_r([], 1)),
+     ?_assertEqual([1], sublist_r([1], 1)),
+     ?_assertEqual([4,5], sublist_r([1,2,3,4,5], 2)),
+     ?_assertEqual([1,2,3], sublist_r([1,2,3], 5)),
+     ?_assertEqual([1,2,3,4,5], sublist_r([1,2,3,4,5], 5))
+    ].
+
+dig_before_hour_test_() ->
+    [?_assertEqual([{2, 10}, {3, 15}], dig_before_hour(5, [{2, 10}, {3, 15}])),
+     ?_assertEqual([], dig_before_hour(5, [{5, 10}])),
+     ?_assertEqual([], dig_before_hour(5, [{6, 10}]))
+    ].
+
+dig_position_test_() ->
+    Digest = [{3, 25}, {6, 15}],
+    [?_assertEqual(before, dig_position(2, Digest)),
+     ?_assertEqual(inside, dig_position(3, Digest)),
+     ?_assertEqual(inside, dig_position(5, Digest)),
+     ?_assertEqual(inside, dig_position(6, Digest)),
+     ?_assertEqual('after', dig_position(8, Digest))].
+
+frequency_test_() ->
+    [?_assertEqual([{a, 2}, {b, 3}], frequency([a, a, b, b, b]))].
+
+
+page_minimum_hour_test_() ->
+    [?_assertEqual(3, page_minimum_hour( 5, [{1, 6}, {2, 5}, {3, 8}])),
+     ?_assertEqual(2, page_minimum_hour(10, [{1, 6}, {2, 5}, {3, 8}])),
+     ?_assertEqual(1, page_minimum_hour(20, [{1, 6}, {2, 5}, {3, 8}]))
+    ].
+
+save_sublist_test_() ->
+    [?_assertEqual([1,2,3], save_sublist([1,2,3], 1, 10))
+    ,?_assertEqual([2,3],   save_sublist([1,2,3], 2, 10))
+    ,?_assertEqual([3],     save_sublist([1,2,3], 3, 10))
+    ,?_assertEqual([],      save_sublist([1,2,3], 4, 10))
+    ,?_assertEqual([],      save_sublist([], 1, 1))
+    ,?_assertEqual([],      save_sublist([], 1, 2))
+    ].
+
+dig_decrease_test_() ->
+    [?_assertEqual([{262969,1}], dig_decrease([{262969,1},{262970,1}], 262970, 1))
+    ].
+
 paginate_test_() ->
     [{"Zero offset",
       ?_assertEqual({0, [1,2,3]},
@@ -507,7 +552,7 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
             Keys = request_keys(set_bounds(LBound, UBound, RQ)),
             BeforeCnt = dig_total(dig_before_hour(LHour, RSetDigest)),
             PageOffset = Offset - BeforeCnt,
-            MatchedKeys = save_sublist(Keys, PageOffset, PageSize),
+            MatchedKeys = save_sublist(Keys, PageOffset+1, PageSize),
             EndHourCnt = filter_and_count_hour_keys(hour(End), Keys),
             AfterHourCnt = dig_calc_volume(hour(End), RSetDigest) - EndHourCnt,
             TotalCount = RSetDigestCnt - AfterHourCnt,
@@ -1907,11 +1952,17 @@ meck_test_() ->
        fun(_) -> unload_mock() end,
        {generator, fun bounded_first_page_case/0}}},
 
-     {"Index = 2, PageSize = 1, Start is defined.",
+     {"Index=0, PageSize=1, End is defined.",
       {setup,
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
        {generator, fun index_upper_bounded_last_page_case/0}}},
+
+     {"Index = 2, PageSize = 1, Start is defined.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       {generator, fun index_upper_bounded_last_page2_case/0}}},
 
      {"Selecting messages from a tiny date range. RSet is empty.",
       {setup,
@@ -2920,6 +2971,20 @@ proper_case() ->
     reset_now(),
     [].
 
+index_upper_bounded_last_page_case() ->
+    %% index_upper_bounded_last_page
+    reset_now(),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,28,25}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{6,8,20}})),
+    lookup_messages(alice(), undefined, undefined, undefined,
+        get_now(), undefined, 4, true, 256),
+    set_now(datetime_to_microseconds({{2000,1,1},{6,51,32}})),
+    assert_keys(0, 0, [],
+        lookup_messages(alice(), #rsm_in{index=0},
+            undefined, datetime_to_microseconds({{2000,1,1},{0,0,0}}),
+            get_now(), undefined, 1, true, 256)).
+
 bounded_first_page_case() ->
     %% bounded_first_page
     reset_now(),
@@ -2935,7 +3000,7 @@ bounded_first_page_case() ->
             datetime_to_microseconds({{2000,1,1},{0,0,0}}) + 28,
             get_now(), undefined, 0, true, 256)).
 
-index_upper_bounded_last_page_case() ->
+index_upper_bounded_last_page2_case() ->
     %% index_upper_bounded_last_page
     reset_mock(),
     set_now(datetime_to_microseconds({{2000,1,1},{0,0,0}})),
@@ -3196,49 +3261,6 @@ date_to_hour(DateTime) when is_binary(DateTime) ->
     Microseconds = mod_mam_utils:maybe_microseconds(DateTime),
     hour(Microseconds).
 
-sublist_r_test_() ->
-    [?_assertEqual([], sublist_r([], 1)),
-     ?_assertEqual([1], sublist_r([1], 1)),
-     ?_assertEqual([4,5], sublist_r([1,2,3,4,5], 2)),
-     ?_assertEqual([1,2,3], sublist_r([1,2,3], 5)),
-     ?_assertEqual([1,2,3,4,5], sublist_r([1,2,3,4,5], 5))
-    ].
-
-dig_before_hour_test_() ->
-    [?_assertEqual([{2, 10}, {3, 15}], dig_before_hour(5, [{2, 10}, {3, 15}])),
-     ?_assertEqual([], dig_before_hour(5, [{5, 10}])),
-     ?_assertEqual([], dig_before_hour(5, [{6, 10}]))
-    ].
-
-dig_position_test_() ->
-    Digest = [{3, 25}, {6, 15}],
-    [?_assertEqual(before, dig_position(2, Digest)),
-     ?_assertEqual(inside, dig_position(3, Digest)),
-     ?_assertEqual(inside, dig_position(5, Digest)),
-     ?_assertEqual(inside, dig_position(6, Digest)),
-     ?_assertEqual('after', dig_position(8, Digest))].
-
-frequency_test_() ->
-    [?_assertEqual([{a, 2}, {b, 3}], frequency([a, a, b, b, b]))].
-
-
-page_minimum_hour_test_() ->
-    [?_assertEqual(3, page_minimum_hour( 5, [{1, 6}, {2, 5}, {3, 8}])),
-     ?_assertEqual(2, page_minimum_hour(10, [{1, 6}, {2, 5}, {3, 8}])),
-     ?_assertEqual(1, page_minimum_hour(20, [{1, 6}, {2, 5}, {3, 8}]))
-    ].
-
-save_sublist_test_() ->
-    [?_assertEqual(save_sublist([1,2,3], 1, 10), [1,2,3])
-    ,?_assertEqual(save_sublist([1,2,3], 2, 10), [2,3])
-    ,?_assertEqual(save_sublist([1,2,3], 3, 10), [3])
-    ,?_assertEqual(save_sublist([1,2,3], 4, 10), [])
-    ].
-
-dig_decrease_test_() ->
-    [?_assertEqual([{262969,1}], dig_decrease([{262969,1},{262970,1}], 262970, 1))
-    ].
-
 -endif.
 
 is_short_range(Now, Start, End) ->
@@ -3255,7 +3277,7 @@ calc_range(_,   Start, End)       -> End - Start.
 sublist_r(Keys, N) ->
     lists:sublist(Keys, max(0, length(Keys) - N) + 1, N).
 
-save_sublist(L, S, C) when S =< length(L) ->
+save_sublist(L, S, C) when S =< length(L), S > 0 ->
     lists:sublist(L, S, C);
 save_sublist(_, _, _) ->
     [].
