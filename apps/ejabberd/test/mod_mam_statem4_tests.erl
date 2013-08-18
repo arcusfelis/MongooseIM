@@ -1,4 +1,4 @@
--module(mod_mam_statem3_tests).
+-module(mod_mam_statem4_tests).
 -include_lib("ejabberd/include/jlib.hrl").
 
 -ifdef(TEST).
@@ -118,13 +118,18 @@ command(S) ->
     ?LET({Start, End}, maybe_start_and_end(S),
         {call, ?M, lookup_messages,
          [alice(), rsm(mess_id(S)), Start, End,
-          S#state.next_now, maybe_cat(), page_size(), true, 256]})
+          S#state.next_now, maybe_cat(), page_size(), true, 256]}),
+    ?LET({Start, End}, maybe_start_and_end(S),
+        {call, ?M, purge_multiple_messages,
+         [alice(), Start, End, S#state.next_now, maybe_cat()]})
     ]).
 
 next_state(S, _V, {call, ?M, archive_message, [MessID, _, _, _, _, _]}) ->
     next_now(S#state{mess_ids=[MessID|S#state.mess_ids]});
 next_state(S, _V, {call, ?M, lookup_messages, _}) ->
-    next_now(S).
+    next_now(S);
+next_state(S, _V, {call, ?M, purge_multiple_messages, [_, Start, End, _, _]}) ->
+    next_now(delete_messages(Start, End, S)).
 
 precondition(_S, _C) ->
     true.
@@ -156,6 +161,10 @@ postcondition(_S, _C, _R) ->
 %% ------------------------------------------------------------------
 %% Model helpers
 %% ------------------------------------------------------------------
+
+delete_messages(Start, End, S) ->
+    ML = cut(Start, End, S#state.mess_ids),
+    S#state{mess_ids=ML}.
 
 paginate(undefined, ML) ->
     ML;
@@ -262,6 +271,12 @@ pretty_print_result([{set, _,
      [LocJID, RSM, Start, End, Now, _, PageSize, _, _]}}|T]) ->
     [pretty_print_lookup_messages(LocJID, RSM, Start, End, Now, PageSize)
     |pretty_print_result(T)];
+
+pretty_print_result([{set, _,
+    {call, ?M, purge_multiple_messages,
+     [LocJID, Start, End, Now, WithJID]}}|T]) ->
+    [pretty_print_purge_messages(LocJID, Start, End, Now, WithJID)
+    |pretty_print_result(T)];
 pretty_print_result([_|T]) ->
     ["% skipped\n"|pretty_print_result(T)];
 pretty_print_result([]) ->
@@ -289,6 +304,16 @@ pretty_print_lookup_messages(LocJID, RSM, Start, End, Now, PageSize) ->
          pretty_print_maybe_microseconds(Start),
          pretty_print_maybe_microseconds(End),
          PageSize]).
+
+pretty_print_purge_messages(LocJID, Start, End, Now, WithJID) ->
+    io_lib:format(
+        "set_now(~s),~n"
+        "purge_multiple_messages(~s, ~s, ~s, get_now(), ~s),~n",
+        [pretty_print_microseconds(Now),
+         pretty_print_jid(LocJID),
+         pretty_print_maybe_microseconds(Start),
+         pretty_print_maybe_microseconds(End),
+         pretty_print_jid(LocJID)]).
 
 pretty_print_jid(#jid{luser = <<"alice">>}) -> "alice()";
 pretty_print_jid(#jid{luser = <<"cat">>, lresource = <<"1">>})   -> "cat1()";
