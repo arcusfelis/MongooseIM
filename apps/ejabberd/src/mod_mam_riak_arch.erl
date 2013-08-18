@@ -479,7 +479,7 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
         false ->
             UHour1 = dig_nth(Offset + PageSize, RSetDigest),
             case End < hour_to_max_microseconds(UHour1) of
-            true -> last_page;
+            true -> index_upper_bounded_last_page;
             false -> middle_page
             end
         end,
@@ -499,14 +499,17 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
             AfterHourCnt = get_hour_key_count_after(RQ, Digest, End),
             TotalCount = RSetDigestCnt - AfterHourCnt,
             return_matched_keys(TotalCount, Offset, MatchedKeys);
-        last_page ->
+        index_upper_bounded_last_page ->
+            %% Get entries only from digest before `End'.
             LHour = dig_nth(Offset, RSetDigest),
             LBound = hour_to_min_mess_id(LHour),
             UBound = microseconds_to_max_mess_id(End),
             Keys = request_keys(set_bounds(LBound, UBound, RQ)),
-            PageOffset = dig_total(dig_before_hour(LHour, RSetDigest)),
-            MatchedKeys = save_sublist(Keys, PageOffset+1, PageSize),
-            AfterHourCnt = filter_after_timestamp(End+1, Keys),
+            BeforeCnt = dig_total(dig_before_hour(LHour, RSetDigest)),
+            PageOffset = Offset - BeforeCnt,
+            MatchedKeys = save_sublist(Keys, PageOffset, PageSize),
+            EndHourCnt = filter_and_count_hour_keys(hour(End), Keys),
+            AfterHourCnt = dig_calc_volume(hour(End), RSetDigest) - EndHourCnt,
             TotalCount = RSetDigestCnt - AfterHourCnt,
             return_matched_keys(TotalCount, Offset, MatchedKeys)
         end;
@@ -540,6 +543,7 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
             UBound = hour_to_max_mess_id(UHour),
             Keys = request_keys(set_bounds(LBound, UBound, RQ)),
             MatchedKeys = save_sublist(Keys, Offset+1, PageSize),
+            %% FIXME
             StartHourCnt = filter_after_timestamp(hour_to_max_microseconds(hour(Start))+1, Keys),
             AfterHourCnt = get_hour_key_count_after(RQ, Digest, End),
             StartHourOffset = HeadCnt - StartHourCnt,
@@ -1515,6 +1519,12 @@ filter_after_mess_id(MessID, Keys) ->
     AfterKey = replace_mess_id(MessID, hd(Keys)),
     filter_after(AfterKey, Keys).
 
+filter_and_count_hour_keys(Hour, Keys) ->
+    length(filter_hour_keys(Hour, Keys)).
+
+filter_hour_keys(Hour, Keys) ->
+    [Key || Key <- Keys, key_to_hour(Key) =:= Hour].
+
 dig_is_recorded(Hour, Digest) ->
     %% Tip: if no information exists after specified hour,
     %%      `dig_calc_volume' returns `undefined'.
@@ -1901,6 +1911,12 @@ meck_test_() ->
        fun() -> load_mock(0) end,
        fun(_) -> unload_mock() end,
        {generator, fun proper_case/0}}},
+
+     {"Index = 2, PageSize = 1, Start is defined.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       {generator, fun index_upper_bounded_last_page_case/0}}},
 
      {"Selecting messages from a tiny date range. RSet is empty.",
       {setup,
@@ -2906,8 +2922,26 @@ only_from_digest_non_empty_hour_offset_case() ->
             get_now(), undefined, 4, true, 256)).
 
 proper_case() ->
-    reset_mock(),
+    reset_now(),
     [].
+
+index_upper_bounded_last_page_case() ->
+    %% index_upper_bounded_last_page
+    reset_mock(),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,0,0}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,45,34}})),
+    archive_message(id(), incoming, alice(), cat(), cat(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{0,45,40}})),
+    archive_message(id(), incoming, alice(), cat(), cat(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{5,23,53}})),
+    lookup_messages(alice(), undefined, undefined, undefined,
+        get_now(), undefined, 4, true, 256),
+    set_now(datetime_to_microseconds({{2000,1,1},{5,56,26}})),
+    assert_keys(1, 2, [],
+        lookup_messages(alice(), #rsm_in{index=2}, undefined,
+            datetime_to_microseconds({{2000,1,1},{0,0,0}}),
+            get_now(), undefined, 1, true, 256)).
 
 tiny_empty_date_range_lookup_case() ->
     reset_mock(),
