@@ -239,13 +239,13 @@ safe_sublist_test_() ->
 dig_subtract_test_() ->
     [{"Delete the tail.",
       ?_assertEqual([{262969,1}],
-                    dig_decrease([{262969,1},{262970,1}], [{262970,1}])}
+                    dig_subtract([{262969,1},{262970,1}], [{262970,1}]))}
     ,{"Delete the head.",
       ?_assertEqual([{262970,1}],
-                   dig_decrease([{262969,1},{262970,1}], [{262969,1}])}
+                    dig_subtract([{262969,1},{262970,1}], [{262969,1}]))}
     ,{"DeletedDigest contains recent entries.",
       ?_assertEqual([],
-                    dig_decrease([{262969,1}], [{262969,1},{262970,1}])}
+                    dig_subtract([{262969,1}], [{262969,1},{262970,1}]))}
     ].
 
 dig_decrease_test_() ->
@@ -575,6 +575,9 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
         RSetDigest = dig_to_hour(hour(End), dig_from_hour(hour(Start), Digest)),
         %% Expected size of the Result Set in best-cast scenario (maximim)
         RSetDigestCnt = dig_total(RSetDigest),
+        case RSetDigestCnt of
+        0 -> return_matched_keys(0, Offset, []);
+        _ ->
         HeadCnt = dig_first_count(RSetDigest),
         LastCnt = dig_last_count(RSetDigest),
         MinRSetDigestCnt = RSetDigestCnt - LastCnt - HeadCnt,
@@ -642,6 +645,7 @@ analyse_digest_index(RQ, RSM, Offset, Start, End, PageSize, Digest) ->
             PageOffset = RSetOffset + dig_total(dig_before_hour(LHour, RSetDigest)),
             MatchedKeys = safe_sublist(Keys, PageOffset+1, PageSize),
             return_matched_keys(TotalCount, Offset, MatchedKeys)
+        end
         end
     end.
 
@@ -1967,6 +1971,12 @@ meck_test_() ->
        fun(_) -> unload_mock() end,
        safe_generator(fun proper_case/0)}},
 
+     {"End and Start are defined, RSet is empty.",
+      {setup,
+       fun() -> load_mock(0) end,
+       fun(_) -> unload_mock() end,
+       safe_generator(fun index_bounded_empty_rset_case/0)}},
+
      {"Try to purge multiple messages (lower bounded).",
       {setup,
        fun() -> load_mock(0) end,
@@ -3044,7 +3054,25 @@ only_from_digest_non_empty_hour_offset_case() ->
             get_now(), undefined, 4, true, 256)).
 
 proper_case() ->
+    reset_now(),
     [].
+
+index_bounded_empty_rset_case() ->
+    reset_now(),
+    set_now(datetime_to_microseconds({{2000,1,1},{3,54,3}})),
+    archive_message(id(), incoming, alice(), cat(), cat(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{4,48,26}})),
+    lookup_messages(alice(), undefined, undefined,
+        datetime_to_microseconds({{2000,1,1},{0,0,0}}),
+        get_now(), undefined, 2, true, 256),
+    set_now(datetime_to_microseconds({{2000,1,1},{14,32,22}})),
+    archive_message(id(), outgoing, alice(), cat(), alice(), packet()),
+    set_now(datetime_to_microseconds({{2000,1,1},{16,49,9}})),
+    assert_keys(0, 2, [],
+        lookup_messages(alice(), #rsm_in{index=2},
+            datetime_to_microseconds({{2000,1,1},{7,33,13}}),
+            datetime_to_microseconds({{2000,1,1},{8,31,47}}),
+            get_now(), undefined, 3, true, 256)).
 
 purge_multiple_messages_lower_bounded_case() ->
     reset_now(),
