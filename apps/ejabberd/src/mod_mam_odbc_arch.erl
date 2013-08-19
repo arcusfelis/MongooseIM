@@ -113,11 +113,10 @@ purge_single_message(#jid{lserver = LServer, luser = LUser}, MessID, _Now) ->
     WithJID :: #jid{} | undefined.
 purge_multiple_messages(UserJID = #jid{lserver=LServer}, Start, End, _Now, WithJID) ->
     Filter = prepare_filter(UserJID, Start, End, WithJID),
-    {undefined, _} =
+    {updated, _} =
     ejabberd_odbc:sql_query(
       LServer,
-      ["DELETE FROM mam_message "
-       "WHERE ", Filter]),
+      ["DELETE FROM mam_message ", Filter]),
     ok.
 
 %% Each record is a tuple of form 

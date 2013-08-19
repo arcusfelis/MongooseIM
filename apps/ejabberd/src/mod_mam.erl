@@ -240,6 +240,7 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer}, _To,
     false ->
         return_purge_not_allowed_error_iq(IQ);
     true ->
+        wait_flushing(LServer),
         case BExtMessID of
         <<>> ->
             %% Purging multiple messages.
