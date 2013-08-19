@@ -62,6 +62,7 @@
 %% ----------------------------------------------------------------------
 %% Other types
 -type archive_behaviour() :: atom(). % roster | always | never.
+-type message_id() :: non_neg_integer().
 
 %% ----------------------------------------------------------------------
 %% Constants
@@ -197,17 +198,12 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
     Now   = mod_mam_utils:now_to_microseconds(now()),
     %% Filtering by date.
     %% Start :: integer() | undefined
-    Start = maybe_microseconds(xml:get_path_s(QueryEl, [{elem, <<"start">>}, cdata])),
-    End   = maybe_microseconds(xml:get_path_s(QueryEl, [{elem, <<"end">>}, cdata])),
-    RSM   = fix_rsm(jlib:rsm_decode(QueryEl)),
+    Start = elem_to_start_microseconds(QueryEl),
+    End   = elem_to_end_microseconds(QueryEl),
     %% Filtering by contact.
-    With  = maybe_jid(xml:get_path_s(QueryEl, [{elem, <<"with">>}, cdata])),
-    %% This element's name is "limit".
-    %% But it must be "max" according XEP-0313.
-    Limit = get_one_of_path(QueryEl, [
-                    [{elem, <<"set">>}, {elem, <<"max">>}, cdata],
-                    [{elem, <<"set">>}, {elem, <<"limit">>}, cdata]
-                   ]),
+    With  = elem_to_with_jid(QueryEl),
+    RSM   = fix_rsm(jlib:rsm_decode(QueryEl)),
+    Limit = elem_to_limit(QueryEl),
     PageSize = min(max_result_limit(),
                    maybe_integer(Limit, default_result_limit())),
     LimitPassed = Limit =/= <<>>,
@@ -233,8 +229,34 @@ process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
         %% messages from the archive that match the client's given criteria,
         %% and finally returns the <iq/> result.
         IQ#iq{type = result, sub_el = [ResultQueryEl]}
+    end;
+ 
+process_mam_iq(From=#jid{luser = LUser, lserver = LServer}, _To,
+               IQ=#iq{type = set,
+                      sub_el = PurgeEl = #xmlel{name = <<"purge">>}}) ->
+    Now = mod_mam_utils:now_to_microseconds(now()),
+    BExtMessID = xml:get_tag_attr_s(<<"id">>, PurgeEl),
+    case is_purging_allowed(LUser, LServer) of
+    false ->
+        return_purge_not_allowed_error_iq(IQ);
+    true ->
+        case BExtMessID of
+        <<>> ->
+            %% Purging multiple messages.
+            %% Filtering by date.
+            %% Start :: integer() | undefined
+            Start = elem_to_start_microseconds(PurgeEl),
+            End   = elem_to_end_microseconds(PurgeEl),
+            %% Filtering by contact.
+            With  = elem_to_with_jid(PurgeEl),
+            purge_multiple_messages(From, Start, End, Now, With),
+            return_purge_success(IQ);
+        _ ->
+            MessID = mod_mam_utils:external_binary_to_mess_id(BExtMessID),
+            PurgingResult = purge_single_message(From, MessID, Now),
+            return_purge_single_message_iq(IQ, PurgingResult)
+        end
     end.
-
 
 %% @doc Handle an outgoing message.
 %%
@@ -407,6 +429,33 @@ archive_message(Id, Dir,
     M = writer_module(LServer),
     M:archive_message(Id, Dir, LocJID, RemJID, SrcJID, Packet).
 
+
+-spec is_purging_allowed(LUser, LServer) -> boolean() when
+    LUser :: term(),
+    LServer :: term().
+is_purging_allowed(LUser, LServer) ->
+    true.
+
+-spec purge_single_message(UserJID, MessID, Now) ->
+    ok | {error, 'not-found'} when
+    UserJID :: #jid{},
+    MessID :: message_id(),
+    Now :: unix_timestamp().
+purge_single_message(UserJID=#jid{lserver=LServer}, MessID, Now) ->
+    AM = archive_module(LServer),
+    AM:purge_single_message(UserJID, MessID, Now).
+
+-spec purge_multiple_messages(UserJID, Start, End, Now, WithJID) -> ok when
+    UserJID :: #jid{},
+    Start   :: unix_timestamp() | undefined,
+    End     :: unix_timestamp() | undefined,
+    Now     :: unix_timestamp(),
+    WithJID :: #jid{} | undefined.
+purge_multiple_messages(UserJID=#jid{lserver=LServer},
+    Start, End, Now, WithJID) ->
+    AM = archive_module(LServer),
+    AM:purge_multiple_messages(UserJID, Start, End, Now, WithJID).
+
 %% ----------------------------------------------------------------------
 %% Helpers
 
@@ -432,3 +481,40 @@ fix_rsm(RSM=#rsm_in{id = <<>>}) ->
 fix_rsm(RSM=#rsm_in{id = BExtMessID}) when is_binary(BExtMessID) ->
     MessID = mod_mam_utils:external_binary_to_mess_id(BExtMessID),
     RSM#rsm_in{id = MessID}.
+
+elem_to_start_microseconds(El) ->
+    maybe_microseconds(xml:get_path_s(El, [{elem, <<"start">>}, cdata])).
+
+elem_to_end_microseconds(El) ->
+    maybe_microseconds(xml:get_path_s(El, [{elem, <<"start">>}, cdata])).
+
+elem_to_with_jid(El) ->
+    maybe_jid(xml:get_path_s(El, [{elem, <<"with">>}, cdata])).
+
+%% This element's name is "limit".
+%% But it must be "max" according XEP-0313.
+elem_to_limit(QueryEl) ->
+    get_one_of_path(QueryEl, [
+        [{elem, <<"set">>}, {elem, <<"max">>}, cdata],
+        [{elem, <<"set">>}, {elem, <<"limit">>}, cdata]
+    ]).
+
+return_purge_success(IQ) ->
+    IQ#iq{type = result, sub_el = []}.
+
+return_purge_not_allowed_error_iq(IQ) ->
+    ErrorEl = ?STANZA_ERRORT(<<"">>, <<"cancel">>, <<"not-allowed">>,
+         <<"en">>, <<"Users are not allowed to purge their archives.">>),          
+    IQ#iq{type = error, sub_el = [ErrorEl]}.
+
+return_purge_not_found_error_iq(IQ) ->
+    %% Message not found.
+    ErrorEl = ?STANZA_ERRORT(<<"">>, <<"cancel">>, <<"item-not-found">>,
+         <<"en">>, <<"The provided UID did not match any message stored in archive.">>),          
+    IQ#iq{type = error, sub_el = [ErrorEl]}.
+
+return_purge_single_message_iq(IQ, ok) ->
+    return_purge_success(IQ);
+return_purge_single_message_iq(IQ, {error, 'not-found'}) ->
+    return_purge_not_found_error_iq(IQ).
+

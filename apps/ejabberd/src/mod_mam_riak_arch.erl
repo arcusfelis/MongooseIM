@@ -1135,7 +1135,7 @@ remove_user_from_db(LServer, LUser) ->
     ok.
 
 -spec purge_single_message(UserJID, MessID, Now) ->
-    ok | {error, 'not-allowed' | 'not-found'} when
+    ok | {error, 'not-found'} when
     UserJID :: #jid{},
     MessID :: message_id(),
     Now :: unix_timestamp().
@@ -1169,8 +1169,7 @@ purge_single_message(Conn, #jid{lserver = LServer, luser = LUser}, MessID, Now) 
             ok
     end.
 
--spec purge_multiple_messages(UserJID, Start, End, Now, WithJID) ->
-    ok | {error, 'not-allowed'} when
+-spec purge_multiple_messages(UserJID, Start, End, Now, WithJID) -> ok when
     UserJID :: #jid{},
     Start   :: unix_timestamp() | undefined,
     End     :: unix_timestamp() | undefined,
