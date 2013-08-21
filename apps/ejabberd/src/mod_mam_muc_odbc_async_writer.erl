@@ -1,14 +1,16 @@
 %% @doc Collect messages and flush them into the database.
 -module(mod_mam_muc_odbc_async_writer).
--export([start_link/2,
+-export([start/1,
+         stop/1,
+         start_link/2,
          srv_name/1,
-         archive_message/5,
+         archive_message/6,
+         wait_flushing/1,
          queue_length/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
-
 
 -include("ejabberd.hrl").
 -include("jlib.hrl").
@@ -28,14 +30,35 @@ srv_name() ->
 %% API
 %%====================================================================
 
+start(Host) ->
+    WriterProc = srv_name(Host),
+    WriterChildSpec =
+    {WriterProc,
+     {?MODULE, start_link, [WriterProc, Host]},
+     permanent,
+     5000,
+     worker,
+     [?MODULE]},
+    supervisor:start_child(ejabberd_sup, WriterChildSpec).
+
+stop(Host) ->
+    Proc = srv_name(Host),
+    supervisor:terminate_child(ejabberd_sup, Proc),
+    supervisor:delete_child(ejabberd_sup, Proc).
+
 start_link(ProcName, Host) ->
     gen_server:start_link({local, ProcName}, ?MODULE, [Host], []).
 
 srv_name(Host) ->
     gen_mod:get_module_proc(Host, srv_name()).
 
+archive_message(Id, incoming,
+                _LocJID=#jid{lserver=Host, luser=RoomName},
+                _RemJID=#jid{},
+                _SrcJID=#jid{lresource=FromNick}, Packet) ->
+    archive_message_1(Host, RoomName, Id, FromNick, Packet).
 
-archive_message(Host, RoomName, Id, FromNick, Packet) ->
+archive_message_1(Host, RoomName, Id, FromNick, Packet) ->
     RoomId = mod_mam_muc_cache:room_id(Host, RoomName),
     SRoomId = integer_to_list(RoomId),
     SFromNick = ejabberd_odbc:escape(FromNick),
@@ -53,6 +76,9 @@ queue_length(Host) ->
         {message_queue_len, Len} = erlang:process_info(Pid, message_queue_len),
         {ok, Len}
     end.
+
+wait_flushing(_Host) ->
+    timer:sleep(1000).
 
 %%====================================================================
 %% Internal functions
