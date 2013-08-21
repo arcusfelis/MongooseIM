@@ -1,7 +1,7 @@
 -module(mod_mam_odbc_prefs).
 -export([get_behaviour/3,
          get_prefs/3,
-         update_settings/5,
+         set_prefs/5,
          remove_user_from_db/2]).
 
 -include_lib("ejabberd/include/ejabberd.hrl").
@@ -22,7 +22,7 @@ get_behaviour(DefaultBehaviour,
         _ -> DefaultBehaviour
     end.
 
-update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs) ->
+set_prefs(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs) ->
     UserID = mod_mam_cache:user_id(LServer, LUser),
     SUserID = integer_to_list(UserID),
     DelQuery = ["DELETE FROM mam_config WHERE user_id = '", SUserID, "'"],

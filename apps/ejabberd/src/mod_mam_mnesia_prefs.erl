@@ -2,7 +2,7 @@
 -export([start/1,
          get_behaviour/3,
          get_prefs/3,
-         update_settings/5,
+         set_prefs/5,
          remove_user_from_db/2]).
 
 -include_lib("ejabberd/include/ejabberd.hrl").
@@ -37,7 +37,7 @@ get_behaviour(DefaultBehaviour,
         [#mam_prefs_rule{behaviour=B}] -> B
     end.
 
-update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs) ->
+set_prefs(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs) ->
     NewARules = lists:usort(rules(AlwaysJIDs)),
     NewNRules = lists:usort(rules(NeverJIDs)),
     SU = {LServer, LUser},

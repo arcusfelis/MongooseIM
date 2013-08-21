@@ -123,7 +123,6 @@ stop(Host) ->
 %% ----------------------------------------------------------------------
 %% OTP helpers
 
-
 start_supervisor(_Host) ->
     CacheChildSpec =
     {mod_mam_cache,
@@ -160,103 +159,22 @@ stop_module(Host, M) ->
 %% to the user on their bare JID (i.e. `From.luser'),
 %% while a MUC service might allow MAM queries to be sent to the room's bare JID
 %% (i.e `To.luser').
-process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
-               _To,
-               IQ=#iq{type = set,
-                      sub_el = PrefsEl = #xmlel{name = <<"prefs">>}}) ->
-    ?DEBUG("Handling mam prefs IQ~n    from ~p ~n    packet ~p.",
-              [From, IQ]),
-    {DefaultMode, AlwaysJIDs, NeverJIDs} = parse_prefs(PrefsEl),
-    ?DEBUG("Parsed data~n\tDefaultMode ~p~n\tAlwaysJIDs ~p~n\tNeverJIDS ~p~n",
-              [DefaultMode, AlwaysJIDs, NeverJIDs]),
-    update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs),
-    ResultPrefsEl = result_prefs(DefaultMode, AlwaysJIDs, NeverJIDs),
-    IQ#iq{type = result, sub_el = [ResultPrefsEl]};
+process_mam_iq(From, To, IQ) ->
+    Type = iq_type(IQ),
+    handle_mam_iq(Type, From, To, IQ).
 
-process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
-               _To,
-               IQ=#iq{type = get,
-                      sub_el = #xmlel{name = <<"prefs">>}}) ->
-    ?DEBUG("Handling mam prefs IQ~n    from ~p ~n    packet ~p.",
-              [From, IQ]),
-    {DefaultMode, AlwaysJIDs, NeverJIDs} = get_prefs(LServer, LUser, always),
-    ?DEBUG("Extracted data~n\tDefaultMode ~p~n\tAlwaysJIDs ~p~n\tNeverJIDS ~p~n",
-              [DefaultMode, AlwaysJIDs, NeverJIDs]),
-    ResultPrefsEl = result_prefs(DefaultMode, AlwaysJIDs, NeverJIDs),
-    IQ#iq{type = result, sub_el = [ResultPrefsEl]};
-    
-process_mam_iq(From=#jid{luser = LUser, lserver = LServer},
-               To,
-               IQ=#iq{type = get,
-                      sub_el = QueryEl = #xmlel{name = <<"query">>}}) ->
-    ?DEBUG("Handling mam IQ~n    from ~p ~n    to ~p~n    packet ~p.",
-              [From, To, IQ]),
-    QueryID = xml:get_tag_attr_s(<<"queryid">>, QueryEl),
-
-    wait_flushing(LServer),
-
-    Now   = mod_mam_utils:now_to_microseconds(now()),
-    %% Filtering by date.
-    %% Start :: integer() | undefined
-    Start = elem_to_start_microseconds(QueryEl),
-    End   = elem_to_end_microseconds(QueryEl),
-    %% Filtering by contact.
-    With  = elem_to_with_jid(QueryEl),
-    RSM   = fix_rsm(jlib:rsm_decode(QueryEl)),
-    Limit = elem_to_limit(QueryEl),
-    PageSize = min(max_result_limit(),
-                   maybe_integer(Limit, default_result_limit())),
-    LimitPassed = Limit =/= <<>>,
-    case lookup_messages(From, RSM, Start, End, Now, With, PageSize,
-                         LimitPassed, max_result_limit()) of
-    {error, 'policy-violation'} ->
-        ?DEBUG("Policy violation by ~p.", [LUser]),
-        ErrorEl = ?STANZA_ERRORT(<<"">>, <<"modify">>, <<"policy-violation">>,
-                                 <<"en">>, <<"Too many results">>),          
-        IQ#iq{type = error, sub_el = [ErrorEl]};
-    {ok, {TotalCount, Offset, MessageRows}} ->
-        {FirstId, LastId} =
-            case MessageRows of
-                []    -> {undefined, undefined};
-                [_|_] -> {message_row_to_ext_id(hd(MessageRows)),
-                          message_row_to_ext_id(lists:last(MessageRows))}
-            end,
-        [send_message(To, From, message_row_to_xml(M, QueryID))
-         || M <- MessageRows],
-        ResultSetEl = result_set(FirstId, LastId, Offset, TotalCount),
-        ResultQueryEl = result_query(ResultSetEl),
-        %% On receiving the query, the server pushes to the client a series of
-        %% messages from the archive that match the client's given criteria,
-        %% and finally returns the <iq/> result.
-        IQ#iq{type = result, sub_el = [ResultQueryEl]}
-    end;
- 
-process_mam_iq(From=#jid{luser = LUser, lserver = LServer}, _To,
-               IQ=#iq{type = set,
-                      sub_el = PurgeEl = #xmlel{name = <<"purge">>}}) ->
-    Now = mod_mam_utils:now_to_microseconds(now()),
-    BExtMessID = xml:get_tag_attr_s(<<"id">>, PurgeEl),
-    case is_purging_allowed(LUser, LServer) of
-    false ->
-        return_purge_not_allowed_error_iq(IQ);
-    true ->
-        wait_flushing(LServer),
-        case BExtMessID of
-        <<>> ->
-            %% Purging multiple messages.
-            %% Filtering by date.
-            %% Start :: integer() | undefined
-            Start = elem_to_start_microseconds(PurgeEl),
-            End   = elem_to_end_microseconds(PurgeEl),
-            %% Filtering by contact.
-            With  = elem_to_with_jid(PurgeEl),
-            purge_multiple_messages(From, Start, End, Now, With),
-            return_purge_success(IQ);
-        _ ->
-            MessID = mod_mam_utils:external_binary_to_mess_id(BExtMessID),
-            PurgingResult = purge_single_message(From, MessID, Now),
-            return_purge_single_message_iq(IQ, PurgingResult)
-        end
+handle_mam_iq(Type, From, To, IQ) ->
+    case Type of
+    set_prefs ->
+        handle_set_prefs(To, IQ);
+    get_prefs ->
+        handle_get_prefs(To, IQ);
+    lookup_messages ->
+        handle_lookup_messages(From, To, IQ);
+    purge_multiple_messages ->
+        handle_purge_multiple_messages(To, IQ);
+    purge_single_message ->
+        handle_purge_single_message(To, IQ)
     end.
 
 %% @doc Handle an outgoing message.
@@ -308,6 +226,99 @@ remove_user(User, Server) ->
 %% ----------------------------------------------------------------------
 %% Internal functions
 
+iq_type(#iq{type = Action, sub_el = SubEl = #xmlel{name = Category}}) ->
+    case {Action, Category} of
+        {set, <<"prefs">>} -> set_prefs;
+        {get, <<"prefs">>} -> get_prefs;
+        {get, <<"query">>} -> lookup_messages;
+        {set, <<"purge">>} ->
+            case xml:get_tag_attr_s(<<"id">>, SubEl) of
+                <<>> -> purge_multiple_messages;
+                _    -> purge_single_message
+            end
+    end.
+
+handle_set_prefs(#jid{luser = LUser, lserver = LServer},
+                 IQ=#iq{sub_el = PrefsEl}) ->
+    {DefaultMode, AlwaysJIDs, NeverJIDs} = parse_prefs(PrefsEl),
+    ?DEBUG("Parsed data~n\tDefaultMode ~p~n\tAlwaysJIDs ~p~n\tNeverJIDS ~p~n",
+              [DefaultMode, AlwaysJIDs, NeverJIDs]),
+    set_prefs(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs),
+    ResultPrefsEl = result_prefs(DefaultMode, AlwaysJIDs, NeverJIDs),
+    IQ#iq{type = result, sub_el = [ResultPrefsEl]}.
+
+handle_get_prefs(#jid{luser = LUser, lserver = LServer}, IQ) ->
+    {DefaultMode, AlwaysJIDs, NeverJIDs} = get_prefs(LServer, LUser, always),
+    ?DEBUG("Extracted data~n\tDefaultMode ~p~n\tAlwaysJIDs ~p~n\tNeverJIDS ~p~n",
+              [DefaultMode, AlwaysJIDs, NeverJIDs]),
+    ResultPrefsEl = result_prefs(DefaultMode, AlwaysJIDs, NeverJIDs),
+    IQ#iq{type = result, sub_el = [ResultPrefsEl]}.
+    
+handle_lookup_messages(
+        From,
+        To=#jid{luser = LUser, lserver = LServer},
+        IQ=#iq{sub_el = QueryEl}) ->
+    Now = mod_mam_utils:now_to_microseconds(now()),
+    QueryID = xml:get_tag_attr_s(<<"queryid">>, QueryEl),
+    wait_flushing(LServer),
+    %% Filtering by date.
+    %% Start :: integer() | undefined
+    Start = elem_to_start_microseconds(QueryEl),
+    End   = elem_to_end_microseconds(QueryEl),
+    %% Filtering by contact.
+    With  = elem_to_with_jid(QueryEl),
+    RSM   = fix_rsm(jlib:rsm_decode(QueryEl)),
+    Limit = elem_to_limit(QueryEl),
+    PageSize = min(max_result_limit(),
+                   maybe_integer(Limit, default_result_limit())),
+    LimitPassed = Limit =/= <<>>,
+    case lookup_messages(To, RSM, Start, End, Now, With, PageSize,
+                         LimitPassed, max_result_limit()) of
+    {error, 'policy-violation'} ->
+        ?DEBUG("Policy violation by ~p.", [LUser]),
+        ErrorEl = ?STANZA_ERRORT(<<"">>, <<"modify">>, <<"policy-violation">>,
+                                 <<"en">>, <<"Too many results">>),          
+        IQ#iq{type = error, sub_el = [ErrorEl]};
+    {ok, {TotalCount, Offset, MessageRows}} ->
+        {FirstId, LastId} =
+            case MessageRows of
+                []    -> {undefined, undefined};
+                [_|_] -> {message_row_to_ext_id(hd(MessageRows)),
+                          message_row_to_ext_id(lists:last(MessageRows))}
+            end,
+        [send_message(To, From, message_row_to_xml(M, QueryID))
+         || M <- MessageRows],
+        ResultSetEl = result_set(FirstId, LastId, Offset, TotalCount),
+        ResultQueryEl = result_query(ResultSetEl),
+        %% On receiving the query, the server pushes to the client a series of
+        %% messages from the archive that match the client's given criteria,
+        %% and finally returns the <iq/> result.
+        IQ#iq{type = result, sub_el = [ResultQueryEl]}
+    end.
+
+%% Purging multiple messages.
+handle_purge_multiple_messages(To=#jid{lserver = LServer},
+                               IQ=#iq{sub_el = PurgeEl}) ->
+    Now = mod_mam_utils:now_to_microseconds(now()),
+    wait_flushing(LServer),
+    %% Filtering by date.
+    %% Start :: integer() | undefined
+    Start = elem_to_start_microseconds(PurgeEl),
+    End   = elem_to_end_microseconds(PurgeEl),
+    %% Filtering by contact.
+    With  = elem_to_with_jid(PurgeEl),
+    purge_multiple_messages(To, Start, End, Now, With),
+    return_purge_success(IQ).
+
+handle_purge_single_message(To=#jid{lserver = LServer},
+                            IQ=#iq{sub_el = PurgeEl}) ->
+    Now = mod_mam_utils:now_to_microseconds(now()),
+    wait_flushing(LServer),
+    BExtMessID = xml:get_tag_attr_s(<<"id">>, PurgeEl),
+    MessID = mod_mam_utils:external_binary_to_mess_id(BExtMessID),
+    PurgingResult = purge_single_message(To, MessID, Now),
+    return_purge_single_message_iq(IQ, PurgingResult).
+
 -spec handle_package(Dir, ReturnId, LocJID, RemJID, SrcJID, Packet) ->
     MaybeId when
     Dir :: incoming | outgoing,
@@ -317,7 +328,6 @@ remove_user(User, Server) ->
     SrcJID :: jid(),
     Packet :: elem(),
     MaybeId :: binary() | undefined.
-
 handle_package(Dir, ReturnId,
                LocJID=#jid{},
                RemJID=#jid{},
@@ -363,9 +373,9 @@ get_behaviour(DefaultBehaviour, LocJID=#jid{lserver=LServer}, RemJID=#jid{}) ->
     M = prefs_module(LServer),
     M:get_behaviour(DefaultBehaviour, LocJID, RemJID).
 
-update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs) ->
+set_prefs(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs) ->
     M = prefs_module(LServer),
-    M:update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs).
+    M:set_prefs(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs).
 
 %% @doc Load settings from the database.
 -spec get_prefs(LServer, LUser, GlobalDefaultMode) -> Result when
@@ -376,11 +386,9 @@ update_settings(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs) ->
     Result      :: {DefaultMode, AlwaysJIDs, NeverJIDs},
     AlwaysJIDs  :: [literal_jid()],
     NeverJIDs   :: [literal_jid()].
-
 get_prefs(LServer, LUser, GlobalDefaultMode) ->
     M = prefs_module(LServer),
     M:get_prefs(LServer, LUser, GlobalDefaultMode).
-
 
 remove_user_from_db(LServer, LUser) ->
     wait_flushing(LServer),
@@ -392,7 +400,6 @@ remove_user_from_db(LServer, LUser) ->
     mod_mam_cache:remove_user_from_cache(LServer, LUser),
     ok.
 
-
 message_row_to_xml({MessID,SrcJID,Packet}, QueryID) ->
     {Microseconds, _NodeId} = decode_compact_uuid(MessID),
     DateTime = calendar:now_to_universal_time(microseconds_to_now(Microseconds)),
@@ -402,12 +409,11 @@ message_row_to_xml({MessID,SrcJID,Packet}, QueryID) ->
 message_row_to_ext_id({MessID,_,_}) ->
     mess_id_to_external_binary(MessID).
 
-
--spec lookup_messages(UserJID, RSM, Start, End, Now, WithJID, PageSize,
+-spec lookup_messages(ArcJID, RSM, Start, End, Now, WithJID, PageSize,
                       LimitPassed, MaxResultLimit) ->
     {ok, {TotalCount, Offset, MessageRows}} | {error, 'policy-violation'}
     when
-    UserJID :: #jid{},
+    ArcJID :: #jid{},
     RSM     :: #rsm_in{} | undefined,
     Start   :: unix_timestamp() | undefined,
     End     :: unix_timestamp() | undefined,
@@ -419,10 +425,10 @@ message_row_to_ext_id({MessID,_,_}) ->
     TotalCount :: non_neg_integer(),
     Offset  :: non_neg_integer(),
     MessageRows :: list(tuple()).
-lookup_messages(UserJID=#jid{lserver=LServer}, RSM, Start, End, Now,
+lookup_messages(ArcJID=#jid{lserver=LServer}, RSM, Start, End, Now,
                 WithJID, PageSize, LimitPassed, MaxResultLimit) ->
     AM = archive_module(LServer),
-    AM:lookup_messages(UserJID, RSM, Start, End, Now, WithJID, PageSize,
+    AM:lookup_messages(ArcJID, RSM, Start, End, Now, WithJID, PageSize,
                        LimitPassed, MaxResultLimit).
 
 archive_message(Id, Dir,
@@ -431,37 +437,30 @@ archive_message(Id, Dir,
     M:archive_message(Id, Dir, LocJID, RemJID, SrcJID, Packet).
 
 
--spec is_purging_allowed(LUser, LServer) -> boolean() when
-    LUser :: term(),
-    LServer :: term().
-is_purging_allowed(LUser, LServer) ->
-    true.
-
--spec purge_single_message(UserJID, MessID, Now) ->
+-spec purge_single_message(ArcJID, MessID, Now) ->
     ok | {error, 'not-found'} when
-    UserJID :: #jid{},
+    ArcJID :: #jid{},
     MessID :: message_id(),
     Now :: unix_timestamp().
-purge_single_message(UserJID=#jid{lserver=LServer}, MessID, Now) ->
+purge_single_message(ArcJID=#jid{lserver=LServer}, MessID, Now) ->
     AM = archive_module(LServer),
-    AM:purge_single_message(UserJID, MessID, Now).
+    AM:purge_single_message(ArcJID, MessID, Now).
 
--spec purge_multiple_messages(UserJID, Start, End, Now, WithJID) -> ok when
-    UserJID :: #jid{},
+-spec purge_multiple_messages(ArcJID, Start, End, Now, WithJID) -> ok when
+    ArcJID :: #jid{},
     Start   :: unix_timestamp() | undefined,
     End     :: unix_timestamp() | undefined,
     Now     :: unix_timestamp(),
     WithJID :: #jid{} | undefined.
-purge_multiple_messages(UserJID=#jid{lserver=LServer},
+purge_multiple_messages(ArcJID=#jid{lserver=LServer},
     Start, End, Now, WithJID) ->
     AM = archive_module(LServer),
-    AM:purge_multiple_messages(UserJID, Start, End, Now, WithJID).
+    AM:purge_multiple_messages(ArcJID, Start, End, Now, WithJID).
 
 %% ----------------------------------------------------------------------
 %% Helpers
 
 
-%% TODO: While it is too easy to use a `timer:sleep/1' here, it will cause delays.
 wait_flushing(LServer) ->
     M = writer_module(LServer),
     M:wait_flushing(LServer).
