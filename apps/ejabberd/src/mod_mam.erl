@@ -1,15 +1,23 @@
 -module(mod_mam).
 -behavior(gen_mod).
+
+%% Client API
+-export([delete_archive/2,
+         archive_size/2]).
+
+%% gen_mod handlers
 -export([start/2, stop/1]).
+
 %% ejabberd handlers
 -export([process_mam_iq/3,
          user_send_packet/3,
          remove_user/2,
          filter_packet/1]).
 
-%% Client API
--export([delete_archive/2,
-         archive_size/2]).
+%% ejabberd room handlers
+-export([filter_room_packet/4,
+         room_process_mam_iq/3,
+         forget_room/2]).
 
 -import(mod_mam_utils,
         [maybe_microseconds/1,
@@ -37,10 +45,11 @@
          is_function_exist/3,
          mess_id_to_external_binary/1]).
 
-%% Ejabberd
+%% ejabberd
 -import(mod_mam_utils,
         [send_message/3,
          is_jid_in_user_roster/2]).
+
 
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
@@ -95,8 +104,23 @@ archive_size(Server, User) ->
 %% gen_mod callbacks
 
 start(Host, Opts) ->
+    case gen_mod:get_opt(muc, Opts, false) of
+        false -> start_for_users(Host, Opts);
+        true  -> start_for_rooms(Host, rewrite_default_muc_modules(Host, Opts))
+    end.
+
+stop(Host) ->
+    case gen_mod:get_module_opt(muc, ?MODULE, false) of
+        false -> stop_for_users(Host);
+        true  -> stop_for_rooms(Host)
+    end.
+
+%% ----------------------------------------------------------------------
+%% Starting and stopping functions for users' archives
+
+start_for_users(Host, Opts) ->
     ?DEBUG("mod_mam starting", []),
-    start_supervisor(Host),
+    start_supervisor_for_users(Host),
     %% `parallel' is the only one recommended here.
     IQDisc = gen_mod:get_opt(iqdisc, Opts, parallel), %% Type
     mod_disco:register_feature(Host, mam_ns_binary()),
@@ -109,9 +133,9 @@ start(Host, Opts) ->
     [start_module(Host, M) || M <- required_modules(Host)],
     ok.
 
-stop(Host) ->
+stop_for_users(Host) ->
     ?DEBUG("mod_mam stopping", []),
-    stop_supervisor(Host),
+    stop_supervisor_for_users(Host),
     ejabberd_hooks:delete(user_send_packet, Host, ?MODULE, user_send_packet, 90),
     ejabberd_hooks:delete(filter_packet, global, ?MODULE, filter_packet, 90),
     ejabberd_hooks:delete(remove_user, Host, ?MODULE, remove_user, 50),
@@ -120,10 +144,7 @@ stop(Host) ->
     [stop_module(Host, M) || M <- required_modules(Host)],
     ok.
 
-%% ----------------------------------------------------------------------
-%% OTP helpers
-
-start_supervisor(_Host) ->
+start_supervisor_for_users(_Host) ->
     CacheChildSpec =
     {mod_mam_cache,
      {mod_mam_cache, start_link, []},
@@ -133,9 +154,50 @@ start_supervisor(_Host) ->
      [mod_mam_cache]},
     supervisor:start_child(ejabberd_sup, CacheChildSpec).
 
-stop_supervisor(_Host) ->
+stop_supervisor_for_users(_Host) ->
     ok.
 
+%% ----------------------------------------------------------------------
+%% Starting and stopping functions for MUC archives
+
+start_for_rooms(Host, Opts) ->
+    ?DEBUG("mod_mam_muc starting", []),
+    start_supervisor_for_rooms(Host),
+    IQDisc = gen_mod:get_opt(iqdisc, Opts, parallel), %% Type
+    mod_disco:register_feature(Host, mam_ns_binary()),
+    gen_iq_handler:add_iq_handler(mod_muc_iq, Host, mam_ns_binary(),
+                                  ?MODULE, room_process_mam_iq, IQDisc),
+    ejabberd_hooks:add(filter_room_packet, Host, ?MODULE,
+                       filter_room_packet, 90),
+    ejabberd_hooks:add(forget_room, Host, ?MODULE, forget_room, 90),
+    [start_module(Host, M) || M <- required_modules(Host)],
+    ok.
+
+stop_for_rooms(Host) ->
+    ?DEBUG("mod_mam stopping", []),
+    stop_supervisor_for_rooms(Host),
+    ejabberd_hooks:add(filter_room_packet, Host, ?MODULE,
+                       filter_room_packet, 90),
+    gen_iq_handler:remove_iq_handler(mod_muc_iq, Host, mam_ns_string()),
+    mod_disco:unregister_feature(Host, mam_ns_binary()),
+    [stop_module(Host, M) || M <- required_modules(Host)],
+    ok.
+
+start_supervisor_for_rooms(_Host) ->
+    CacheChildSpec =
+    {mod_mam_muc_cache,
+     {mod_mam_muc_cache, start_link, []},
+     permanent,
+     5000,
+     worker,
+     [mod_mam_muc_cache]},
+    supervisor:start_child(ejabberd_sup, CacheChildSpec).
+
+stop_supervisor_for_rooms(_Host) ->
+    ok.
+
+%% ----------------------------------------------------------------------
+%% Control modules
 
 start_module(Host, M) ->
     case is_function_exist(M, start, 1) of
@@ -150,6 +212,43 @@ stop_module(Host, M) ->
         false -> ok
     end,
     ok.
+
+required_modules(Host) ->
+    [prefs_module(Host),
+     archive_module(Host),
+     writer_module(Host)].
+
+prefs_module(Host) ->
+    gen_mod:get_module_opt(Host, ?MODULE, prefs_module, mod_mam_odbc_prefs).
+
+archive_module(Host) ->
+    gen_mod:get_module_opt(Host, ?MODULE, archive_module, mod_mam_odbc_arch).
+
+writer_module(Host) ->
+    gen_mod:get_module_opt(Host, ?MODULE, writer_module, mod_mam_odbc_async_writer).
+
+default_muc_modules() ->
+    [{prefs_module, mod_mam_muc_odbc_prefs}
+    ,{archive_module, mod_mam_muc_odbc_arch}
+    ,{writer_module, mod_mam_odbc_async_writer}].
+
+rewrite_default_muc_modules(Host, Opts) ->
+    rewrite_default_options(Host, default_muc_modules(), Opts).
+
+rewrite_default_options(Host, [{K, V}|DefOpts], Opts) ->
+    NewOpts = rewrite_default_option(Host, K, V, Opts),
+    rewrite_default_options(Host, DefOpts, NewOpts);
+rewrite_default_options(_Host, [], NewOpts) ->
+    NewOpts.
+    
+rewrite_default_option(Host, K, V, Opts) ->
+    case gen_mod:get_opt(K, Opts, default) of
+        default ->
+            gen_mod:set_module_opt(Host, ?MODULE, K, V),
+            gen_mod:set_opt(K, Opts, V);
+        V ->
+            Opts
+    end.
 
 %% ----------------------------------------------------------------------
 %% hooks and handlers
@@ -222,6 +321,36 @@ filter_packet({From, To=#jid{luser=LUser, lserver=LServer}, Packet}) ->
 %% @doc A ejabberd's callback with diferent order of arguments.
 remove_user(User, Server) ->
     delete_archive(Server, User).
+
+
+%% ----------------------------------------------------------------------
+%% hooks and handlers for MUC
+
+%% @doc Handle public MUC-message.
+filter_room_packet(Packet, FromNick, FromJID,
+                   RoomJID=#jid{lserver = LServer, luser = RoomName}) ->
+    ?DEBUG("Incoming room packet.", []),
+    case mod_mam_muc_cache:is_logging_enabled(LServer, RoomName) of
+    false -> Packet;
+    true ->
+    Id = generate_message_id(),
+    SrcJID = jlib:jid_replace_resource(RoomJID, FromNick),
+    archive_message(Id, incoming, RoomJID, FromJID, SrcJID, Packet),
+    BareRoomJID = jlib:jid_to_binary(RoomJID),
+    replace_archived_elem(BareRoomJID, mess_id_to_external_binary(Id), Packet)
+    end.
+
+%% `process_mam_iq/3' is simular.
+-spec room_process_mam_iq(From, To, IQ) -> IQ | ignore | error when
+    From :: jid(),
+    To :: jid(),
+    IQ :: #iq{}.
+room_process_mam_iq(From, To, IQ) ->
+    process_mam_iq(From, To, IQ).
+
+%% This hook is called from `mod_muc:forget_room(Host, Name)'.
+forget_room(LServer, RoomName) ->
+    delete_archive(LServer, RoomName).
 
 %% ----------------------------------------------------------------------
 %% Internal functions
@@ -353,20 +482,6 @@ handle_package(Dir, ReturnId,
         end;
         false -> undefined
     end.
-
-required_modules(Host) ->
-    [prefs_module(Host),
-     archive_module(Host),
-     writer_module(Host)].
-
-prefs_module(Host) ->
-    gen_mod:get_module_opt(Host, ?MODULE, prefs_module, mod_mam_odbc_prefs).
-
-archive_module(Host) ->
-    gen_mod:get_module_opt(Host, ?MODULE, archive_module, mod_mam_odbc_arch).
-
-writer_module(Host) ->
-    gen_mod:get_module_opt(Host, ?MODULE, writer_module, mod_mam_odbc_async_writer).
 
 
 get_behaviour(DefaultBehaviour, LocJID=#jid{lserver=LServer}, RemJID=#jid{}) ->
