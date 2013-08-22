@@ -72,6 +72,7 @@
 %% Other types
 -type archive_behaviour() :: atom(). % roster | always | never.
 -type message_id() :: non_neg_integer().
+-type action() :: atom().
 
 %% ----------------------------------------------------------------------
 %% Constants
@@ -258,22 +259,71 @@ rewrite_default_option(Host, K, V, Opts) ->
 %% to the user on their bare JID (i.e. `From.luser'),
 %% while a MUC service might allow MAM queries to be sent to the room's bare JID
 %% (i.e `To.luser').
+-spec process_mam_iq(From, To, IQ) -> IQ | ignore when
+    From :: jid(),
+    To :: jid(),
+    IQ :: #iq{}.
 process_mam_iq(From, To, IQ) ->
-    Type = iq_type(IQ),
-    handle_mam_iq(Type, From, To, IQ).
+    process_mam_iq(user, From, To, IQ).
 
-handle_mam_iq(Type, From, To, IQ) ->
-    case Type of
-    set_prefs ->
-        handle_set_prefs(To, IQ);
-    get_prefs ->
+process_mam_iq(ArcType, From, To, IQ) ->
+    Action = iq_action(IQ),
+    case is_action_allowed(ArcType, Action, From, To) of
+        true  -> handle_mam_iq(Action, From, To, IQ);
+        false -> return_action_not_allowed_error_iq(IQ)
+    end.
+
+is_action_allowed(ArcType, Action, From, To=#jid{lserver=Host}) ->
+    case acl:match_rule(Host, Action, From) of
+        allow   -> true;
+        deny    -> false;
+        default -> is_action_allowed_by_default(ArcType, Action, From, To)
+    end.
+
+-spec is_action_allowed_by_default(ArcType, Action, From, To) -> boolean() when
+    ArcType :: user | room,
+    Action  :: action(),
+    From    :: jid(),
+    To      :: jid().
+is_action_allowed_by_default(user, _Action, From, To) ->
+    compare_bare_jids(From, To);
+is_action_allowed_by_default(room, Action, From, To) ->
+    is_room_action_allowed_by_default(Action, From, To).
+
+is_room_action_allowed_by_default(Action, From, To) ->
+    case action_type(Action) of
+        set -> is_room_owner(From, To);
+        get -> true
+    end.
+
+is_room_owner(From, To) ->
+    case mod_mam_room:is_room_owner(To, From) of
+        {error, _} -> false;
+        {ok, IsOwner} -> IsOwner
+    end.
+
+compare_bare_jids(JID1, JID2) ->
+    jlib:jid_remove_resource(JID1) =:=
+    jlib:jid_remove_resource(JID2).
+
+action_type(mam_get_prefs)                  -> get;
+action_type(mam_set_prefs)                  -> set;
+action_type(mam_lookup_messages)            -> get;
+action_type(mam_purge_single_message)       -> set;
+action_type(mam_purge_multiple_messages)    -> set.
+
+handle_mam_iq(Action, From, To, IQ) ->
+    case Action of
+    mam_get_prefs ->
         handle_get_prefs(To, IQ);
-    lookup_messages ->
+    mam_set_prefs ->
+        handle_set_prefs(To, IQ);
+    mam_lookup_messages ->
         handle_lookup_messages(From, To, IQ);
-    purge_multiple_messages ->
-        handle_purge_multiple_messages(To, IQ);
-    purge_single_message ->
-        handle_purge_single_message(To, IQ)
+    mam_purge_single_message ->
+        handle_purge_single_message(To, IQ);
+    mam_purge_multiple_messages ->
+        handle_purge_multiple_messages(To, IQ)
     end.
 
 %% @doc Handle an outgoing message.
@@ -341,12 +391,12 @@ filter_room_packet(Packet, FromNick, FromJID,
     end.
 
 %% `process_mam_iq/3' is simular.
--spec room_process_mam_iq(From, To, IQ) -> IQ | ignore | error when
+-spec room_process_mam_iq(From, To, IQ) -> IQ | ignore when
     From :: jid(),
     To :: jid(),
     IQ :: #iq{}.
 room_process_mam_iq(From, To, IQ) ->
-    process_mam_iq(From, To, IQ).
+    process_mam_iq(room, From, To, IQ).
 
 %% This hook is called from `mod_muc:forget_room(Host, Name)'.
 forget_room(LServer, RoomName) ->
@@ -355,15 +405,15 @@ forget_room(LServer, RoomName) ->
 %% ----------------------------------------------------------------------
 %% Internal functions
 
-iq_type(#iq{type = Action, sub_el = SubEl = #xmlel{name = Category}}) ->
+iq_action(#iq{type = Action, sub_el = SubEl = #xmlel{name = Category}}) ->
     case {Action, Category} of
-        {set, <<"prefs">>} -> set_prefs;
-        {get, <<"prefs">>} -> get_prefs;
-        {get, <<"query">>} -> lookup_messages;
+        {set, <<"prefs">>} -> mam_set_prefs;
+        {get, <<"prefs">>} -> mam_get_prefs;
+        {get, <<"query">>} -> mam_lookup_messages;
         {set, <<"purge">>} ->
             case xml:get_tag_attr_s(<<"id">>, SubEl) of
-                <<>> -> purge_multiple_messages;
-                _    -> purge_single_message
+                <<>> -> mam_purge_multiple_messages;
+                _    -> mam_purge_single_message
             end
     end.
 
@@ -617,9 +667,9 @@ elem_to_limit(QueryEl) ->
 return_purge_success(IQ) ->
     IQ#iq{type = result, sub_el = []}.
 
-return_purge_not_allowed_error_iq(IQ) ->
+return_action_not_allowed_error_iq(IQ) ->
     ErrorEl = ?STANZA_ERRORT(<<"">>, <<"cancel">>, <<"not-allowed">>,
-         <<"en">>, <<"Users are not allowed to purge their archives.">>),          
+         <<"en">>, <<"The action is not allowed.">>),
     IQ#iq{type = error, sub_el = [ErrorEl]}.
 
 return_purge_not_found_error_iq(IQ) ->
