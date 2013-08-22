@@ -37,6 +37,9 @@
          start/7,
          route/4]).
 
+%% API exports
+-export([get_users/1]).
+
 %% gen_fsm callbacks
 -export([init/1,
          normal_state/2,
@@ -115,6 +118,14 @@
                children = [#xmlel{name = <<"value">>,
                                   children = [#xmlcdata{content = jlib:jid_to_binary(JID)}]}
                            || JID <- JIDList]}).
+
+%%%----------------------------------------------------------------------
+%%% Types
+%%%----------------------------------------------------------------------
+-type affiliation() :: admin | owner | member | outcast | none.
+-type role() :: moderator | participant | visitor | none.
+-type state_data() :: #state{}.
+
 %%%----------------------------------------------------------------------
 %%% API
 %%%----------------------------------------------------------------------
@@ -139,6 +150,16 @@ start_link(Host, ServerHost, Access, Room, HistorySize, RoomShaper, Opts) ->
                        [Host, ServerHost, Access, Room, HistorySize,
                         RoomShaper, Opts],
                        ?FSMOPTS).
+
+-spec get_users(RoomJID :: jid()) -> {ok, [#user{}]} | {error, not_found}.
+get_users(RoomJID) ->
+    case mod_muc:room_jid_to_pid(RoomJID) of
+        {ok, Pid} ->
+            gen_fsm:sync_send_all_state_event(Pid, get_users);
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
 
 %%%----------------------------------------------------------------------
 %%% Callback functions from gen_fsm
@@ -497,6 +518,8 @@ handle_sync_event(get_config, _From, StateName, StateData) ->
     {reply, {ok, StateData#state.config}, StateName, StateData};
 handle_sync_event(get_state, _From, StateName, StateData) ->
     {reply, {ok, StateData}, StateName, StateData};
+handle_sync_event(get_users, _From, StateName, StateData) ->
+    {reply, {ok, dict_to_values(StateData#state.users)}, StateName, StateData};
 handle_sync_event({change_config, Config}, _From, StateName, StateData) ->
     {result, [], NSD} = change_config(Config, StateData),
     {reply, {ok, NSD#state.config}, StateName, NSD};
@@ -751,6 +774,7 @@ process_presence(From, ToNick, Presence, StateData, NewState) ->
 process_presence(From, Nick, #xmlel{name = <<"presence">>,
                                     attrs = Attrs} = Packet,
          StateData) ->
+    %% TODO rewrite me (too scary)
     Type = xml:get_attr_s(<<"type">>, Attrs),
     Lang = xml:get_attr_s(<<"xml:lang">>, Attrs),
     StateData1 =
@@ -791,8 +815,7 @@ process_presence(From, Nick, #xmlel{name = <<"presence">>,
             case is_nick_change(From, Nick, StateData) of
                 true ->
                 case {is_nick_exists(Nick, StateData),
-                      mod_muc:can_use_nick(
-                    StateData#state.host, From, Nick),
+                      mod_muc:can_use_nick(StateData#state.host, From, Nick),
                                       {(StateData#state.config)#config.allow_visitor_nickchange,
                                        is_visitor(From, StateData)}} of
                                     {_, _, {false, true}} ->
@@ -802,9 +825,7 @@ process_presence(From, Nick, #xmlel{name = <<"presence">>,
                         ?ERRT_NOT_ALLOWED(Lang, ErrText)),
                     ejabberd_router:route(
                       % TODO: s/Nick/<<>>/
-                      jlib:jid_replace_resource(
-                        StateData#state.jid,
-                        Nick),
+                      jlib:jid_replace_resource(StateData#state.jid, Nick),
                       From, Err),
                     StateData;
                     {true, _, _} ->
@@ -814,9 +835,8 @@ process_presence(From, Nick, #xmlel{name = <<"presence">>,
                         Packet,
                         ?ERRT_CONFLICT(Lang, ErrText)),
                     ejabberd_router:route(
-                      jlib:jid_replace_resource(
-                        StateData#state.jid,
-                        Nick), % TODO: s/Nick/<<>>/
+                      % TODO: s/Nick/<<>>/
+                      jlib:jid_replace_resource(StateData#state.jid, Nick), 
                       From, Err),
                     StateData;
                     {_, false, _} ->
@@ -826,9 +846,7 @@ process_presence(From, Nick, #xmlel{name = <<"presence">>,
                         ?ERRT_CONFLICT(Lang, ErrText)),
                     ejabberd_router:route(
                       % TODO: s/Nick/<<>>/
-                      jlib:jid_replace_resource(
-                        StateData#state.jid,
-                        Nick),
+                      jlib:jid_replace_resource(StateData#state.jid, Nick),
                       From, Err),
                     StateData;
                     _ ->
@@ -855,7 +873,7 @@ process_presence(From, Nick, #xmlel{name = <<"presence">>,
         StateData
     end,
     case (not (StateData1#state.config)#config.persistent) andalso
-    (?DICT:to_list(StateData1#state.users) == []) of
+    is_empty_room(StateData1) of
     true ->
         ?INFO_MSG("Destroyed MUC room ~s because it's temporary and empty", 
               [jlib:jid_to_binary(StateData#state.jid)]),
@@ -886,14 +904,9 @@ is_user_online(JID, StateData) ->
 is_occupant_or_admin(JID, StateData) ->
     FAffiliation = get_affiliation(JID, StateData),
     FRole = get_role(JID, StateData),
-    case (FRole /= none) orelse
+    (FRole /= none) orelse
     (FAffiliation == admin) orelse
-    (FAffiliation == owner) of
-        true ->
-        true;
-        _ ->
-        false
-    end.
+    (FAffiliation == owner).
 
 %%%
 %%% Handle IQ queries of vCard
@@ -939,7 +952,8 @@ change_stanzaid(PreviousId, ToJID, Packet) ->
 %%%
 %%%
 
-role_to_list(Role) ->
+-spec role_to_binary(role()) -> binary().
+role_to_binary(Role) ->
     case Role of
     moderator ->   <<"moderator">>;
     participant -> <<"participant">>;
@@ -947,7 +961,8 @@ role_to_list(Role) ->
     none ->        <<"none">>
     end.
 
-affiliation_to_list(Affiliation) ->
+-spec affiliation_to_binary(affiliation()) -> binary().
+affiliation_to_binary(Affiliation) ->
     case Affiliation of
     owner ->   <<"owner">>;
     admin ->   <<"admin">>;
@@ -956,7 +971,8 @@ affiliation_to_list(Affiliation) ->
     none ->    <<"none">>
     end.
 
-list_to_role(Role) ->
+-spec binary_to_role(binary()) -> role().
+binary_to_role(Role) ->
     case Role of
     <<"moderator">> ->   moderator;
     <<"participant">> -> participant;
@@ -964,7 +980,8 @@ list_to_role(Role) ->
     <<"none">> ->        none
     end.
 
-list_to_affiliation(Affiliation) ->
+-spec binary_to_affiliation(binary()) -> affiliation().
+binary_to_affiliation(Affiliation) ->
     case Affiliation of
     <<"owner">> ->   owner;
     <<"admin">> ->   admin;
@@ -1044,6 +1061,13 @@ expulse_participant(Packet, From, StateData, Reason1) ->
     send_new_presence(From, NewState),
     remove_online_user(From, NewState).
 
+access_admin(#state{access=Access}) ->
+    {_AccessRoute, _AccessCreate, AccessAdmin, _AccessPersistent} = Access,
+    AccessAdmin.
+
+access_persistent(#state{access=Access}) ->
+    {_AccessRoute, _AccessCreate, _AccessAdmin, AccessPersistent} = Access,
+    AccessPersistent.
 
 set_affiliation(JID, Affiliation, StateData) ->
     LJID = jlib:jid_remove_resource(jlib:jid_tolower(JID)),
@@ -1071,8 +1095,9 @@ set_affiliation_and_reason(JID, Affiliation, Reason, StateData) ->
            end,
     StateData#state{affiliations = Affiliations}.
 
+-spec get_affiliation(jid(), state_data()) -> affiliation().
 get_affiliation(JID, StateData) ->
-    {_AccessRoute, _AccessCreate, AccessAdmin, _AccessPersistent} = StateData#state.access,
+    AccessAdmin = access_admin(StateData),
     Res =
     case acl:match_rule(StateData#state.server_host, AccessAdmin, JID) of
         allow ->
@@ -1112,8 +1137,7 @@ get_affiliation(JID, StateData) ->
     end.
 
 get_service_affiliation(JID, StateData) ->
-    {_AccessRoute, _AccessCreate, AccessAdmin, _AccessPersistent} =
-    StateData#state.access,
+    AccessAdmin = access_admin(StateData),
     case acl:match_rule(StateData#state.server_host, AccessAdmin, JID) of
     allow ->
         owner;
@@ -1121,43 +1145,15 @@ get_service_affiliation(JID, StateData) ->
         none
     end.
 
+-spec set_role(JID :: jid(), Role :: role(), StateData) -> StateData when
+    StateData :: state_data().
+set_role(JID, none, StateData) ->
+    erase_matched_users(JID, StateData);
 set_role(JID, Role, StateData) ->
-    LJID = jlib:jid_tolower(JID),
-    LJIDs = case LJID of
-        {U, S, <<>>} ->
-            ?DICT:fold(
-               fun(J, _, Js) ->
-                   case J of
-                   {U, S, _} ->
-                       [J | Js];
-                   _ ->
-                       Js
-                   end
-               end, [], StateData#state.users);
-        _ ->
-            case ?DICT:is_key(LJID, StateData#state.users) of
-            true ->
-                [LJID];
-            _ ->
-                []
-            end
-        end,
-    Users = case Role of
-        none ->
-            lists:foldl(fun(J, Us) ->
-                    ?DICT:erase(J,
-                            Us)
-                end, StateData#state.users, LJIDs);
-        _ ->
-            lists:foldl(fun(J, Us) ->
-                    {ok, User} = ?DICT:find(J, Us),
-                    ?DICT:store(J,
-                            User#user{role = Role},
-                            Us)
-                end, StateData#state.users, LJIDs)
-        end,
-    StateData#state{users = Users}.
+    update_matched_users(fun(User) -> User#user{role = Role} end,
+                         JID, StateData).
 
+-spec get_role(jid(), state_data()) -> role().
 get_role(JID, StateData) ->
     LJID = jlib:jid_tolower(JID),
     case ?DICT:find(LJID, StateData#state.users) of
@@ -1167,6 +1163,7 @@ get_role(JID, StateData) ->
         none
     end.
 
+-spec get_default_role(affiliation(), state_data()) -> role().
 get_default_role(Affiliation, StateData) ->
     case Affiliation of
     owner ->   moderator;
@@ -1187,8 +1184,18 @@ get_default_role(Affiliation, StateData) ->
         end
     end.
 
+-spec is_visitor(jid(), state_data()) -> boolean().
 is_visitor(Jid, StateData) ->
     get_role(Jid, StateData) =:= visitor.
+
+is_empty_room(#state{users=Users}) ->
+    is_empty_dict(Users).
+
+is_empty_dict(Dict) ->
+    dict:size(Dict) =:= 0.
+
+dict_to_values(Dict) ->
+    [V || {_, V} <- dict:to_list(Dict)].
 
 get_max_users(StateData) ->
     MaxUsers = (StateData#state.config)#config.max_users,
@@ -1397,8 +1404,7 @@ add_user_presence_un(JID, Presence, StateData) ->
     ?DICT:update(
        LJID,
        fun(#user{} = User) ->
-           User#user{last_presence = FPresence,
-                 role = none}
+           User#user{last_presence = FPresence, role = none}
        end, StateData#state.users),
     StateData#state{users = Users}.
 
@@ -1432,8 +1438,7 @@ add_new_user(From, Nick, #xmlel{attrs = Attrs,
     Lang = xml:get_attr_s(<<"xml:lang">>, Attrs),
     MaxUsers = get_max_users(StateData),
     MaxAdminUsers = MaxUsers + get_max_users_admin_threshold(StateData),
-    NUsers = dict:fold(fun(_, _, Acc) -> Acc + 1 end, 0,
-               StateData#state.users),
+    NUsers = ?DICT:size(StateData#state.users),
     Affiliation = get_affiliation(From, StateData),
     ServiceAffiliation = get_service_affiliation(From, StateData),
     NConferences = tab_count_user(From),
@@ -1534,10 +1539,17 @@ add_new_user(From, Nick, #xmlel{attrs = Attrs,
        end
     end.
 
+-spec check_password(
+    ServiceAffiliation, Affiliation, Els, _From, StateData) ->
+    boolean() | nopass when
+    ServiceAffiliation :: affiliation(),
+    Affiliation :: affiliation(),
+    Els :: [#xmlel{}],
+    StateData :: state_data().
 check_password(owner, _Affiliation, _Els, _From, _StateData) ->
     %% Don't check pass if user is owner in MUC service (access_admin option)
     true;
-check_password(_ServiceAffiliation, Affiliation, Els, From, StateData) ->
+check_password(_ServiceAffiliation, _Affiliation, Els, _From, StateData) ->
     case (StateData#state.config)#config.password_protected of
         false ->
             %% Don't check password
@@ -1548,12 +1560,7 @@ check_password(_ServiceAffiliation, Affiliation, Els, From, StateData) ->
                 false ->
                     nopass;
                 _ ->
-                    case (StateData#state.config)#config.password of
-                        Pass ->
-                            true;
-                        _ ->
-                            false
-                    end
+                    (StateData#state.config)#config.password =:= Pass
             end
     end.
 
@@ -1624,12 +1631,7 @@ count_seconds_shift(Seconds, HistoryList) ->
 
 count_maxstanzas_shift(MaxStanzas, HistoryList) ->
     S = length(HistoryList) - MaxStanzas,
-    if
-    S =< 0 ->
-        0;
-    true ->
-        S
-    end.
+    max(0, S).
 
 count_maxchars_shift(Nick, MaxSize, HistoryList) ->
     NLen = string:len(binary_to_list(Nick)) + 1,
@@ -1687,29 +1689,84 @@ send_update_presence(JID, StateData) ->
     send_update_presence(JID, <<>>, StateData).
 
 send_update_presence(JID, Reason, StateData) ->
+    foreach_matched_jid(fun(J) ->
+      send_new_presence(J, Reason, StateData)
+    end, JID, StateData).
+
+foreach_matched_jid(F, JID, #state{users=Users}) ->
     LJID = jlib:jid_tolower(JID),
-    LJIDs = case LJID of
+    case LJID of
+        %% Match by bare JID
         {U, S, <<>>} ->
-            ?DICT:fold(
-               fun(J, _, Js) ->
-                   case J of
-                   {U, S, _} ->
-                       [J | Js];
-                   _ ->
-                       Js
-                   end
-               end, [], StateData#state.users);
+            ?DICT:fold(fun(J, #user{jid=MatchedJID}, _) ->
+                  case J of
+                    {U, S, _} -> F(MatchedJID);
+                    _         -> ok
+                  end
+               end, ok, Users);
+        %% Match by full JID
         _ ->
-            case ?DICT:is_key(LJID, StateData#state.users) of
+            case ?DICT:is_key(LJID, Users) of
             true ->
-                [LJID];
-            _ ->
-                []
+                F(JID);
+            false ->
+                ok
             end
-        end,
-    lists:foreach(fun(J) ->
-              send_new_presence(J, Reason, StateData)
-          end, LJIDs).
+    end.
+
+foreach_matched_user(F, JID, #state{users=Users}) ->
+    LJID = jlib:jid_tolower(JID),
+    case LJID of
+        %% Match by bare JID
+        {U, S, <<>>} ->
+            ?DICT:fold(fun(J, User, _) ->
+                  case J of
+                    {U, S, _} -> F(User);
+                    _         -> ok
+                  end
+               end, ok, Users);
+        %% Match by full JID
+        _ ->
+            case ?DICT:find(LJID, Users) of
+                {ok, User} -> F(User);
+                error -> ok
+            end
+    end.
+
+erase_matched_users(JID, #state{users=Users}) ->
+    LJID = jlib:jid_tolower(JID),
+    case LJID of
+        %% Match by bare JID
+        {U, S, <<>>} ->
+            ?DICT:fold(fun(J, _, Us) ->
+                  case J of
+                    {U, S, _} -> ?DICT:erase(J, Us);
+                    _         -> Us
+                  end
+               end, Users, Users);
+        %% Match by full JID
+        _ ->
+            ?DICT:erase(LJID, Users)
+    end.
+
+update_matched_users(F, JID, #state{users=Users}) ->
+    LJID = jlib:jid_tolower(JID),
+    case LJID of
+        %% Match by bare JID
+        {U, S, <<>>} ->
+            ?DICT:fold(fun(J, User, Us) ->
+                  case J of
+                    {U, S, _} -> ?DICT:store(J, F(User), Us);
+                    _         -> Us
+                  end
+               end, Users, Users);
+        %% Match by full JID
+        _ ->
+            case ?DICT:find(LJID, Users) of
+                {ok, User} -> ?DICT:store(LJID, F(User), Users);
+                error -> ok
+            end
+    end.
 
 send_new_presence(NJID, StateData) ->
     send_new_presence(NJID, <<>>, StateData).
@@ -1721,8 +1778,8 @@ send_new_presence(NJID, Reason, StateData) ->
            last_presence = Presence}} =
     ?DICT:find(jlib:jid_tolower(NJID), StateData#state.users),
     Affiliation = get_affiliation(NJID, StateData),
-    SAffiliation = affiliation_to_list(Affiliation),
-    SRole = role_to_list(Role),
+    BAffiliation = affiliation_to_binary(Affiliation),
+    BRole = role_to_binary(Role),
     lists:foreach(
       fun({_LJID, Info}) ->
           ItemAttrs =
@@ -1730,11 +1787,11 @@ send_new_presence(NJID, Reason, StateData) ->
               ((StateData#state.config)#config.anonymous == false) of
               true ->
               [{<<"jid">>, jlib:jid_to_binary(RealJID)},
-               {<<"affiliation">>, SAffiliation},
-               {<<"role">>, SRole}];
+               {<<"affiliation">>, BAffiliation},
+               {<<"role">>, BRole}];
               _ ->
-              [{<<"affiliation">>, SAffiliation},
-               {<<"role">>, SRole}]
+              [{<<"affiliation">>, BAffiliation},
+               {<<"role">>, BRole}]
           end,
           ItemEls = case Reason of
                 <<>> ->
@@ -1791,8 +1848,7 @@ send_new_presence(NJID, Reason, StateData) ->
 
 send_existing_presences(ToJID, StateData) ->
     LToJID = jlib:jid_tolower(ToJID),
-    {ok, #user{jid = RealToJID,
-           role = Role}} =
+    {ok, #user{jid = RealToJID, role = Role}} =
     ?DICT:find(LToJID, StateData#state.users),
     lists:foreach(
       fun({LJID, #user{jid = FromJID,
@@ -1812,12 +1868,12 @@ send_existing_presences(ToJID, StateData) ->
                   true ->
                   [{<<"jid">>, jlib:jid_to_binary(FromJID)},
                    {<<"affiliation">>,
-                    affiliation_to_list(FromAffiliation)},
-                   {<<"role">>, role_to_list(FromRole)}];
+                    affiliation_to_binary(FromAffiliation)},
+                   {<<"role">>, role_to_binary(FromRole)}];
                   _ ->
                   [{<<"affiliation">>,
-                    affiliation_to_list(FromAffiliation)},
-                   {<<"role">>, role_to_list(FromRole)}]
+                    affiliation_to_binary(FromAffiliation)},
+                   {<<"role">>, role_to_binary(FromRole)}]
               end,
               Packet = xml:append_subtags(
                  Presence,
@@ -1886,8 +1942,8 @@ send_nick_changing(JID, OldNick, StateData) ->
            last_presence = Presence}} =
     ?DICT:find(jlib:jid_tolower(JID), StateData#state.users),
     Affiliation = get_affiliation(JID, StateData),
-    SAffiliation = affiliation_to_list(Affiliation),
-    SRole = role_to_list(Role),
+    BAffiliation = affiliation_to_binary(Affiliation),
+    BRole = role_to_binary(Role),
     lists:foreach(
       fun({_LJID, Info}) ->
           ItemAttrs1 =
@@ -1895,12 +1951,12 @@ send_nick_changing(JID, OldNick, StateData) ->
               ((StateData#state.config)#config.anonymous == false) of
               true ->
               [{<<"jid">>, jlib:jid_to_binary(RealJID)},
-               {<<"affiliation">>, SAffiliation},
-               {<<"role">>, SRole},
+               {<<"affiliation">>, BAffiliation},
+               {<<"role">>, BRole},
                {<<"nick">>, Nick}];
               _ ->
-              [{<<"affiliation">>, SAffiliation},
-               {<<"role">>, SRole},
+              [{<<"affiliation">>, BAffiliation},
+               {<<"role">>, BRole},
                {<<"nick">>, Nick}]
           end,
           ItemAttrs2 =
@@ -1908,11 +1964,11 @@ send_nick_changing(JID, OldNick, StateData) ->
               ((StateData#state.config)#config.anonymous == false) of
               true ->
               [{<<"jid">>, jlib:jid_to_binary(RealJID)},
-               {<<"affiliation">>, SAffiliation},
-               {<<"role">>, SRole}];
+               {<<"affiliation">>, BAffiliation},
+               {<<"role">>, BRole}];
               _ ->
-              [{<<"affiliation">>, SAffiliation},
-               {<<"role">>, SRole}]
+              [{<<"affiliation">>, BAffiliation},
+               {<<"role">>, BRole}]
           end,
 
 		  SelfPresenceCode= if 
@@ -2077,15 +2133,15 @@ process_iq_admin(From, get, Lang, SubEl, StateData) ->
             false ->
                 {error, ?ERR_BAD_REQUEST};
             {value, StrAffiliation} ->
-                case catch list_to_affiliation(StrAffiliation) of
+                case catch binary_to_affiliation(StrAffiliation) of
                 {'EXIT', _} ->
                     {error, ?ERR_BAD_REQUEST};
-                SAffiliation ->
+                BAffiliation ->
                     if
                     (FAffiliation == owner) or
                     (FAffiliation == admin) ->
                         Items = items_with_affiliation(
-                              SAffiliation, StateData),
+                              BAffiliation, StateData),
                         {result, Items, StateData};
                     true ->
                         ErrText = <<"Administrator privileges required">>,
@@ -2094,13 +2150,13 @@ process_iq_admin(From, get, Lang, SubEl, StateData) ->
                 end
             end;
         {value, StrRole} ->
-            case catch list_to_role(StrRole) of
+            case catch binary_to_role(StrRole) of
             {'EXIT', _} ->
                 {error, ?ERR_BAD_REQUEST};
-            SRole ->
+            BRole ->
                 if
                 FRole == moderator ->
-                    Items = items_with_role(SRole, StateData),
+                    Items = items_with_role(BRole, StateData),
                     {result, Items, StateData};
                 true ->
                     ErrText = <<"Moderator privileges required">>,
@@ -2111,25 +2167,25 @@ process_iq_admin(From, get, Lang, SubEl, StateData) ->
     end.
 
 
-items_with_role(SRole, StateData) ->
+items_with_role(BRole, StateData) ->
     lists:map(
       fun({_, U}) ->
           user_to_item(U, StateData)
-      end, search_role(SRole, StateData)).
+      end, search_role(BRole, StateData)).
 
-items_with_affiliation(SAffiliation, StateData) ->
+items_with_affiliation(BAffiliation, StateData) ->
     lists:map(
       fun({JID, {Affiliation, Reason}}) ->
           #xmlel{name = <<"item">>,
-                 attrs = [{<<"affiliation">>, affiliation_to_list(Affiliation)},
+                 attrs = [{<<"affiliation">>, affiliation_to_binary(Affiliation)},
                       {<<"jid">>, jlib:jid_to_binary(JID)}],
                  children = [#xmlel{name = <<"reason">>,
                                     children = [#xmlcdata{content = Reason}]}]};
          ({JID, Affiliation}) ->
               #xmlel{name = <<"item">>,
-                     attrs = [{<<"affiliation">>, affiliation_to_list(Affiliation)},
+                     attrs = [{<<"affiliation">>, affiliation_to_binary(Affiliation)},
                           {<<"jid">>, jlib:jid_to_binary(JID)}]}
-      end, search_affiliation(SAffiliation, StateData)).
+      end, search_affiliation(BAffiliation, StateData)).
 
 user_to_item(#user{role = Role,
            nick = Nick,
@@ -2137,8 +2193,8 @@ user_to_item(#user{role = Role,
           }, StateData) ->
     Affiliation = get_affiliation(JID, StateData),
     #xmlel{name = <<"item">>,
-           attrs = [{<<"role">>, role_to_list(Role)},
-                    {<<"affiliation">>, affiliation_to_list(Affiliation)},
+           attrs = [{<<"role">>, role_to_binary(Role)},
+                    {<<"affiliation">>, affiliation_to_binary(Affiliation)},
                     {<<"nick">>, Nick},
                     {<<"jid">>, jlib:jid_to_binary(JID)}]}.
 
@@ -2289,18 +2345,18 @@ find_changed_items(UJID, UAffiliation, URole,
             false ->
                 {error, ?ERR_BAD_REQUEST};
             {value, StrAffiliation} ->
-                case catch list_to_affiliation(StrAffiliation) of
+                case catch binary_to_affiliation(StrAffiliation) of
                 {'EXIT', _} ->
                     ErrText1 = <<(translate:translate(Lang, <<"Invalid affiliation ">>))/binary,
                         StrAffiliation/binary>>,
                     {error, ?ERRT_NOT_ACCEPTABLE(Lang, ErrText1)};
-                SAffiliation ->
+                BAffiliation ->
                     ServiceAf = get_service_affiliation(JID, StateData),
                     CanChangeRA =
                     case can_change_ra(
                            UAffiliation, URole,
                            TAffiliation, TRole,
-                           affiliation, SAffiliation,
+                           affiliation, BAffiliation,
                            ServiceAf) of
                         nothing ->
                         nothing;
@@ -2334,7 +2390,7 @@ find_changed_items(UJID, UAffiliation, URole,
                           Items, Lang, StateData,
                           [{jlib:jid_remove_resource(JID),
                         affiliation,
-                        SAffiliation,
+                        BAffiliation,
                         xml:get_path_s(
                           Item, [{elem, <<"reason">>},
                              cdata])} | Res]);
@@ -2346,18 +2402,18 @@ find_changed_items(UJID, UAffiliation, URole,
                 end
             end;
         {value, StrRole} ->
-            case catch list_to_role(StrRole) of
+            case catch binary_to_role(StrRole) of
             {'EXIT', _} ->
                 ErrText1 = <<(translate:translate(Lang, <<"Invalid role ">>))/binary,
                     StrRole/binary>>,
                 {error, ?ERRT_BAD_REQUEST(Lang, ErrText1)};
-            SRole ->
+            BRole ->
                 ServiceAf = get_service_affiliation(JID, StateData),
                 CanChangeRA =
                 case can_change_ra(
                        UAffiliation, URole,
                        TAffiliation, TRole,
-                       role, SRole,
+                       role, BRole,
                        ServiceAf) of
                     nothing ->
                     nothing;
@@ -2387,7 +2443,7 @@ find_changed_items(UJID, UAffiliation, URole,
                       UJID,
                       UAffiliation, URole,
                       Items, Lang, StateData,
-                      [{JID, role, SRole,
+                      [{JID, role, BRole,
                     xml:get_path_s(
                       Item, [{elem, <<"reason">>},
                          cdata])} | Res]);
@@ -2569,39 +2625,17 @@ send_kickban_presence(JID, Reason, Code, StateData) ->
     send_kickban_presence(JID, Reason, Code, NewAffiliation, StateData).
 
 send_kickban_presence(JID, Reason, Code, NewAffiliation, StateData) ->
-    LJID = jlib:jid_tolower(JID),
-    LJIDs = case LJID of
-        {U, S, <<>>} ->
-            ?DICT:fold(
-               fun(J, _, Js) ->
-                   case J of
-                   {U, S, _} ->
-                       [J | Js];
-                   _ ->
-                       Js
-                   end
-               end, [], StateData#state.users);
-        _ ->
-            case ?DICT:is_key(LJID, StateData#state.users) of
-            true ->
-                [LJID];
-            _ ->
-                []
-            end
-        end,
-    lists:foreach(fun(J) ->
-              {ok, #user{nick = Nick}} =
-                  ?DICT:find(J, StateData#state.users),
-              add_to_log(kickban, {Nick, Reason, Code}, StateData),
-              tab_remove_online_user(J, StateData),
-              send_kickban_presence1(J, Reason, Code, NewAffiliation, StateData)
-          end, LJIDs).
+    foreach_matched_user(fun(#user{nick = Nick, jid = J}) ->
+      add_to_log(kickban, {Nick, Reason, Code}, StateData),
+      tab_remove_online_user(J, StateData),
+      send_kickban_presence1(J, Reason, Code, NewAffiliation, StateData)
+    end, JID, StateData).
 
 send_kickban_presence1(UJID, Reason, Code, Affiliation, StateData) ->
     {ok, #user{jid = RealJID,
            nick = Nick}} =
     ?DICT:find(jlib:jid_tolower(UJID), StateData#state.users),
-    SAffiliation = affiliation_to_list(Affiliation),
+    BAffiliation = affiliation_to_binary(Affiliation),
     BannedJIDString = jlib:jid_to_binary(RealJID),
     lists:foreach(
       fun({_LJID, Info}) ->
@@ -2611,7 +2645,7 @@ send_kickban_presence1(UJID, Reason, Code, Affiliation, StateData) ->
                 true -> [{<<"jid">>, BannedJIDString}];
                 false -> []
                 end,
-          ItemAttrs = [{<<"affiliation">>, SAffiliation},
+          ItemAttrs = [{<<"affiliation">>, BAffiliation},
                {<<"role">>, <<"none">>}] ++ JidAttrList,
           ItemEls = case Reason of
                 <<>> ->
@@ -2703,14 +2737,14 @@ process_iq_owner(From, get, Lang, SubEl, StateData) ->
             false ->
                 {error, ?ERR_BAD_REQUEST};
             {value, StrAffiliation} ->
-                case catch list_to_affiliation(StrAffiliation) of
+                case catch binary_to_affiliation(StrAffiliation) of
                 {'EXIT', _} ->
                     ErrText = <<(translate:translate(Lang, <<"Invalid affiliation ">>))/binary,
                         StrAffiliation/binary>>,
                     {error, ?ERRT_NOT_ACCEPTABLE(Lang, ErrText)};
-                SAffiliation ->
+                BAffiliation ->
                     Items = items_with_affiliation(
-                          SAffiliation, StateData),
+                          BAffiliation, StateData),
                     {result, Items, StateData}
                 end
             end;
@@ -2738,7 +2772,7 @@ is_allowed_persistent_change(XEl, StateData, From) ->
     false ->
         true;
     true ->
-        {_AccessRoute, _AccessCreate, _AccessAdmin, AccessPersistent} = StateData#state.access,
+        AccessPersistent = access_persistent(StateData),
         (allow == acl:match_rule(StateData#state.server_host, AccessPersistent, From))
     end.
 
@@ -2811,7 +2845,7 @@ get_default_room_maxusers(RoomState) ->
     (RoomState2#state.config)#config.max_users.
 
 get_config(Lang, StateData, From) ->
-    {_AccessRoute, _AccessCreate, _AccessAdmin, AccessPersistent} = StateData#state.access,
+    AccessPersistent = access_persistent(StateData),
     ServiceMaxUsers = get_service_max_users(StateData),
     DefaultRoomMaxUsers = get_default_room_maxusers(StateData),
     Config = StateData#state.config,
@@ -3362,7 +3396,7 @@ check_voice_approval(From, [#xmlel{name = <<"x">>,
     RoleBin = GetField(<<"muc#role">>),
     case Items of
         [_Form, _Role] ->
-            case catch list_to_role(RoleBin) of
+            case catch binary_to_role(RoleBin) of
                 {'EXIT', _} -> {error, ?ERR_BAD_REQUEST};
                 _ -> {form, RoleBin}
             end;
