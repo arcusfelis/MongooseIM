@@ -266,10 +266,16 @@ rewrite_default_option(Host, K, V, Opts) ->
 process_mam_iq(From, To, IQ) ->
     process_mam_iq(user, From, To, IQ).
 
-process_mam_iq(ArcType, From, To, IQ) ->
+process_mam_iq(ArcType, From=#jid{lserver=Host}, To, IQ) ->
     Action = iq_action(IQ),
     case is_action_allowed(ArcType, Action, From, To) of
-        true  -> handle_mam_iq(Action, From, To, IQ);
+        true  -> 
+            case shaper_srv:wait(Host, action_to_shaper_name(Action), From, 1) of
+                ok ->
+                    handle_mam_iq(Action, From, To, IQ);
+                {error, max_delay_reached} ->
+                    return_max_delay_reached_error_iq(IQ)
+            end;
         false -> return_action_not_allowed_error_iq(IQ)
     end.
 
@@ -311,6 +317,9 @@ action_type(mam_set_prefs)                  -> set;
 action_type(mam_lookup_messages)            -> get;
 action_type(mam_purge_single_message)       -> set;
 action_type(mam_purge_multiple_messages)    -> set.
+
+-spec action_to_shaper_name(action()) -> atom().
+action_to_shaper_name(Action) -> list_to_atom(atom_to_list(Action) ++ "_shaper").
 
 handle_mam_iq(Action, From, To, IQ) ->
     case Action of
@@ -675,7 +684,13 @@ return_action_not_allowed_error_iq(IQ) ->
 return_purge_not_found_error_iq(IQ) ->
     %% Message not found.
     ErrorEl = ?STANZA_ERRORT(<<"">>, <<"cancel">>, <<"item-not-found">>,
-         <<"en">>, <<"The provided UID did not match any message stored in archive.">>),          
+         <<"en">>, <<"The provided UID did not match any message stored in archive.">>),
+    IQ#iq{type = error, sub_el = [ErrorEl]}.
+
+return_max_delay_reached_error_iq(IQ) ->
+    %% Message not found.
+    ErrorEl = ?ERRT_RESOURCE_CONSTRAINT(
+        <<"en">>, <<"The action is cancelled because of flooding.">>),
     IQ#iq{type = error, sub_el = [ErrorEl]}.
 
 return_purge_single_message_iq(IQ, ok) ->
