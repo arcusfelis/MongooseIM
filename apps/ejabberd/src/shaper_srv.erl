@@ -1,5 +1,6 @@
 -module(shaper_srv).
 -behaviour(gen_server).
+-include_lib("ejabberd/include/ejabberd.hrl").
 -define(SERVER, ?MODULE).
 
 %% ------------------------------------------------------------------
@@ -14,8 +15,12 @@
 %% ------------------------------------------------------------------
 
 -record(state, {
+        %% Maximum ammount of milliseconds to wait
         max_delay :: non_neg_integer(),
-        shapers :: dict()
+        %% How many seconds to store each shaper
+        ttl :: non_neg_integer(),
+        shapers :: dict(),
+        a_times :: dict()
     }).
 
 %% ------------------------------------------------------------------
@@ -43,35 +48,37 @@ wait(Host, Action, FromJID, Size) ->
 %% ------------------------------------------------------------------
 
 init(Args) ->
-    State = #state{
-        shapers = dict:new(),
-        max_delay = proplists:get_value(max_delay, Args, 3000)
-    },
+    State = init_dicts(#state{
+        max_delay = proplists:get_value(max_delay, Args, 3000),
+        ttl = proplists:get_value(ttl, Args, 120)
+    }),
+    GCInt = proplists:get_value(gc_interval, Args, 30),
+    timer:send_interval(timer:seconds(GCInt), delete_old_shapers),
     {ok, State}.
 
 handle_call({wait, Host, Action, FromJID, Size},
-            FromRef, State=#state{shapers=Shapers, max_delay=MaxDelayMs}) ->
+            FromRef, State=#state{max_delay=MaxDelayMs}) ->
     Key = new_key(Host, Action, FromJID),
-    Shaper = find_or_create_shaper(Key, Shapers),
+    Shaper = find_or_create_shaper(Key, State),
+    State1 = update_access_time(Key, now(), State),
     case shaper:update(Shaper, Size) of
         {Shaper, 0} ->
-            {reply, ok, State};
+            {reply, ok, State1};
         {UpdatedShaper, 0} ->
-            NewShapers = dict:store(Key, UpdatedShaper, Shapers),
-            NewState = #state{shapers=NewShapers},
-            {reply, ok, NewState};
+            {reply, ok, save_shaper(Key, UpdatedShaper, State1)};
         {UpdatedShaper, DelayMs} when DelayMs < MaxDelayMs ->
-            NewShapers = dict:store(Key, UpdatedShaper, Shapers),
             reply_after(DelayMs, FromRef),
-            NewState = #state{shapers=NewShapers},
-            {noreply, NewState};
+            {noreply, save_shaper(Key, UpdatedShaper, State1)};
         {_, _} ->
-            {reply, {error, max_delay_reached}, State}
+            {reply, {error, max_delay_reached}, State1}
     end.
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+handle_info(delete_old_shapers, State) ->
+    ?DEBUG("Deleted old shapers", []),
+    {noreply, delete_old_shapers(State)};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -88,11 +95,30 @@ code_change(_OldVsn, State, _Extra) ->
 new_key(Host, Action, FromJID) ->
     {Host, Action, FromJID}.
 
-find_or_create_shaper(Key, Shapers) ->
+find_or_create_shaper(Key, #state{shapers=Shapers}) ->
     case dict:find(Key, Shapers) of
         {ok, Shaper} -> Shaper;
         error -> create_shaper(Key)
     end.
+
+update_access_time(Key, Now, State=#state{a_times=Times}) ->
+    State#state{a_times=dict:store(Key, Now, Times)}.
+
+save_shaper(Key, Shaper, State=#state{shapers=Shapers}) ->
+    State#state{shapers=dict:store(Key, Shaper, Shapers)}.
+
+init_dicts(State) ->
+    State#state{shapers=dict:new(), a_times=dict:new()}.
+
+delete_old_shapers(State=#state{shapers=Shapers, a_times=Times, ttl=TTL}) ->
+    Min = subtract_seconds(now(), TTL),
+    %% Copy recently modified shapers
+    dict:fold(fun
+        (_, ATime, Acc) when ATime < Min -> Acc; %% skip too old
+        (Key, ATime, Acc) ->
+            Shaper = dict:fetch(Key, Shapers),
+            update_access_time(Key, ATime, save_shaper(Key, Shaper, Acc))
+        end, init_dicts(State), Times).
 
 create_shaper(Key) ->
     shaper:new(request_shaper_name(Key)).
@@ -111,3 +137,6 @@ get_shaper_name(Host, Action, FromJID, Default) ->
 
 reply_after(DelayMs, FromJID) ->
     timer:apply_after(DelayMs, gen_server, reply, [FromJID, ok]).
+
+subtract_seconds({MegaSecs, Secs, MicroSecs}, SubSecs) ->
+    {MegaSecs - (SubSecs div 1000000), Secs - (SubSecs rem 1000000), MicroSecs}.
