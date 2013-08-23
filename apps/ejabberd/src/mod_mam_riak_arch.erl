@@ -13,6 +13,8 @@
          purge_multiple_messages/5]).
 
 -ifdef(TEST).
+-export([dirty_purge_single_message/3]).
+
 -export([load_mock/1,
          unload_mock/0,
          reset_mock/0,
@@ -208,6 +210,21 @@ lookup_messages(_UserJID=#jid{lserver=LocLServer, luser=LocLUser},
         end)
         end,
     with_connection(LocLServer, F).
+
+-ifdef(TEST).
+
+dirty_purge_single_message(
+        UserJID=#jid{lserver = LServer, luser = LUser}, MessID, Now)
+    when is_integer(MessID), is_integer(Now) ->
+    with_connection(LServer, fun(Conn) ->
+        UserID = mod_mam_cache:user_id(LServer, LUser),
+        BUserID = user_id_to_binary(UserID),
+        BMessID = mess_id_to_binary(MessID),
+        Key = message_key(BUserID, BMessID),
+        riakc_pb_socket:delete(Conn, message_bucket(), Key)
+        end).
+
+-endif.
 
 -spec purge_single_message(UserJID, MessID, Now) ->
     ok | {error, 'not-found'} when
