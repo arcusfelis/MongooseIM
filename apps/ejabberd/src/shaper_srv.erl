@@ -62,8 +62,6 @@ handle_call({wait, Host, Action, FromJID, Size},
     Shaper = find_or_create_shaper(Key, State),
     State1 = update_access_time(Key, now(), State),
     case shaper:update(Shaper, Size) of
-        {Shaper, 0} ->
-            {reply, ok, State1};
         {UpdatedShaper, 0} ->
             {reply, ok, save_shaper(Key, UpdatedShaper, State1)};
         {UpdatedShaper, DelayMs} when DelayMs < MaxDelayMs ->
