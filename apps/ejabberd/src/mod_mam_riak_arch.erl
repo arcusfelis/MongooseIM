@@ -1087,8 +1087,8 @@ merge_digest_siblings(RQ, DigestObj) ->
     case has_siblings(DigestObj) of
     true ->
         DigestObj2 = fix_metadata(DigestObj),
-        Values = riakc_obj:get_values(DigestObj),
-        NewDigest = dig_merge(RQ, deserialize_values(Values)),
+        Values = filter_deleted_values(riakc_obj:get_values(DigestObj)),
+        NewDigest = dig_merge(RQ, deserialize_digest_values(Values)),
         riakc_obj:update_value(DigestObj2, digest_to_binary(NewDigest));
     false ->
         DigestObj
@@ -1239,7 +1239,7 @@ with_connection(_LocLServer, F) ->
         riak_pool:with_connection(mam_cluster, F)).
 
 has_siblings(Obj) ->
-    length(riakc_obj:get_values(Obj)) > 1.
+    length(filter_deleted_values(riakc_obj:get_values(Obj))) > 1.
 
 %% @doc Return mtime of the object in microseconds.
 last_modified(Obj) ->
@@ -1391,6 +1391,20 @@ to_values(Conn, Keys) ->
             Values
     end.
 
+-spec to_existed_values(riak_connection(), list(full_key())) -> list(riak_value()).
+to_existed_values(Conn, Keys) ->
+    %% Action is `<<"filter_notfound">>'.
+    Ops = [{map, {modfun, riak_kv_mapreduce, map_object_value}, <<"filter_notfound">>, true}],
+    case riakc_pb_socket:mapred(Conn, Keys, Ops) of
+        {ok, []} ->
+            [];
+        {ok, [{0, Values}]} ->
+            filter_deleted_values(Values)
+    end.
+
+filter_deleted_values(Values) ->
+    [Value || Value <- Values, Value =/= <<>>].
+
 to_digest_objects(Conn, Keys) ->
     FullKeys = [{digest_bucket(), Key} || Key <- Keys],
     to_objects(Conn, FullKeys).
@@ -1419,7 +1433,7 @@ get_object_range(Conn, Bucket, SecIndex, LBound, UBound)
 -spec get_message_rows(term(), [binary()]) -> list(message_row()).
 get_message_rows(Conn, Keys) ->
     FullKeys = [{message_bucket(), K} || K <- Keys],
-    Values = to_values(Conn, FullKeys),
+    Values = to_existed_values(Conn, FullKeys),
     MessageRows = deserialize_values(Values),
     lists:usort(MessageRows).
 
@@ -1435,12 +1449,18 @@ get_all_digest_objects(Conn, LServer, LUser) ->
 %% -----------------------------------------------------------------------
 
 %% @doc Count entries (bounds are inclusive).
-%% TODO: use map-reduce here
+%% This function does the same as:
+%% `length(get_key_range(Conn, SecIndex, LBound, UBound))'
 get_key_count_between(Conn, SecIndex, LBound, UBound) when LBound =< UBound ->
-    {ok, ?INDEX_RESULTS{keys=Keys}} =
-    riakc_pb_socket:get_index_range(
-        Conn, message_bucket(), SecIndex, LBound, UBound),
-    length(Keys);
+    Input = {index,message_bucket(),SecIndex,LBound,UBound},
+    Ops = [{reduce, {modfun, riak_kv_mapreduce, reduce_count_inputs},
+            undefined, true}],
+    case riakc_pb_socket:mapred(Conn, Input, Ops) of
+        {ok, []} ->
+            0;
+        {ok, [{0, [Count]}]} ->
+            Count
+    end;
 get_key_count_between(_, _, _, _) ->
     0.
 
@@ -1685,6 +1705,9 @@ binary_to_digest(Bin) when is_binary(Bin) ->
 deserialize_values(Values) ->
     [binary_to_term(Value) || Value <- Values].
 
+deserialize_digest_values(Values) ->
+    [binary_to_term(Value) || Value <- Values, not is_empty_digest_value(Value)].
+
 secondary_key(BUserID, BMessID, undefined) ->
     message_key(BUserID, BMessID);
 secondary_key(BUserID, BMessID, BWithJID) ->
@@ -1872,6 +1895,8 @@ dig_add_keys(Keys, Digest) ->
 dig_concat(Digest1, Digest2) ->
     Digest1 ++ Digest2.
 
+dig_merge(_, []) ->
+    [];
 dig_merge(RQ, Digests) ->
     SiblingCnt = length(Digests),
     F1 = fun({Hour, Cnt}, Dict) -> dict:append(Hour, Cnt, Dict) end,
@@ -2487,7 +2512,7 @@ load_mock(DigestThreshold) ->
         case Ops of
         %% Get values
         %% see `to_values/2'
-        [{map, {modfun, riak_kv_mapreduce, map_object_value}, undefined, true}] ->
+        [{map, {modfun, riak_kv_mapreduce, map_object_value}, _, true}] ->
             case [proplists:get_value(value, Obj)
                  || Key <- Keys,
                     {Key, Obj} <- ets:lookup(Tab, Key)] of
@@ -2500,7 +2525,10 @@ load_mock(DigestThreshold) ->
                     {Key, Obj} <- ets:lookup(Tab, Key)] of
                 []     -> {ok, []};
                 Values -> {ok, [{0, Values}]}
-            end
+            end;
+        [{reduce, {modfun, riak_kv_mapreduce, reduce_count_inputs},
+          undefined, true}] ->
+            {ok, [{0, length(Keys)}]}
         end
         end),
     meck:expect(SM, get_bucket, fun(Conn, Bucket) ->
