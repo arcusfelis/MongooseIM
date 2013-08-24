@@ -1,6 +1,9 @@
 -module(mod_mam).
 -behavior(gen_mod).
 
+%% ----------------------------------------------------------------------
+%% Exports
+
 %% Client API
 -export([delete_archive/2,
          archive_size/2]).
@@ -18,6 +21,13 @@
 -export([filter_room_packet/4,
          room_process_mam_iq/3,
          forget_room/2]).
+
+%% Utils
+-export([create_dump_file/2,
+         restore_dump_file/2]).
+
+%% ----------------------------------------------------------------------
+%% Imports
 
 -import(mod_mam_utils,
         [maybe_microseconds/1,
@@ -100,6 +110,90 @@ archive_size(Server, User) ->
     LServer = jlib:nameprep(Server),
     AM = archive_module(LServer),
     AM:archive_size(LServer, LUser).
+
+%% ----------------------------------------------------------------------
+%% Utils API
+
+create_dump_file(ArcJID, OutFileName) ->
+    {ok, FD} = file:open(OutFileName, [write]),
+    F = fun(Data, _) -> file:write(FD, Data) end,
+    F(<<"<stream>">>, undefined),
+    Now = mod_mam_utils:now_to_microseconds(now()),
+    create_dump_cycle(
+        F, undefined, ArcJID, undefined,
+        undefined, undefined, Now, undefined, 50),
+    F(<<"</stream>">>, undefined),
+    file:close(FD).
+
+create_dump_cycle(F, Acc, ArcJID, RSM, From, To, Now, WithJID, PageSize) ->
+    {ok, {TotalCount, Offset, MessageRows}} =
+    lookup_messages(ArcJID, RSM, From, To, Now,
+                    WithJID, PageSize, true, PageSize),
+    Data = [exml:to_iolist(message_row_to_dump_xml(M)) || M <- MessageRows],
+    Acc1 = F(Data, Acc),
+    case is_last_page(TotalCount, Offset, PageSize) of
+    false ->
+        Acc1;
+    true ->
+        create_dump_cycle(
+            F, Acc1, ArcJID, after_rsm(MessageRows),
+            From, To, Now, WithJID, PageSize)
+    end.
+
+message_row_to_dump_xml(M) ->
+     xml:get_subtag(message_row_to_xml(M, undefined), <<"result">>).
+
+after_rsm(MessageRows) ->
+    {MessID,_SrcJID,_Packet} = lists:last(MessageRows),
+    #rsm_in{direction = aft, id = MessID}.
+
+is_last_page(TotalCount, Offset, PageSize) ->
+    Offset - PageSize >= TotalCount.
+
+restore_dump_file(JID, InFileName) ->
+    {ok, FD} = file:open(InFileName, [read]),
+    F = fun(Acc) ->
+            case file:read(FD, 1024) of
+            {ok, Data} ->
+                {ok, Data, Acc};
+            eof ->
+                {eof, Acc}
+            end
+        end,
+    restore_dump(F, undefined, JID),
+    file:close(FD).
+
+restore_dump(F, Acc, JID) ->
+    {ok, Parser} = exml_stream:new_parser(),
+    restore_dump_cycle(F, Acc, Parser, JID).
+
+restore_dump_cycle(F, Acc, Parser, JID) ->
+    case F(Acc) of
+    {ok, Data, Acc1} ->
+        case exml_stream:parse(Parser, Data) of
+        {ok, Parser1, Elems} ->
+            [insert_xml_message(JID, Elem) || Elem = #xmlel{} <- Elems],
+            restore_dump_cycle(F, Acc1, Parser1, JID);
+        {error, Error} ->
+            {error, Error, Acc1}
+        end;
+    {eof, Acc1} ->
+        {exml_stream:free_parser(Parser), Acc1}
+    end.
+
+insert_xml_message(LocJID, ResElem) ->
+    FwdElem = xml:get_subtag(ResElem, <<"forwarded">>),
+    MessElem = xml:get_subtag(FwdElem, <<"message">>),
+    BExtMessID = xml:get_tag_attr_s(<<"id">>, ResElem),
+    MessID = mod_mam_utils:external_binary_to_mess_id(BExtMessID),
+    FromJID = jlib:binary_to_jid(xml:get_tag_attr(<<"from">>, MessElem)),
+    ToJID   = jlib:binary_to_jid(xml:get_tag_attr(<<"to">>, MessElem)),
+    case LocJID of
+    FromJID ->
+        archive_message(MessID, outgoing, LocJID, FromJID, FromJID, MessElem);
+    ToJID ->
+        archive_message(MessID, incoming, LocJID, FromJID, FromJID, MessElem)
+    end.
 
 %% ----------------------------------------------------------------------
 %% gen_mod callbacks

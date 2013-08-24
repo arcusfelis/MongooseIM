@@ -206,8 +206,8 @@ delay(DateTime, SrcJID) ->
 result(QueryID, MessageUID, Children) when is_list(Children) ->
     #xmlel{
         name = <<"result">>,
-        attrs = [{<<"xmlns">>, mam_ns_binary()},
-                 {<<"queryid">>, QueryID},
+        attrs = [{<<"queryid">>, QueryID} || QueryID =/= undefined] ++
+                [{<<"xmlns">>, mam_ns_binary()},
                  {<<"id">>, MessageUID}],
         children = Children}.
 
