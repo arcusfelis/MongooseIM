@@ -1,3 +1,9 @@
+%%%-------------------------------------------------------------------
+%%% @author Uvarov Michael <arcusfelis@gmail.com>
+%%% @copyright (C) 2013, Uvarov Michael
+%%% @doc A backend for storing messages in Riak.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(mod_mam_riak_arch).
 
 %% Exports

@@ -1,3 +1,32 @@
+%%%-------------------------------------------------------------------
+%%% @author Uvarov Michael <arcusfelis@gmail.com>
+%%% @copyright (C) 2013, Uvarov Michael
+%%% @doc XEP-0313: Message Archive Management
+%%%
+%%% The module uses several backend modules:
+%%%
+%%% <ul>
+%%% <li>Preference manager ({@link mod_mam_muc_odbc_prefs});</li>
+%%% <li>Writer ({@link mod_mam_muc_odbc_arch} or {@link mod_mam_muc_odbc_async_writer});</li>
+%%% <li>Archive manager ({@link mod_mam_muc_odbc_arch}).</li>
+%%% </ul>
+%%%
+%%% There are two backends: for MySQL and for Riak.
+%%% Preferencies can be also stored in Mnesia ({@link mod_mam_mnesia_prefs}).
+%%% This module handles both MUC and simple archives.
+%%%
+%%% This module should be started for each host.
+%%% Message archivation is not shaped here (use standard support for this).
+%%% MAM's IQs are shaped inside {@link shaper_srv}.
+%%%
+%%% Message identifiers (or UIDs in the spec) are generated based on:
+%%%
+%%% <ul>
+%%% <li>date (using `now()');</li>
+%%% <li>node number (using {@link ejabberd_node_id}).</li>
+%%% </ul>
+%%% @end
+%%%-------------------------------------------------------------------
 -module(mod_mam).
 -behavior(gen_mod).
 
@@ -155,8 +184,9 @@ is_last_page(TotalCount, Offset, PageSize) ->
     LocJID :: #jid{},
     InFileName :: file:filename(),
     Opts :: [Opt],
-    Opt :: {rewrite_jids, RewriterF},
+    Opt :: {rewrite_jids, RewriterF | Substitutions},
     RewriterF :: fun((BinJID) -> BinJID),
+    Substitutions :: [{BinJID, BinJID}],
     BinJID :: binary().
 restore_dump_file(LocJID, InFileName, Opts) ->
     {ok, StreamAcc} = file:open(InFileName, [read, binary]),
@@ -174,13 +204,23 @@ apply_rewrite_jids(CallF, InitCallAcc, Opts) ->
         undefined ->
             {CallF, InitCallAcc};
         RewriterOpts ->
+            RewriterF = rewrite_opts_to_fun(RewriterOpts),
             {fun(ResElem=#xmlel{}, CallAcc) ->
-                    CallF(rewrite_jids(ResElem, RewriterOpts), CallAcc);
+                    CallF(rewrite_jids(ResElem, RewriterF), CallAcc);
                 (Event, CallAcc) ->
                     ?DEBUG("Skipped ~p.", [Event]),
                     CallF(Event, CallAcc)
              end, InitCallAcc}
     end.
+
+rewrite_opts_to_fun(RewriterF) when is_function(RewriterF) ->
+    RewriterF;
+rewrite_opts_to_fun(Substitutions) when is_list(Substitutions) ->
+    substitute_fun(Substitutions).
+
+substitute_fun(Substitutions) ->
+    Dict = dict:from_list(Substitutions),
+    fun(Orig) -> dict:fetch(Orig, Dict) end.
 
 insert_message_iter(ResElem=#xmlel{}, LocJID) ->
     case insert_xml_message(ResElem, LocJID) of
@@ -190,6 +230,7 @@ insert_message_iter(ResElem=#xmlel{}, LocJID) ->
             {ok, LocJID}
     end;
 insert_message_iter(_, LocJID) ->
+    %% Skip `#xmlstreamelement{}' and `#xmlstreamend{}'
     {ok, LocJID}.
 
 read_data(FD) ->
@@ -257,7 +298,10 @@ debug_rewriting(F) ->
         To
     end.
 
-rewrite_jids(ResElem, F) ->
+-spec rewrite_jids(ResElem, RewriterF) -> ResElem when
+    ResElem :: #xmlel{},
+    RewriterF :: fun((BinJID) -> BinJID).
+rewrite_jids(ResElem, F) when is_function(F) ->
     F1 = debug_rewriting(F),
     WithMsgF = fun(MsgElem) ->
         update_tag_attr(F1, <<"to">>,
@@ -272,13 +316,23 @@ rewrite_jids(ResElem, F) ->
         end,
     update_sub_tag(WithFwdF, <<"forwarded">>, ResElem).
 
+
+-spec update_tag_attr(F, Name, Elem) -> Elem when
+    F :: fun((Value) -> Value),
+    Name :: binary(),
+    Value :: binary(),
+    Elem :: #xmlel{}.
 update_tag_attr(F, Name, Elem)
-    when is_binary(Name) ->
+    when is_function(F, 1), is_binary(Name) ->
     Value = xml:get_tag_attr_s(Name, Elem),
     xml:replace_tag_attr(Name, F(Value), Elem).
 
+-spec update_sub_tag(F, Name, Elem) -> Elem when
+    F :: fun((Elem) -> Elem),
+    Name :: binary(),
+    Elem :: #xmlel{}.
 update_sub_tag(F, Name, Elem=#xmlel{children=Children})
-    when is_binary(Name) ->
+    when is_function(F, 1), is_binary(Name) ->
     Elem#xmlel{children=update_tags(F, Name, Children)};
 update_sub_tag(_, _, Elem) ->
     Elem.
@@ -289,7 +343,14 @@ update_tags(F, Name, [H|T]) ->
     [H|update_tags(F, Name, T)];
 update_tags(_, _, []) ->
     [].
-    
+
+%% @doc Insert a message into archive.
+%% `ResElem' is `<result><forwarded>...</forwarded></result>'.
+%% This format is used inside dump files.
+-spec insert_xml_message(ResElem, LocJID) -> ok | {error, Reason} when
+    ResElem :: #xmlel{},
+    LocJID :: #jid{},
+    Reason :: term().
 insert_xml_message(ResElem, LocJID) ->
     FwdElem = xml:get_subtag(ResElem, <<"forwarded">>),
     MessElem = xml:get_subtag(FwdElem, <<"message">>),

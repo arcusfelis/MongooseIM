@@ -1,4 +1,9 @@
-%% @doc Collect messages and flush them into the database.
+%%%-------------------------------------------------------------------
+%%% @author Uvarov Michael <arcusfelis@gmail.com>
+%%% @copyright (C) 2013, Uvarov Michael
+%%% @doc Collect messages and flush them into the database.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(mod_mam_muc_odbc_async_writer).
 -export([start/1,
          stop/1,

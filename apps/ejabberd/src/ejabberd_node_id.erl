@@ -1,4 +1,9 @@
-%% @doc Stores cache using ETS-table.
+%%%-------------------------------------------------------------------
+%%% @author Uvarov Michael <arcusfelis@gmail.com>
+%%% @copyright (C) 2013, Uvarov Michael
+%%% @doc Allocates unique ids for each node.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(ejabberd_node_id).
 -export([start/0, node_id/0]).
 
@@ -31,6 +36,8 @@ register_node(NodeName) ->
         end),
     ok.
 
+%% @doc Return an integer node ID.
+-spec node_id() -> non_neg_integer().
 node_id() ->
     %% Save result into the process's memory space.
     case get(node_id) of

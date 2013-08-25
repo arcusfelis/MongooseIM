@@ -1,4 +1,9 @@
-%% @doc Stores cache using ETS-table.
+%%%-------------------------------------------------------------------
+%%% @author Uvarov Michael <arcusfelis@gmail.com>
+%%% @copyright (C) 2013, Uvarov Michael
+%%% @doc Stores cache using ETS-table.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(mod_mam_muc_cache).
 -export([start_link/0,
          is_logging_enabled/2,

@@ -1,3 +1,9 @@
+%%%-------------------------------------------------------------------
+%%% @author Uvarov Michael <arcusfelis@gmail.com>
+%%% @copyright (C) 2013, Uvarov Michael
+%%% @doc Shared shapers.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(shaper_srv).
 -behaviour(gen_server).
 -include_lib("ejabberd/include/ejabberd.hrl").
@@ -39,6 +45,7 @@ start_link() ->
 
 srv(_Host) -> ?SERVER.
 
+%% @doc Shapes the caller from executing the action.
 -spec wait(_Host, _Action, _FromJID, _Size) -> ok | {error, max_delay_reached}.
 wait(Host, Action, FromJID, Size) ->
     gen_server:call(srv(Host), {wait, Host, Action, FromJID, Size}).

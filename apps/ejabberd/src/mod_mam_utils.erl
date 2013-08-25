@@ -1,3 +1,9 @@
+%%%-------------------------------------------------------------------
+%%% @author Uvarov Michael <arcusfelis@gmail.com>
+%%% @copyright (C) 2013, Uvarov Michael
+%%% @doc General functions for MAM.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(mod_mam_utils).
 %% Time
 -export([maybe_microseconds/1,
@@ -54,15 +60,17 @@ mam_ns_binary() -> <<"urn:xmpp:mam:tmp">>.
 -type unix_timestamp() :: non_neg_integer().
 
 -type elem() :: #xmlel{}.
--type archive_behaviour() :: atom(). % roster | always | never.
--type archive_behaviour_bin() :: binary(). % <<"roster">> | <<"always">> | <<"never">>.
+-type archive_behaviour() :: roster | always | never.
+-type archive_behaviour_bin() :: binary(). % `<<"roster">> | <<"always">> | <<"never">>'.
 
 
 %% -----------------------------------------------------------------------
 %% Time
 
 %% @doc Return a unix timestamp in microseconds.
-%% "maybe" means, that the function may return 'undefined'.
+%%
+%% "maybe" means, that the function may return `undefined'.
+%% @end
 -spec maybe_microseconds(iso8601_datetime_binary()) -> unix_timestamp();
                           (<<>>) -> undefined.
 maybe_microseconds(<<>>) -> undefined;
@@ -104,18 +112,21 @@ generate_message_id() ->
     %% Use monotone function here.
     encode_compact_uuid(now_to_microseconds(now()), NodeId).
 
-%% Removed a leading 0 from 64-bit binary representation.
-%% Put node id as a last byte.
-%% It will stop working at `{{4253,5,31},{22,20,37}}' (it is a date).
+%% @doc Create a message ID (UID).
+%%
+%% It removes a leading 0 from 64-bit binary representation.
+%% It puts node id as a last byte.
+%% The maximum date, that can be encoded is `{{4253,5,31},{22,20,37}}'.
+%% @end
 encode_compact_uuid(Microseconds, NodeId)
     when is_integer(Microseconds), is_integer(NodeId) ->
     (Microseconds bsl 8) + NodeId.
 
+%% @doc Extract date and node id from a message id.
 decode_compact_uuid(Id) ->
     Microseconds = Id bsr 8,
     NodeId = Id band 255,
     {Microseconds, NodeId}.
-
 
 %% @doc Encode a message ID to pass it to the user.
 mess_id_to_external_binary(MessID) when is_integer(MessID) ->
@@ -160,8 +171,10 @@ get_one_of_path(_Elem, [], Def) ->
     Def.
 
 
-%% @doc Check, that the stanza is a message with body.
-%% Servers SHOULD NOT archive messages that do not have a <body/> child tag.
+%% @doc Checks, that the stanza is a message with body.
+%%
+%% Servers SHOULD NOT archive messages that do not have a `<body/>' child tag.
+%% @end
 -spec is_complete_message(Packet::#xmlel{}) -> boolean().
 is_complete_message(Packet=#xmlel{name = <<"message">>}) ->
     case xml:get_tag_attr_s(<<"type">>, Packet) of
@@ -179,7 +192,7 @@ is_complete_message(Packet=#xmlel{name = <<"message">>}) ->
 is_complete_message(_) -> false.
 
 
-%% @doc Form `<forwarded/>' element, according to the XEP.
+%% @doc Forms `<forwarded/>' element, according to the XEP.
 -spec wrap_message(Packet::elem(), QueryID::binary(),
                    MessageUID::term(), DateTime::calendar:datetime(), SrcJID::jid()) ->
         Wrapper::elem().
@@ -202,7 +215,10 @@ delay(DateTime, SrcJID) ->
     jlib:timestamp_to_xml(DateTime, utc, SrcJID, <<>>).
 
 
-%% @doc This element will be added in each forwarded message.
+%% @doc Generates tag `<result />'.
+%%
+%% This element will be added in each forwarded message.
+%% @end
 result(QueryID, MessageUID, Children) when is_list(Children) ->
     #xmlel{
         name = <<"result">>,
@@ -212,7 +228,10 @@ result(QueryID, MessageUID, Children) when is_list(Children) ->
         children = Children}.
 
 
-%% @doc This element will be added into "iq/query".
+%% @doc Generates `<set />' tag.
+%%
+%% This element will be added into "iq/query".
+%% @end
 -spec result_set(FirstId, LastId, FirstIndexI, CountI) -> elem() when
     FirstId :: binary() | undefined,
     LastId  :: binary() | undefined,

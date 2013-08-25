@@ -1,3 +1,9 @@
+%%%-------------------------------------------------------------------
+%%% @author Uvarov Michael <arcusfelis@gmail.com>
+%%% @copyright (C) 2013, Uvarov Michael
+%%% @doc A backend for storing MAM preferencies using Mnesia.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(mod_mam_mnesia_prefs).
 -export([start/1,
          get_behaviour/3,

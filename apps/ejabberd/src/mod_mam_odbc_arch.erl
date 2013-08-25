@@ -1,3 +1,9 @@
+%%%-------------------------------------------------------------------
+%%% @author Uvarov Michael <arcusfelis@gmail.com>
+%%% @copyright (C) 2013, Uvarov Michael
+%%% @doc ODBC backend for Message Archive Management.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(mod_mam_odbc_arch).
 -export([archive_size/2,
          lookup_messages/9,
@@ -148,9 +154,11 @@ extract_messages(LServer, Filter, IOffset, IMax) ->
     ?DEBUG("extract_messages query returns ~p", [MessageRows]),
     MessageRows.
 
-%% Zero-based index of the row with UID in the result test.
+%% @doc Calculate a zero-based index of the row with UID in the result test.
+%%
 %% If the element does not exists, the ID of the next element will
 %% be returned instead.
+%% @end
 %% "SELECT COUNT(*) as "index" FROM mam_message WHERE id <= '",  UID
 -spec calc_index(LServer, Filter, SUID) -> Count
     when
@@ -166,7 +174,9 @@ calc_index(LServer, Filter, SUID) ->
     list_to_integer(binary_to_list(BIndex)).
 
 %% @doc Count of elements in RSet before the passed element.
+%%
 %% The element with the passed UID can be already deleted.
+%% @end
 %% "SELECT COUNT(*) as "count" FROM mam_message WHERE id < '",  UID
 -spec calc_before(LServer, Filter, SUID) -> Count
     when

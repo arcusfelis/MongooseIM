@@ -1,3 +1,9 @@
+%%%-------------------------------------------------------------------
+%%% @author Uvarov Michael <arcusfelis@gmail.com>
+%%% @copyright (C) 2013, Uvarov Michael
+%%% @doc Stores MAM preferencies for rooms using ODBC.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(mod_mam_muc_odbc_prefs).
 
 %% Client API

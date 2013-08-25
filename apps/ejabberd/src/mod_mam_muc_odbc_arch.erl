@@ -1,3 +1,9 @@
+%%%-------------------------------------------------------------------
+%%% @author Uvarov Michael <arcusfelis@gmail.com>
+%%% @copyright (C) 2013, Uvarov Michael
+%%% @doc A backend for storing messages from MUC rooms using ODBC.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(mod_mam_muc_odbc_arch).
 -export([archive_size/2,
          lookup_messages/9,
@@ -165,6 +171,7 @@ calc_index(LServer, Filter, SUID) ->
 
 %% @doc Count of elements in RSet before the passed element.
 %% The element with the passed UID can be already deleted.
+%% @end
 %% "SELECT COUNT(*) as "count" FROM mam_muc_message WHERE id < '",  UID
 -spec calc_before(LServer, Filter, SUID) -> Count
     when
