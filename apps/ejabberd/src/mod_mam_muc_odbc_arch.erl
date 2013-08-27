@@ -6,8 +6,10 @@
 %%%-------------------------------------------------------------------
 -module(mod_mam_muc_odbc_arch).
 -export([archive_size/2,
+         wait_flushing/1,
          lookup_messages/9,
          remove_user_from_db/2,
+         archive_message/6,
          purge_single_message/3,
          purge_multiple_messages/5]).
 
@@ -36,6 +38,33 @@ archive_size(LServer, LRoom) ->
        "WHERE room_id = '", escape_room_id(RoomID), "'"]),
     list_to_integer(binary_to_list(BSize)).
 
+wait_flushing(_Host) ->
+    ok.
+
+archive_message(Id, incoming,
+                _LocJID=#jid{lserver=Host, luser=RoomName},
+                _RemJID=#jid{},
+                _SrcJID=#jid{lresource=FromNick}, Packet) ->
+    archive_message_1(Host, RoomName, Id, FromNick, Packet).
+
+archive_message_1(Host, RoomName, Id, FromNick, Packet) ->
+    RoomId = mod_mam_muc_cache:room_id(Host, RoomName),
+    SRoomId = integer_to_list(RoomId),
+    SFromNick = ejabberd_odbc:escape(FromNick),
+    SData = ejabberd_odbc:escape(term_to_binary(Packet, [compressed])),
+    SID = integer_to_list(Id),
+    write_message(Host, SID, SRoomId, SFromNick, SData).
+
+write_message(Host, SID, SRoomId, SFromNick, SData) ->
+    io:format("SFromNick ~p~n", [SFromNick]),
+    io:format("Data ~p~n", [SData]),
+    {updated, 1} =
+    ejabberd_odbc:sql_query(
+      Host,
+      ["INSERT INTO mam_muc_message(id, room_id, nick_name, message) "
+       "VALUES ('", SID, "', '", SRoomId, "', "
+               "'", SFromNick, "', ", SData, "')"]),
+    ok.
 
 -spec lookup_messages(RoomJID, RSM, Start, End, Now, WithJID, PageSize,
                       LimitPassed, MaxResultLimit) ->

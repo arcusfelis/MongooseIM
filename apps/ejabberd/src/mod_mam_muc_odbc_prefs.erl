@@ -67,12 +67,12 @@ delete_archive(LServer, RoomName) ->
     RoomId = mod_mam_muc_cache:room_id(LServer, RoomName),
     SRoomId = integer_to_list(RoomId),
     %% TODO: use transaction
-    {selected, _ColumnNames, _MessageRows} =
+    {updated, _} =
     ejabberd_odbc:sql_query(LServer,
-    ["DELETE FROM mam_muc_message WHERE room_id = \"", SRoomId, "\""]),
-    {selected, _ColumnNames, _MessageRows} =
+    ["DELETE FROM mam_muc_message WHERE room_id = '", SRoomId, "'"]),
+    {updated, _} =
     ejabberd_odbc:sql_query(LServer,
-    ["DELETE FROM mam_muc_room WHERE id = \"", SRoomId, "\""]),
+    ["DELETE FROM mam_muc_room WHERE id = '", SRoomId, "'"]),
     true.
 
 create_room_archive(LServer, RoomName) ->
@@ -88,7 +88,7 @@ create_room_archive(LServer, RoomName) ->
 
 get_behaviour(DefaultBehaviour,
               #jid{lserver=LServer, luser=RoomName},
-              #jid{} = RemJID) ->
+              #jid{} = _RemJID) ->
     %% TODO: handle "roster" (registered user).
     rewrite_undefined(DefaultBehaviour,
         mod_mam_muc_cache:is_logging_enabled(LServer, RoomName)).
@@ -113,8 +113,8 @@ get_prefs(LServer, LUser, _GlobalDefaultMode) ->
 %% ----------------------------------------------------------------------
 %% SQL Internal functions
 
-sql_bool(true)      -> "\"1\"";
-sql_bool(false)     -> "\"0\"";
+sql_bool(true)      -> "'1'";
+sql_bool(false)     -> "'0'";
 sql_bool(undefined) -> "null".
 
 set_bool(LServer, RoomName, FieldName, FieldValue) ->
@@ -124,7 +124,7 @@ set_bool(LServer, RoomName, FieldName, FieldValue) ->
       LServer,
       ["UPDATE mam_muc_room "
        "SET ", FieldName, " = ", sql_bool(FieldValue), " "
-       "WHERE id = \"", SRoomId, "\""]).
+       "WHERE id = '", SRoomId, "'"]).
 
 select_bool(LServer, RoomName, Field) ->
     SRoomName = ejabberd_odbc:escape(RoomName),

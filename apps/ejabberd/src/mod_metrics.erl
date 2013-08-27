@@ -262,5 +262,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%====================================================================
 
 message_queue_len(Pid) ->
-    {message_queue_len, Len} = erlang:process_info(Pid, message_queue_len),
-    Len.
+    case erlang:process_info(Pid, message_queue_len) of
+        {message_queue_len, Len} -> Len;
+        undefined -> 0
+    end.

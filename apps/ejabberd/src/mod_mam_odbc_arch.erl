@@ -6,6 +6,8 @@
 %%%-------------------------------------------------------------------
 -module(mod_mam_odbc_arch).
 -export([archive_size/2,
+         wait_flushing/1,
+         archive_message/6,
          lookup_messages/9,
          remove_user_from_db/2,
          purge_single_message/3,
@@ -27,6 +29,9 @@
 -type server_hostname() :: binary().
 -type unix_timestamp() :: non_neg_integer().
 
+encode_direction(incoming) -> "I";
+encode_direction(outgoing) -> "O".
+
 archive_size(LServer, LUser) ->
     UserID = mod_mam_cache:user_id(LServer, LUser),
     {selected, _ColumnNames, [{BSize}]} =
@@ -36,6 +41,36 @@ archive_size(LServer, LUser) ->
        "FROM mam_message "
        "WHERE user_id = '", escape_user_id(UserID), "'"]),
     list_to_integer(binary_to_list(BSize)).
+
+wait_flushing(_Host) ->
+    ok.
+
+archive_message(Id, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
+                RemJID=#jid{lresource=RemLResource}, SrcJID, Packet) ->
+    UserID = mod_mam_cache:user_id(LocLServer, LocLUser),
+    SUserID = integer_to_list(UserID),
+    SBareRemJID = esc_jid(jlib:jid_tolower(jlib:jid_remove_resource(RemJID))),
+    SSrcJID = esc_jid(SrcJID),
+    SDir = encode_direction(Dir),
+    SRemLResource = ejabberd_odbc:escape(RemLResource),
+    Data = term_to_binary(Packet, [compressed]),
+    SData = ejabberd_odbc:escape(Data),
+    SId = integer_to_list(Id),
+    write_message(LocLServer, SId, SUserID, SBareRemJID,
+                  SRemLResource, SDir, SSrcJID, SData).
+
+write_message(LServer, SId, SUserID, SBareRemJID,
+              SRemLResource, SDir, SSrcJID, SData) ->
+    {updated, 1} =
+    ejabberd_odbc:sql_query(
+      LServer,
+      ["INSERT INTO mam_message(id, user_id, remote_bare_jid, "
+                                "remote_resource, direction, "
+                                "from_jid, message) "
+       "VALUES ('", SId, "', '", SUserID, "', '", SBareRemJID, "', "
+               "'", SRemLResource, "', '", SDir, "', ",
+               "'", SSrcJID, "', '", SData, "');"]),
+    ok.
 
 
 -spec lookup_messages(UserJID, RSM, Start, End, Now, WithJID, PageSize,
@@ -296,3 +331,6 @@ escape_user_id(UserID) when is_integer(UserID) ->
 
 secure_escaped_jid(JID) ->
     ejabberd_odbc:escape(jlib:binary_to_jid(JID)).
+
+esc_jid(JID) ->
+    ejabberd_odbc:escape(jlib:jid_to_binary(JID)).

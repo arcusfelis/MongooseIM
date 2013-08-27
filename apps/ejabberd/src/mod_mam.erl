@@ -53,7 +53,8 @@
 
 %% Utils
 -export([create_dump_file/2,
-         restore_dump_file/3]).
+         restore_dump_file/3,
+         debug_info/1]).
 
 %% ----------------------------------------------------------------------
 %% Imports
@@ -139,6 +140,14 @@ archive_size(Server, User) ->
     LServer = jlib:nameprep(Server),
     AM = archive_module(LServer),
     AM:archive_size(LServer, LUser).
+
+debug_info(LServer) ->
+    AM = archive_module(LServer),
+    WM = writer_module(LServer),
+    PM = prefs_module(LServer),
+    [{archive_module, AM},
+     {writer_module, WM},
+     {prefs_module, PM}].
 
 %% ----------------------------------------------------------------------
 %% Utils API
@@ -378,7 +387,7 @@ start(Host, Opts) ->
     end.
 
 stop(Host) ->
-    case gen_mod:get_module_opt(muc, ?MODULE, false) of
+    case gen_mod:get_module_opt(Host, muc, ?MODULE, false) of
         false -> stop_for_users(Host);
         true  -> stop_for_rooms(Host)
     end.

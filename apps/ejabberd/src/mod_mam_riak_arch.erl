@@ -18,6 +18,9 @@
          purge_single_message/3,
          purge_multiple_messages/5]).
 
+%% For mam_SUITE.
+-export([is_riak_available/1]).
+
 -ifdef(TEST).
 -export([dirty_purge_single_message/3]).
 
@@ -145,6 +148,15 @@ start(Host) ->
             update_bucket(Conn, digest_bucket(), [{allow_mult, true}])
         end,
     with_connection(Host, F).
+
+%% @doc Returns `true', if Riak's configuration is available.
+is_riak_available(_Host) ->
+    case application:get_env(riak_pool, clusters) of
+        {ok, Clusters} ->
+            lists:keymember(mam_cluster, 1, Clusters);
+        _ ->
+            false
+    end.
 
 archive_message(MessID, _Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
                 RemJID=#jid{}, SrcJID, Packet) ->

@@ -170,7 +170,7 @@ select_bool(LServer, RoomName, Field) ->
     end.
 
 create_room_archive(LServer, RoomName) ->
-    mod_mam_muc:create_room_archive(LServer, RoomName).
+    mod_mam_muc_odbc_prefs:create_room_archive(LServer, RoomName).
     
 
 %%====================================================================
