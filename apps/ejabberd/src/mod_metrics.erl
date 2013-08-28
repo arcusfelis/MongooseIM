@@ -69,9 +69,7 @@ init_folsom(Host) ->
     folsom_metrics:new_histogram(with_connection),
 
     folsom_metrics:new_gauge({Host, modMamMessageQueueLength}),
-    folsom_metrics:tag_metric({Host, modMamMessageQueueLength}, Host),
-    folsom_metrics:new_gauge({Host, odbcQueryQueueLength}),
-    folsom_metrics:tag_metric({Host, odbcQueryQueueLength}, Host).
+    folsom_metrics:tag_metric({Host, modMamMessageQueueLength}, Host).
 
 metrics_hooks(Op, Host) ->
     lists:foreach(fun(Hook) ->
@@ -228,9 +226,6 @@ handle_cast(Msg, State) ->
 %%--------------------------------------------------------------------
 
 handle_info(update_metrics, State=#state{host=Host}) ->
-    Workers = ejabberd_odbc_sup:get_pids(Host),
-    Lengths = [message_queue_len(Pid) || Pid <- Workers],
-    folsom_metrics:notify({{Host, odbcQueryQueueLength}, lists:sum(Lengths)}),
     case mod_mam_odbc_async_writer:queue_length(Host) of
     {ok, MamWriterQLen} ->
         folsom_metrics:notify({{Host, modMamMessageQueueLength}, MamWriterQLen});
@@ -261,8 +256,3 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal functions
 %%====================================================================
 
-message_queue_len(Pid) ->
-    case erlang:process_info(Pid, message_queue_len) of
-        {message_queue_len, Len} -> Len;
-        undefined -> 0
-    end.
