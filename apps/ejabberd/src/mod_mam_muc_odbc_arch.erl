@@ -56,14 +56,12 @@ archive_message_1(Host, RoomName, Id, FromNick, Packet) ->
     write_message(Host, SID, SRoomId, SFromNick, SData).
 
 write_message(Host, SID, SRoomId, SFromNick, SData) ->
-    io:format("SFromNick ~p~n", [SFromNick]),
-    io:format("Data ~p~n", [SData]),
     {updated, 1} =
     ejabberd_odbc:sql_query(
       Host,
       ["INSERT INTO mam_muc_message(id, room_id, nick_name, message) "
        "VALUES ('", SID, "', '", SRoomId, "', "
-               "'", SFromNick, "', ", SData, "')"]),
+               "'", SFromNick, "', '", SData, "')"]),
     ok.
 
 -spec lookup_messages(RoomJID, RSM, Start, End, Now, WithJID, PageSize,
