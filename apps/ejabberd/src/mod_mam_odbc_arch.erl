@@ -35,7 +35,7 @@ encode_direction(outgoing) -> "O".
 archive_size(LServer, LUser) ->
     UserID = mod_mam_cache:user_id(LServer, LUser),
     {selected, _ColumnNames, [{BSize}]} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["SELECT COUNT(*) "
        "FROM mam_message "
@@ -53,8 +53,9 @@ archive_message(Id, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
     SSrcJID = esc_jid(SrcJID),
     SDir = encode_direction(Dir),
     SRemLResource = ejabberd_odbc:escape(RemLResource),
-    Data = term_to_binary(Packet, [compressed]),
-    SData = ejabberd_odbc:escape(Data),
+    Data = term_to_binary(Packet),
+    EscFormat = ejabberd_odbc:escape_format(LocLServer),
+    SData = ejabberd_odbc:escape_binary(EscFormat, Data),
     SId = integer_to_list(Id),
     write_message(LocLServer, SId, SUserID, SBareRemJID,
                   SRemLResource, SDir, SSrcJID, SData).
@@ -62,7 +63,7 @@ archive_message(Id, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
 write_message(LServer, SId, SUserID, SBareRemJID,
               SRemLResource, SDir, SSrcJID, SData) ->
     {updated, 1} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["INSERT INTO mam_message(id, user_id, remote_bare_jid, "
                                 "remote_resource, direction, "
@@ -104,24 +105,26 @@ lookup_messages(UserJID=#jid{lserver=LServer},
 
         false ->
             MessageRows = extract_messages(LServer, Filter, Offset, PageSize),
-            {ok, {TotalCount, Offset, rows_to_uniform_format(MessageRows)}}
+            {ok, {TotalCount, Offset, rows_to_uniform_format(LServer, MessageRows)}}
     end.
 
 
-rows_to_uniform_format(MessageRows) ->
-    [row_to_uniform_format(Row) || Row <- MessageRows].
+rows_to_uniform_format(LServer, MessageRows) ->
+    [row_to_uniform_format(LServer, Row) || Row <- MessageRows].
 
-row_to_uniform_format({BMessID,BSrcJID,BPacket}) ->
+row_to_uniform_format(LServer, {BMessID,BSrcJID,SData}) ->
     MessID = list_to_integer(binary_to_list(BMessID)),
     SrcJID = jlib:binary_to_jid(BSrcJID),
-    Packet = binary_to_term(BPacket),
+    EscFormat = ejabberd_odbc:escape_format(LServer),
+    Data = ejabberd_odbc:unescape_binary(EscFormat, SData),
+    Packet = binary_to_term(Data),
     {MessID, SrcJID, Packet}.
 
 
 remove_user_from_db(LServer, LUser) ->
     UserID = mod_mam_cache:user_id(LServer, LUser),
     {updated, _} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["DELETE FROM mam_message "
        "WHERE user_id = '", escape_user_id(UserID), "'"]),
@@ -135,7 +138,7 @@ remove_user_from_db(LServer, LUser) ->
 purge_single_message(#jid{lserver = LServer, luser = LUser}, MessID, _Now) ->
     UserID = mod_mam_cache:user_id(LServer, LUser),
     Result =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["DELETE FROM mam_message "
        "WHERE user_id = '", escape_user_id(UserID), "' "
@@ -155,7 +158,7 @@ purge_single_message(#jid{lserver = LServer, luser = LUser}, MessID, _Now) ->
 purge_multiple_messages(UserJID = #jid{lserver=LServer}, Start, End, _Now, WithJID) ->
     Filter = prepare_filter(UserJID, Start, End, WithJID),
     {updated, _} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["DELETE FROM mam_message ", Filter]),
     ok.
@@ -174,18 +177,17 @@ extract_messages(_LServer, _Filter, _IOffset, 0) ->
     [];
 extract_messages(LServer, Filter, IOffset, IMax) ->
     {selected, _ColumnNames, MessageRows} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["SELECT id, from_jid, message "
        "FROM mam_message ",
         Filter,
        " ORDER BY id"
-       " LIMIT ",
+       " LIMIT ", integer_to_list(IMax),
          case IOffset of
              0 -> "";
-             _ -> [integer_to_list(IOffset), ", "]
-         end,
-         integer_to_list(IMax)]),
+             _ -> [" OFFSET ", integer_to_list(IOffset)]
+         end]),
     ?DEBUG("extract_messages query returns ~p", [MessageRows]),
     MessageRows.
 
@@ -203,7 +205,7 @@ extract_messages(LServer, Filter, IOffset, IMax) ->
     Count    :: non_neg_integer().
 calc_index(LServer, Filter, SUID) ->
     {selected, _ColumnNames, [{BIndex}]} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["SELECT COUNT(*) FROM mam_message ", Filter, " AND id <= '", SUID, "'"]),
     list_to_integer(binary_to_list(BIndex)).
@@ -221,7 +223,7 @@ calc_index(LServer, Filter, SUID) ->
     Count    :: non_neg_integer().
 calc_before(LServer, Filter, SUID) ->
     {selected, _ColumnNames, [{BIndex}]} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["SELECT COUNT(*) FROM mam_message ", Filter, " AND id < '", SUID, "'"]),
     list_to_integer(binary_to_list(BIndex)).
@@ -236,7 +238,7 @@ calc_before(LServer, Filter, SUID) ->
     Count    :: non_neg_integer().
 calc_count(LServer, Filter) ->
     {selected, _ColumnNames, [{BCount}]} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["SELECT COUNT(*) FROM mam_message ", Filter]),
     list_to_integer(binary_to_list(BCount)).

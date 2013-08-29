@@ -68,16 +68,16 @@ delete_archive(LServer, RoomName) ->
     SRoomId = integer_to_list(RoomId),
     %% TODO: use transaction
     {updated, _} =
-    ejabberd_odbc:sql_query(LServer,
+    mod_mam_utils:success_sql_query(LServer,
     ["DELETE FROM mam_muc_message WHERE room_id = '", SRoomId, "'"]),
     {updated, _} =
-    ejabberd_odbc:sql_query(LServer,
+    mod_mam_utils:success_sql_query(LServer,
     ["DELETE FROM mam_muc_room WHERE id = '", SRoomId, "'"]),
     true.
 
 create_room_archive(LServer, RoomName) ->
     SRoomName = ejabberd_odbc:escape(RoomName),
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["INSERT INTO mam_muc_room(room_name) "
        "VALUES ('", SRoomName,"')"]),
@@ -120,7 +120,7 @@ sql_bool(undefined) -> "null".
 set_bool(LServer, RoomName, FieldName, FieldValue) ->
     RoomId = mod_mam_muc_cache:room_id(LServer, RoomName),
     SRoomId = integer_to_list(RoomId),
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["UPDATE mam_muc_room "
        "SET ", FieldName, " = ", sql_bool(FieldValue), " "
@@ -129,7 +129,7 @@ set_bool(LServer, RoomName, FieldName, FieldValue) ->
 select_bool(LServer, RoomName, Field) ->
     SRoomName = ejabberd_odbc:escape(RoomName),
     Result =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["SELECT " ++ Field ++ " "
        "FROM mam_muc_room "

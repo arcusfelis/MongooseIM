@@ -219,3 +219,95 @@ CREATE TABLE pubsub_subscription_opt (
   opt_value text
 );
 CREATE UNIQUE INDEX i_pubsub_subscription_opt ON pubsub_subscription_opt USING btree (subid, opt_name);
+
+
+CREATE TYPE mam_behaviour AS ENUM('A', 'N', 'R');
+CREATE TYPE mam_direction AS ENUM('I','O');
+
+CREATE TABLE mam_message(
+  -- Message UID (64 bits)
+  -- A server-assigned UID that MUST be unique within the archive.
+  id BIGINT NOT NULL PRIMARY KEY,
+  user_id INT NOT NULL,
+  -- FromJID used to form a message without looking into stanza.
+  -- This value will be send to the client "as is".
+  from_jid varchar(250) NOT NULL,
+  -- The remote JID that the stanza is to (for an outgoing message) or from (for an incoming message).
+  -- This field is for sorting and filtering.
+  remote_bare_jid varchar(250) NOT NULL,
+  remote_resource varchar(250) NOT NULL,
+  -- I - incoming, remote_jid is a value from From.
+  -- O - outgoing, remote_jid is a value from To.
+  -- Has no meaning for MUC-rooms.
+  direction mam_direction NOT NULL,
+  -- Term-encoded message packet
+  message bytea NOT NULL
+);
+CREATE INDEX i_mam_message_username_id
+    ON mam_message
+    USING BTREE
+    (user_id, id);
+CREATE INDEX i_mam_message_username_jid_id
+    ON mam_message
+    USING BTREE
+    (user_id, remote_bare_jid, id);
+
+CREATE TABLE mam_config(
+  user_id INT NOT NULL,
+  -- If empty, than it is a default behaviour.
+  remote_jid varchar(250) NOT NULL,
+  -- A - always archive;
+  -- N - never archive;
+  -- R - roster (only for remote_jid == "")
+  behaviour mam_behaviour NOT NULL
+);
+CREATE INDEX i_mam_config
+    ON mam_config
+    (user_id, remote_jid);
+
+CREATE TABLE mam_user(
+  id SERIAL UNIQUE PRIMARY KEY,
+  user_name varchar(250) NOT NULL
+);
+CREATE INDEX i_mam_user_name
+    ON mam_user
+    USING BTREE
+    (user_name);
+
+
+CREATE TABLE mam_muc_message(
+  -- Message UID
+  -- A server-assigned UID that MUST be unique within the archive.
+  id BIGINT NOT NULL PRIMARY KEY,
+  room_id INT NOT NULL,
+  -- A nick of the message's originator
+  nick_name varchar(250) NOT NULL,
+  -- Term-encoded message packet
+  message bytea NOT NULL
+);
+CREATE INDEX i_mam_muc_message_room_name_added_at
+    ON mam_muc_message
+    USING BTREE
+    (room_id, id);
+
+CREATE TABLE mam_muc_room(
+  id SERIAL UNIQUE PRIMARY KEY,
+  room_name varchar(250) NOT NULL,
+  -- 0 -- save
+  -- 1 -- delete
+  -- NULL -- use default settings
+  delete_archive_after_destruction character(1),
+  -- 0 -- disable archiving
+  -- 1 -- enable archiving
+  -- NULL -- use default settings
+  enable_logging character(1),
+  -- 0 -- disable user calls
+  -- 1 -- enable user calls
+  -- NULL -- use default settings
+  enable_querying character(1)
+);
+CREATE INDEX i_mam_muc_room_name
+    ON mam_muc_room
+    USING BTREE
+    (room_name);
+

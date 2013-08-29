@@ -31,7 +31,7 @@
 archive_size(LServer, LRoom) ->
     RoomID = mod_mam_muc_cache:room_id(LServer, LRoom),
     {selected, _ColumnNames, [{BSize}]} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["SELECT COUNT(*) "
        "FROM mam_muc_message "
@@ -51,13 +51,15 @@ archive_message_1(Host, RoomName, Id, FromNick, Packet) ->
     RoomId = mod_mam_muc_cache:room_id(Host, RoomName),
     SRoomId = integer_to_list(RoomId),
     SFromNick = ejabberd_odbc:escape(FromNick),
-    SData = ejabberd_odbc:escape(term_to_binary(Packet, [compressed])),
+    Data = term_to_binary(Packet, [compressed]),
+    EscFormat = ejabberd_odbc:escape_format(Host),
+    SData = ejabberd_odbc:escape_binary(EscFormat, Data),
     SID = integer_to_list(Id),
     write_message(Host, SID, SRoomId, SFromNick, SData).
 
 write_message(Host, SID, SRoomId, SFromNick, SData) ->
     {updated, 1} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       Host,
       ["INSERT INTO mam_muc_message(id, room_id, nick_name, message) "
        "VALUES ('", SID, "', '", SRoomId, "', "
@@ -95,24 +97,27 @@ lookup_messages(RoomJID=#jid{lserver=LServer},
 
         false ->
             MessageRows = extract_messages(LServer, Filter, Offset, PageSize),
-            {ok, {TotalCount, Offset, rows_to_uniform_format(MessageRows, RoomJID)}}
+            {ok, {TotalCount, Offset,
+                  rows_to_uniform_format(MessageRows, LServer, RoomJID)}}
     end.
 
 
-rows_to_uniform_format(MessageRows, RoomJID) ->
-    [row_to_uniform_format(Row, RoomJID) || Row <- MessageRows].
+rows_to_uniform_format(MessageRows, LServer, RoomJID) ->
+    [row_to_uniform_format(Row, LServer, RoomJID) || Row <- MessageRows].
 
-row_to_uniform_format({BMessID,BNick,BPacket}, RoomJID) ->
+row_to_uniform_format({BMessID,BNick,SData}, LServer, RoomJID) ->
     MessID = list_to_integer(binary_to_list(BMessID)),
     SrcJID = jlib:jid_replace_resource(RoomJID, BNick),
-    Packet = binary_to_term(BPacket),
+    EscFormat = ejabberd_odbc:escape_format(LServer),
+    Data = ejabberd_odbc:unescape_binary(EscFormat, SData),
+    Packet = binary_to_term(Data),
     {MessID, SrcJID, Packet}.
 
 
 remove_user_from_db(LServer, LRoom) ->
     RoomID = mod_mam_muc_cache:room_id(LServer, LRoom),
     {updated, _} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["DELETE FROM mam_muc_message "
        "WHERE room_id = '", escape_room_id(RoomID), "'"]),
@@ -126,7 +131,7 @@ remove_user_from_db(LServer, LRoom) ->
 purge_single_message(#jid{lserver = LServer, luser = LRoom}, MessID, _Now) ->
     RoomID = mod_mam_muc_cache:room_id(LServer, LRoom),
     Result =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["DELETE FROM mam_muc_message "
        "WHERE room_id = '", escape_room_id(RoomID), "' "
@@ -146,7 +151,7 @@ purge_single_message(#jid{lserver = LServer, luser = LRoom}, MessID, _Now) ->
 purge_multiple_messages(RoomJID = #jid{lserver=LServer}, Start, End, _Now, WithJID) ->
     Filter = prepare_filter(RoomJID, Start, End, WithJID),
     {updated, _} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["DELETE FROM mam_muc_message ", Filter]),
     ok.
@@ -163,18 +168,17 @@ extract_messages(_LServer, _Filter, _IOffset, 0) ->
     [];
 extract_messages(LServer, Filter, IOffset, IMax) ->
     {selected, _ColumnNames, MessageRows} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["SELECT id, nick_name, message "
        "FROM mam_muc_message ",
         Filter,
        " ORDER BY id"
-       " LIMIT ",
+       " LIMIT ", integer_to_list(IMax),
          case IOffset of
              0 -> "";
-             _ -> [integer_to_list(IOffset), ", "]
-         end,
-         integer_to_list(IMax)]),
+             _ -> [" OFFSET ", integer_to_list(IOffset)]
+         end]),
     ?DEBUG("extract_messages query returns ~p", [MessageRows]),
     MessageRows.
 
@@ -191,7 +195,7 @@ extract_messages(LServer, Filter, IOffset, IMax) ->
     Count    :: non_neg_integer().
 calc_index(LServer, Filter, SUID) ->
     {selected, _ColumnNames, [{BIndex}]} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["SELECT COUNT(*) FROM mam_muc_message ", Filter, " AND id <= '", SUID, "'"]),
     list_to_integer(binary_to_list(BIndex)).
@@ -208,7 +212,7 @@ calc_index(LServer, Filter, SUID) ->
     Count    :: non_neg_integer().
 calc_before(LServer, Filter, SUID) ->
     {selected, _ColumnNames, [{BIndex}]} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["SELECT COUNT(*) FROM mam_muc_message ", Filter, " AND id < '", SUID, "'"]),
     list_to_integer(binary_to_list(BIndex)).
@@ -223,7 +227,7 @@ calc_before(LServer, Filter, SUID) ->
     Count    :: non_neg_integer().
 calc_count(LServer, Filter) ->
     {selected, _ColumnNames, [{BCount}]} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["SELECT COUNT(*) FROM mam_muc_message ", Filter]),
     list_to_integer(binary_to_list(BCount)).

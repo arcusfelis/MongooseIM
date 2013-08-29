@@ -268,7 +268,7 @@ CREATE INDEX i_mam_user_name USING BTREE ON mam_user(user_name);
 CREATE TABLE mam_muc_message(
   -- Message UID
   -- A server-assigned UID that MUST be unique within the archive.
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
   room_id INT UNSIGNED NOT NULL,
   -- A nick of the message's originator
   nick_name varchar(250) NOT NULL,

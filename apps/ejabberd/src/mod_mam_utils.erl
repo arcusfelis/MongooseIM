@@ -34,6 +34,9 @@
          parse_prefs/1
 ]).
 
+%% SQL
+-export([success_sql_query/2]).
+
 %% Other
 -export([maybe_integer/2,
          is_function_exist/3]).
@@ -332,3 +335,14 @@ is_jid_in_user_roster(#jid{lserver=LServer, luser=LUser},
         roster_get_jid_info, LServer,
         {none, []}, [LUser, LServer, RemBareJID]),
     Subscription == from orelse Subscription == both.
+
+success_sql_query(LServer, Query) ->
+    case ejabberd_odbc:sql_query(LServer, Query) of
+        {error, Reason} ->
+            ?ERROR_MSG("SQL-error on ~p.~nQuery ~p~nReason ~p~n",
+                       [LServer, Query, Reason]),
+            error(sql_error);
+        Result ->
+            Result
+    end.
+

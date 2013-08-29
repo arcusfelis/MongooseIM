@@ -47,7 +47,7 @@ get_prefs(LServer, LUser, GlobalDefaultMode) ->
     UserID = mod_mam_cache:user_id(LServer, LUser),
     SUserID = integer_to_list(UserID),
     {selected, _ColumnNames, Rows} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["SELECT remote_jid, behaviour "
        "FROM mam_config "
@@ -58,7 +58,7 @@ remove_user_from_db(LServer, LUser) ->
     UserID = mod_mam_cache:user_id(LServer, LUser),
     SUserID = integer_to_list(UserID),
     {updated, _} =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["DELETE "
        "FROM mam_config "
@@ -67,7 +67,7 @@ remove_user_from_db(LServer, LUser) ->
 
 query_behaviour(LServer, SUserID, SRemLJID, SRemLBareJID) ->
     Result =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       LServer,
       ["SELECT behaviour "
        "FROM mam_config "
@@ -105,7 +105,7 @@ encode_config_row(SUserID, SBehavour, SJID) ->
 
 sql_transaction_map(LServer, Queries) ->
     AtomicF = fun() ->
-        [ejabberd_odbc:sql_query(LServer, Query) || Query <- Queries]
+        [mod_mam_utils:success_sql_query(LServer, Query) || Query <- Queries]
     end,
     ejabberd_odbc:sql_transaction(LServer, AtomicF).
 

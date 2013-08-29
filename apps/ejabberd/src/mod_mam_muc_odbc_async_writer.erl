@@ -67,7 +67,9 @@ archive_message_1(Host, RoomName, Id, FromNick, Packet) ->
     RoomId = mod_mam_muc_cache:room_id(Host, RoomName),
     SRoomId = integer_to_list(RoomId),
     SFromNick = ejabberd_odbc:escape(FromNick),
-    SData = ejabberd_odbc:escape(term_to_binary(Packet, [compressed])),
+    Data = term_to_binary(Packet, [compressed]),
+    EscFormat = ejabberd_odbc:escape_format(Host),
+    SData = ejabberd_odbc:escape_binary(EscFormat, Data),
     SID = integer_to_list(Id),
     Msg = {archive_message, SID, SRoomId, SFromNick, SData},
     gen_server:cast(srv_name(Host), Msg).
@@ -95,7 +97,7 @@ run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc}) ->
     TRef =/= undefined andalso erlang:cancel_timer(TRef),
     ?DEBUG("Flushed ~p entries.", [length(Acc)]),
     Result =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       Conn,
       ["INSERT INTO mam_muc_message(id, room_id, nick_name, message) "
        "VALUES ", tuples(Acc)]),

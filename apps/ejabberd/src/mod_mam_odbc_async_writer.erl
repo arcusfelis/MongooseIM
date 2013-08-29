@@ -74,7 +74,8 @@ archive_message(Id, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
     SDir = encode_direction(Dir),
     SRemLResource = ejabberd_odbc:escape(RemLResource),
     Data = term_to_binary(Packet, [compressed]),
-    SData = ejabberd_odbc:escape(Data),
+    EscFormat = ejabberd_odbc:escape_format(LocLServer),
+    SData = ejabberd_odbc:escape_binary(EscFormat, Data),
     SId = integer_to_list(Id),
     archive_message(LocLServer, SId, SUserID, SBareRemJID,
                     SRemLResource, SDir, SSrcJID, SData).
@@ -108,7 +109,7 @@ run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc,
     TRef =/= undefined andalso erlang:cancel_timer(TRef),
     ?DEBUG("Flushed ~p entries.", [length(Acc)]),
     Result =
-    ejabberd_odbc:sql_query(
+    mod_mam_utils:success_sql_query(
       Conn,
       ["INSERT INTO mam_message(id, user_id, remote_bare_jid, "
                                 "remote_resource, direction, "
