@@ -518,12 +518,12 @@ rewrite_default_options(Host, [{K, V}|DefOpts], Opts) ->
 rewrite_default_options(_Host, [], NewOpts) ->
     NewOpts.
     
-rewrite_default_option(Host, K, V, Opts) ->
+rewrite_default_option(Host, K, NewV, Opts) ->
     case gen_mod:get_opt(K, Opts, default) of
         default ->
-            gen_mod:set_module_opt(Host, ?MODULE, K, V),
-            gen_mod:set_opt(K, Opts, V);
-        V ->
+            gen_mod:set_module_opt(Host, ?MODULE, K, NewV),
+            gen_mod:set_opt(K, Opts, NewV);
+        _ ->
             Opts
     end.
 
