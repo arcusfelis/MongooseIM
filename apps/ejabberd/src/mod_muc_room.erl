@@ -1081,6 +1081,7 @@ access_persistent(#state{access=Access}) ->
     {_AccessRoute, _AccessCreate, _AccessAdmin, AccessPersistent} = Access,
     AccessPersistent.
 
+-spec set_affiliation(jid(), affiliation(), state_data()) -> state_data().
 set_affiliation(JID, Affiliation, StateData) ->
     LJID = jlib:jid_remove_resource(jlib:jid_tolower(JID)),
     Affiliations = case Affiliation of
@@ -1094,6 +1095,8 @@ set_affiliation(JID, Affiliation, StateData) ->
            end,
     StateData#state{affiliations = Affiliations}.
 
+-spec set_affiliation_and_reason(
+        jid(), affiliation(), term(), state_data()) -> state_data().
 set_affiliation_and_reason(JID, Affiliation, Reason, StateData) ->
     LJID = jlib:jid_remove_resource(jlib:jid_tolower(JID)),
     Affiliations = case Affiliation of
@@ -1697,9 +1700,11 @@ extract_history([_ | Els], Type) ->
     extract_history(Els, Type).
 
 
+-spec send_update_presence(jid(), state_data()) -> ok.
 send_update_presence(JID, StateData) ->
     send_update_presence(JID, <<>>, StateData).
 
+-spec send_update_presence(jid(), term(), state_data()) -> ok.
 send_update_presence(JID, Reason, StateData) ->
     foreach_matched_jid(fun(J) ->
       send_new_presence(J, Reason, StateData)
@@ -1720,7 +1725,7 @@ foreach_matched_jid(F, JID, #state{users=Users}) ->
         _ ->
             case ?DICT:is_key(LJID, Users) of
             true ->
-                F(JID);
+                F(JID), ok;
             false ->
                 ok
             end
@@ -1745,8 +1750,12 @@ foreach_matched_user(F, JID, #state{users=Users}) ->
             end
     end.
 
-erase_matched_users(JID, #state{users=Users}) ->
+erase_matched_users(JID, StateData=#state{users=Users}) ->
     LJID = jlib:jid_tolower(JID),
+    NewUsers = erase_matched_users_dict(LJID, Users),
+    StateData#state{users=NewUsers}.
+
+erase_matched_users_dict(LJID, Users) ->
     case LJID of
         %% Match by bare JID
         {U, S, <<>>} ->
@@ -1761,8 +1770,16 @@ erase_matched_users(JID, #state{users=Users}) ->
             ?DICT:erase(LJID, Users)
     end.
 
-update_matched_users(F, JID, #state{users=Users}) ->
+-spec update_matched_users(F, JID, StateData) -> StateData when
+    F :: fun((User) -> User),
+    JID :: jid(),
+    StateData :: state_data().
+update_matched_users(F, JID, StateData=#state{users=Users}) ->
     LJID = jlib:jid_tolower(JID),
+    NewUsers = update_matched_users_dict(F, LJID, Users),
+    StateData#state{users=NewUsers}.
+
+update_matched_users_dict(F, LJID, Users) ->
     case LJID of
         %% Match by bare JID
         {U, S, <<>>} ->
@@ -1776,7 +1793,7 @@ update_matched_users(F, JID, #state{users=Users}) ->
         _ ->
             case ?DICT:find(LJID, Users) of
                 {ok, User} -> ?DICT:store(LJID, F(User), Users);
-                error -> ok
+                error -> Users
             end
     end.
 
