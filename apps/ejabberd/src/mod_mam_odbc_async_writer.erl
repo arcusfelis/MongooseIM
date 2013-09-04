@@ -64,10 +64,12 @@ start_link(ProcName, Host) ->
 srv_name(Host) ->
     gen_mod:get_module_proc(Host, srv_name()).
 
+user_id(LocLServer, LocLUser) ->
+    mod_mam:archive_id(LocLServer, LocLUser).
 
 archive_message(Id, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
                 RemJID=#jid{lresource=RemLResource}, SrcJID, Packet) ->
-    UserID = mod_mam_cache:user_id(LocLServer, LocLUser),
+    UserID = user_id(LocLServer, LocLUser),
     SUserID = integer_to_list(UserID),
     SBareRemJID = esc_jid(jlib:jid_tolower(jlib:jid_remove_resource(RemJID))),
     SSrcJID = esc_jid(SrcJID),

@@ -18,7 +18,7 @@
 -export([get_behaviour/3,
          get_prefs/3,
          set_prefs/5,
-         remove_user_from_db/2]).
+         remove_archive/2]).
 
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
@@ -64,7 +64,7 @@ enable_querying(LServer, RoomName, Enabled) ->
 %% API
 
 delete_archive(LServer, RoomName) ->
-    RoomId = mod_mam_muc_cache:room_id(LServer, RoomName),
+    RoomId = room_id(LServer, RoomName),
     SRoomId = integer_to_list(RoomId),
     %% TODO: use transaction
     {updated, _} =
@@ -94,7 +94,7 @@ get_behaviour(DefaultBehaviour,
         mod_mam_muc_cache:is_logging_enabled(LServer, RoomName)).
 
 %% @doc Delete all messages from the room.
-remove_user_from_db(LServer, RoomName) ->
+remove_archive(LServer, RoomName) ->
     case delete_archive_after_destruction(LServer, RoomName) of
         true -> delete_archive(LServer, RoomName);
         false -> false
@@ -117,8 +117,11 @@ sql_bool(true)      -> "'1'";
 sql_bool(false)     -> "'0'";
 sql_bool(undefined) -> "null".
 
+room_id(LServer, RoomName) ->
+    mod_mam:archive_id(LServer, RoomName).
+
 set_bool(LServer, RoomName, FieldName, FieldValue) ->
-    RoomId = mod_mam_muc_cache:room_id(LServer, RoomName),
+    RoomId = room_id(LServer, RoomName),
     SRoomId = integer_to_list(RoomId),
     mod_mam_utils:success_sql_query(
       LServer,

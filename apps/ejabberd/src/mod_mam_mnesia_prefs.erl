@@ -9,7 +9,7 @@
          get_behaviour/3,
          get_prefs/3,
          set_prefs/5,
-         remove_user_from_db/2]).
+         remove_archive/2]).
 
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
@@ -80,7 +80,7 @@ get_prefs(LServer, LUser, GlobalDefaultMode) ->
             {DefaultMode, AlwaysJIDs, NeverJIDs}
     end.
 
-remove_user_from_db(LServer, LUser) ->
+remove_archive(LServer, LUser) ->
     {atomic, ok} = mnesia:transaction(fun() ->
         case mnesia:read(mam_prefs_user, {LServer, LUser}) of
             [] -> ok; %% already deleted

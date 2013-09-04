@@ -9,7 +9,7 @@
          wait_flushing/1,
          archive_message/6,
          lookup_messages/9,
-         remove_user_from_db/2,
+         remove_archive/2,
          purge_single_message/3,
          purge_multiple_messages/5]).
 
@@ -32,8 +32,11 @@
 encode_direction(incoming) -> "I";
 encode_direction(outgoing) -> "O".
 
+user_id(LocLServer, LocLUser) ->
+    mod_mam:archive_id(LocLServer, LocLUser).
+
 archive_size(LServer, LUser) ->
-    UserID = mod_mam_cache:user_id(LServer, LUser),
+    UserID = user_id(LServer, LUser),
     {selected, _ColumnNames, [{BSize}]} =
     mod_mam_utils:success_sql_query(
       LServer,
@@ -47,7 +50,7 @@ wait_flushing(_Host) ->
 
 archive_message(Id, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
                 RemJID=#jid{lresource=RemLResource}, SrcJID, Packet) ->
-    UserID = mod_mam_cache:user_id(LocLServer, LocLUser),
+    UserID = user_id(LocLServer, LocLUser),
     SUserID = integer_to_list(UserID),
     SBareRemJID = esc_jid(jlib:jid_tolower(jlib:jid_remove_resource(RemJID))),
     SSrcJID = esc_jid(SrcJID),
@@ -121,8 +124,8 @@ row_to_uniform_format(LServer, {BMessID,BSrcJID,SData}) ->
     {MessID, SrcJID, Packet}.
 
 
-remove_user_from_db(LServer, LUser) ->
-    UserID = mod_mam_cache:user_id(LServer, LUser),
+remove_archive(LServer, LUser) ->
+    UserID = user_id(LServer, LUser),
     {updated, _} =
     mod_mam_utils:success_sql_query(
       LServer,
@@ -136,7 +139,7 @@ remove_user_from_db(LServer, LUser) ->
     MessID :: message_id(),
     Now :: unix_timestamp().
 purge_single_message(#jid{lserver = LServer, luser = LUser}, MessID, _Now) ->
-    UserID = mod_mam_cache:user_id(LServer, LUser),
+    UserID = user_id(LServer, LUser),
     Result =
     mod_mam_utils:success_sql_query(
       LServer,
@@ -252,7 +255,7 @@ calc_count(LServer, Filter) ->
     End     :: unix_timestamp() | undefined,
     WithJID :: #jid{} | undefined.
 prepare_filter(#jid{lserver=LServer, luser=LUser}, Start, End, WithJID) ->
-    UserID = mod_mam_cache:user_id(LServer, LUser),
+    UserID = user_id(LServer, LUser),
     {SWithJID, SWithResource} =
     case WithJID of
         undefined -> {undefined, undefined};

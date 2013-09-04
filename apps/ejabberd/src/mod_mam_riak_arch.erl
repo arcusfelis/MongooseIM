@@ -14,7 +14,7 @@
          wait_flushing/1,
          archive_size/2,
          lookup_messages/9,
-         remove_user_from_db/2,
+         remove_archive/2,
          purge_single_message/3,
          purge_multiple_messages/5]).
 
@@ -362,7 +362,7 @@ archive_size(LServer, LUser) ->
             undefined, undefined, undefined, Now, undefined, 0, true, 0),
     TotalCount.
 
-remove_user_from_db(LServer, LUser) ->
+remove_archive(LServer, LUser) ->
     F = fun(Conn) ->
         delete_digests(Conn, LServer, LUser),
         delete_messages(Conn, LServer, LUser)

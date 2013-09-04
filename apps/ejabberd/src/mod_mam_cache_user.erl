@@ -1,126 +1,112 @@
 %%%-------------------------------------------------------------------
 %%% @author Uvarov Michael <arcusfelis@gmail.com>
 %%% @copyright (C) 2013, Uvarov Michael
-%%% @doc Collect messages and flush them into the database.
+%%% @doc Stores cache using ETS-table.
+%%% This module is a proxy for `mod_mam_odbc_user'.
 %%% @end
 %%%-------------------------------------------------------------------
--module(mod_mam_muc_odbc_async_writer).
+-module(mod_mam_cache_user).
 -export([start/1,
-         stop/1,
-         start_link/2,
-         srv_name/1,
-         archive_message/6,
-         wait_flushing/1,
-         queue_length/1]).
+         start_link/0,
+         required_modules/1,
+         archive_id/2,
+         clean_cache/2,
+         remove_archive/2]).
+
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+
 -include("ejabberd.hrl").
 -include("jlib.hrl").
 
--record(state, {
-    flush_interval=500,
-    max_packet_size=30,
-    host,
-    conn,
-    acc=[],
-    flush_interval_tref}).
+-record(state, {}).
 
+%% @private
 srv_name() ->
-    ejabberd_mod_mam_muc_writer.
+    mod_mam_cache.
 
-room_id(LServer, RoomName) ->
-    mod_mam:archive_id(LServer, RoomName).
+tbl_name_archive_id() ->
+    mod_mam_cache_table_archive_id.
+
+group_name() ->
+    mod_mam_cache.
+
+su_key(LServer, LUserName) ->
+    {LServer, LUserName}.
+
+required_modules(_LServer) ->
+    [mod_mam_odbc_user].
 
 %%====================================================================
 %% API
 %%====================================================================
 
-start(Host) ->
-    WriterProc = srv_name(Host),
+start(_Host) ->
     WriterChildSpec =
-    {WriterProc,
-     {?MODULE, start_link, [WriterProc, Host]},
+    {mod_mam_cache_user,
+     {mod_mam_cache_user, start_link, []},
      permanent,
      5000,
      worker,
-     [?MODULE]},
+     [mod_mam_odbc_async_writer]},
     supervisor:start_child(ejabberd_sup, WriterChildSpec).
 
-stop(Host) ->
-    Proc = srv_name(Host),
-    supervisor:terminate_child(ejabberd_sup, Proc),
-    supervisor:delete_child(ejabberd_sup, Proc).
+start_link() ->
+    gen_server:start_link({local, srv_name()}, ?MODULE, [], []).
 
-start_link(ProcName, Host) ->
-    gen_server:start_link({local, ProcName}, ?MODULE, [Host], []).
-
-srv_name(Host) ->
-    gen_mod:get_module_proc(Host, srv_name()).
-
-archive_message(Id, incoming,
-                _LocJID=#jid{lserver=Host, luser=RoomName},
-                _RemJID=#jid{},
-                _SrcJID=#jid{lresource=FromNick}, Packet) ->
-    archive_message_1(Host, RoomName, Id, FromNick, Packet).
-
-archive_message_1(Host, RoomName, Id, FromNick, Packet) ->
-    RoomId = room_id(Host, RoomName),
-    SRoomId = integer_to_list(RoomId),
-    SFromNick = ejabberd_odbc:escape(FromNick),
-    Data = term_to_binary(Packet, [compressed]),
-    EscFormat = ejabberd_odbc:escape_format(Host),
-    SData = ejabberd_odbc:escape_binary(EscFormat, Data),
-    SID = integer_to_list(Id),
-    Msg = {archive_message, SID, SRoomId, SFromNick, SData},
-    gen_server:cast(srv_name(Host), Msg).
-
-%% For folsom.
-queue_length(Host) ->
-    case whereis(srv_name(Host)) of
-    undefined ->
-        {error, not_running};
-    Pid ->
-        {message_queue_len, Len} = erlang:process_info(Pid, message_queue_len),
-        {ok, Len}
+archive_id(LServer, UserName) ->
+    case lookup_archive_id(LServer, UserName) of
+        not_found ->
+            UserId = forward_archive_id(LServer, UserName),
+            cache_archive_id(LServer, UserName, UserId),
+            UserId;
+        UserId ->
+            UserId
     end.
 
-wait_flushing(_Host) ->
-    timer:sleep(1000).
+remove_archive(LServer, UserName) ->
+    clean_cache(LServer, UserName),
+    forward_remove_archive(LServer, UserName).
 
 %%====================================================================
 %% Internal functions
 %%====================================================================
 
-run_flush(State=#state{acc=[]}) ->
-    State;
-run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc}) ->
-    TRef =/= undefined andalso erlang:cancel_timer(TRef),
-    ?DEBUG("Flushed ~p entries.", [length(Acc)]),
-    Result =
-    mod_mam_utils:success_sql_query(
-      Conn,
-      ["INSERT INTO mam_muc_message(id, room_id, nick_name, message) "
-       "VALUES ", tuples(Acc)]),
-    % [SID, SRoomId, SFromNick, SData]
-    case Result of
-        {updated, _Count} -> ok;
-        {error, Reason} ->
-            ?ERROR_MSG("archive_message query failed with reason ~p", [Reason]),
-            ok
-    end,
-    State#state{acc=[], flush_interval_tref=undefined}.
+%% @doc Put an user id into cache.
+%% @private
+cache_archive_id(LServer, UserName, UserId) ->
+    gen_server:call(srv_name(), {cache_archive_id, LServer, UserName, UserId}).
 
-join([H|T]) ->
-    [H, [", " ++ X || X <- T]].
+lookup_archive_id(LServer, UserName) ->
+    try
+        ets:lookup_element(tbl_name_archive_id(), su_key(LServer, UserName), 2)
+    catch error:badarg ->
+        not_found
+    end.
 
-tuples(Rows) ->
-    join([tuple(Row) || Row <- Rows]).
+user_base_module(Host) ->
+    gen_mod:get_module_opt(Host, mod_mam, archive_module, mod_mam_odbc_arch).
 
-tuple([H|T]) ->
-    ["('", H, "'", [[", '", X, "'"] || X <- T], ")"].
+forward_archive_id(LServer, UserName) ->
+    M = user_base_module(LServer),
+    M:archive_id(LServer, UserName).
+
+forward_remove_archive(LServer, UserName) ->
+    M = user_base_module(LServer),
+    M:remove_archive(LServer, UserName).
+
+clean_cache(Server, User) ->
+    %% Send a broadcast message.
+    case pg2:get_members(group_name()) of
+        Pids when is_list(Pids) ->
+            [gen_server:cast(Pid, {remove_user, User, Server})
+            || Pid <- Pids],
+            ok;
+        {error, _Reason} -> ok
+    end.
 
 %%====================================================================
 %% gen_server callbacks
@@ -133,10 +119,14 @@ tuple([H|T]) ->
 %%                         {stop, Reason}
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
-init([Host]) ->
-    %% Use a private ODBC-connection.
-    {ok, Conn} = ejabberd_odbc:get_dedicated_connection(Host),
-    {ok, #state{host=Host, conn=Conn}}.
+init([]) ->
+    pg2:create(group_name()),
+    pg2:join(group_name(), self()),
+    TOpts = [named_table, protected,
+             {write_concurrency, false},
+             {read_concurrency, true}],
+    ets:new(tbl_name_archive_id(), TOpts),
+    {ok, #state{}}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -147,7 +137,8 @@ init([Host]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call(_, _From, State) ->
+handle_call({cache_archive_id, LServer, UserName, UserId}, _From, State) ->
+    ets:insert(tbl_name_archive_id(), {su_key(LServer, UserName), UserId}),
     {reply, ok, State}.
 
 
@@ -158,24 +149,12 @@ handle_call(_, _From, State) ->
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
 
-handle_cast({archive_message, SID, SRoomId, SFromNick, SData},
-            State=#state{acc=Acc, flush_interval_tref=TRef, flush_interval=Int,
-                         max_packet_size=Max}) ->
-    ?DEBUG("Schedule to write ~p.", [SID]),
-    Row = [SID, SRoomId, SFromNick, SData],
-    TRef2 = case {Acc, TRef} of
-            {[], undefined} -> erlang:send_after(Int, self(), flush);
-            {_, _} -> TRef
-            end,
-    State2 = State#state{acc=[Row|Acc], flush_interval_tref=TRef2},
-    case length(Acc) + 1 >= Max of
-        true -> {noreply, run_flush(State2)};
-        false -> {noreply, State2}
-    end;
+handle_cast({remove_user, User, Server}, State) ->
+    ets:delete(tbl_name_archive_id(), su_key(Server, User)),
+    {noreply, State};
 handle_cast(Msg, State) ->
     ?WARNING_MSG("Strange message ~p.", [Msg]),
     {noreply, State}.
-
 
 %%--------------------------------------------------------------------
 %% Function: handle_info(Info, State) -> {noreply, State} |
@@ -184,8 +163,8 @@ handle_cast(Msg, State) ->
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
 
-handle_info(flush, State) ->
-    {noreply, run_flush(State)}.
+handle_info(_Msg, State) ->
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% Function: terminate(Reason, State) -> void()

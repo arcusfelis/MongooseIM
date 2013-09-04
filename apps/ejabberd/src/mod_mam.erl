@@ -35,7 +35,8 @@
 
 %% Client API
 -export([delete_archive/2,
-         archive_size/2]).
+         archive_size/2,
+         archive_id/2]).
 
 %% gen_mod handlers
 -export([start/2, stop/1]).
@@ -132,7 +133,7 @@ delete_archive(Server, User) ->
     LUser = jlib:nodeprep(User),
     LServer = jlib:nameprep(Server),
     ?DEBUG("Remove user ~p from ~p.", [LUser, LServer]),
-    remove_user_from_db(LServer, LUser),
+    remove_archive(LServer, LUser),
     ok.
 
 archive_size(Server, User) ->
@@ -140,6 +141,10 @@ archive_size(Server, User) ->
     LServer = jlib:nameprep(Server),
     AM = archive_module(LServer),
     AM:archive_size(LServer, LUser).
+
+archive_id(LServer, LUser) ->
+    UM = user_module(LServer),
+    AM:archive_id(LServer, LUser).
 
 debug_info(LServer) ->
     AM = archive_module(LServer),
@@ -491,9 +496,31 @@ stop_module(Host, M) ->
     ok.
 
 required_modules(Host) ->
+    expand_modules(Host, base_modules(Host)).
+
+expand_modules(Host, Mods) ->
+    expand_modules(Host, Mods, []).
+
+expand_modules(Host, [H|T], Acc) ->
+    case is_function_exist(H, required_modules, 1) of
+        true  ->
+            %% Do not load the same module twice.
+            ReqMods = skip_expanded_modules(H:required_modules(Host), Acc),
+            expand_modules(Host, T, [H] ++ ReqMods ++ Acc);
+        false ->
+            expand_modules(Host, T, [H|Acc])
+    end;
+expand_modules(_, [], Acc) ->
+    lists:reverse(Acc).
+
+skip_expanded_modules(Mods, ExpandedMods) ->
+    [M || M <- Mods, not lists:member(M, ExpandedMods)].
+
+base_modules(Host) ->
     [prefs_module(Host),
      archive_module(Host),
-     writer_module(Host)].
+     writer_module(Host),
+     user_module(Host)].
 
 prefs_module(Host) ->
     gen_mod:get_module_opt(Host, ?MODULE, prefs_module, mod_mam_odbc_prefs).
@@ -502,12 +529,15 @@ archive_module(Host) ->
     gen_mod:get_module_opt(Host, ?MODULE, archive_module, mod_mam_odbc_arch).
 
 writer_module(Host) ->
-    gen_mod:get_module_opt(Host, ?MODULE, writer_module, mod_mam_odbc_async_writer).
+    gen_mod:get_module_opt(Host, ?MODULE, writer_module, mod_mam_odbc_arch).
+
+user_module(Host) ->
+    gen_mod:get_module_opt(Host, ?MODULE, user_module, mod_mam_odbc_user).
 
 default_muc_modules() ->
     [{prefs_module, mod_mam_muc_odbc_prefs}
     ,{archive_module, mod_mam_muc_odbc_arch}
-    ,{writer_module, mod_mam_odbc_async_writer}].
+    ,{writer_module, mod_mam_muc_odbc_arch}].
 
 rewrite_default_muc_modules(Host, Opts) ->
     rewrite_default_options(Host, default_muc_modules(), Opts).
@@ -840,13 +870,13 @@ get_prefs(LServer, LUser, GlobalDefaultMode) ->
     M = prefs_module(LServer),
     M:get_prefs(LServer, LUser, GlobalDefaultMode).
 
-remove_user_from_db(LServer, LUser) ->
+remove_archive(LServer, LUser) ->
     wait_flushing(LServer),
     PM = prefs_module(LServer),
     AM = archive_module(LServer),
-    PM:remove_user_from_db(LServer, LUser),
-    AM:remove_user_from_db(LServer, LUser),
-    mod_mam_cache:remove_user_from_db(LServer, LUser),
+    PM:remove_archive(LServer, LUser),
+    AM:remove_archive(LServer, LUser),
+    mod_mam_cache:remove_archive(LServer, LUser),
     mod_mam_cache:remove_user_from_cache(LServer, LUser),
     ok.
 

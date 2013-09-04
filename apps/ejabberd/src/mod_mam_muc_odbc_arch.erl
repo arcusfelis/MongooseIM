@@ -8,7 +8,7 @@
 -export([archive_size/2,
          wait_flushing/1,
          lookup_messages/9,
-         remove_user_from_db/2,
+         remove_archive/2,
          archive_message/6,
          purge_single_message/3,
          purge_multiple_messages/5]).
@@ -28,8 +28,11 @@
 -type server_hostname() :: binary().
 -type unix_timestamp() :: non_neg_integer().
 
+room_id(LServer, RoomName) ->
+    mod_mam:archive_id(LServer, RoomName).
+
 archive_size(LServer, LRoom) ->
-    RoomID = mod_mam_muc_cache:room_id(LServer, LRoom),
+    RoomID = room_id(LServer, LRoom),
     {selected, _ColumnNames, [{BSize}]} =
     mod_mam_utils:success_sql_query(
       LServer,
@@ -48,7 +51,7 @@ archive_message(Id, incoming,
     archive_message_1(Host, RoomName, Id, FromNick, Packet).
 
 archive_message_1(Host, RoomName, Id, FromNick, Packet) ->
-    RoomId = mod_mam_muc_cache:room_id(Host, RoomName),
+    RoomId = room_id(Host, RoomName),
     SRoomId = integer_to_list(RoomId),
     SFromNick = ejabberd_odbc:escape(FromNick),
     Data = term_to_binary(Packet, [compressed]),
@@ -114,8 +117,8 @@ row_to_uniform_format({BMessID,BNick,SData}, LServer, RoomJID) ->
     {MessID, SrcJID, Packet}.
 
 
-remove_user_from_db(LServer, LRoom) ->
-    RoomID = mod_mam_muc_cache:room_id(LServer, LRoom),
+remove_archive(LServer, LRoom) ->
+    RoomID = room_id(LServer, LRoom),
     {updated, _} =
     mod_mam_utils:success_sql_query(
       LServer,
@@ -129,7 +132,7 @@ remove_user_from_db(LServer, LRoom) ->
     MessID :: message_id(),
     Now :: unix_timestamp().
 purge_single_message(#jid{lserver = LServer, luser = LRoom}, MessID, _Now) ->
-    RoomID = mod_mam_muc_cache:room_id(LServer, LRoom),
+    RoomID = room_id(LServer, LRoom),
     Result =
     mod_mam_utils:success_sql_query(
       LServer,
@@ -241,7 +244,7 @@ calc_count(LServer, Filter) ->
     End     :: unix_timestamp() | undefined,
     WithJID :: #jid{} | undefined.
 prepare_filter(#jid{lserver=LServer, luser=RoomName}, Start, End, WithJID) ->
-    RoomID = mod_mam_muc_cache:room_id(LServer, RoomName),
+    RoomID = room_id(LServer, RoomName),
     SWithNick = maybe_jid_to_escaped_resource(WithJID),
     prepare_filter_1(RoomID, Start, End, SWithNick).
 
