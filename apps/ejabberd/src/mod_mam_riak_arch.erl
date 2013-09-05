@@ -114,6 +114,9 @@ lww_props() ->
 digest_creation_threshold(Host) ->
     gen_mod:get_module_opt(Host, mod_mam, digest_creation_threshold, 100).
 
+user_id(LocLServer, LocLUser) ->
+    mod_mam:archive_id(LocLServer, LocLUser).
+
 %% Debug helpers
 %% ------------------------------------------------------------------------
 
@@ -160,7 +163,7 @@ is_riak_available(_Host) ->
 
 archive_message(MessID, _Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
                 RemJID=#jid{}, SrcJID, Packet) ->
-    UserID = mod_mam_cache:user_id(LocLServer, LocLUser),
+    UserID = user_id(LocLServer, LocLUser),
     BUserID = user_id_to_binary(UserID),
     BMessID = mess_id_to_binary(MessID),
     BBareRemJID = jid_to_opt_binary(LocLServer, jlib:jid_remove_resource(RemJID)),
@@ -199,7 +202,7 @@ archive_message(MessID, _Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
 lookup_messages(_UserJID=#jid{lserver=LocLServer, luser=LocLUser},
                 RSM, Start, End, Now, WithJID,
                 PageSize, LimitPassed, MaxResultLimit) when is_integer(Now) ->
-    UserID = mod_mam_cache:user_id(LocLServer, LocLUser),
+    UserID = user_id(LocLServer, LocLUser),
     BUserID = user_id_to_binary(UserID),
     BWithJID = maybe_jid_to_opt_binary(LocLServer, WithJID),
     DigestKey = digest_key(BUserID, BWithJID),
@@ -235,7 +238,7 @@ dirty_purge_single_message(
         UserJID=#jid{lserver = LServer, luser = LUser}, MessID, Now)
     when is_integer(MessID), is_integer(Now) ->
     with_connection(LServer, fun(Conn) ->
-        UserID = mod_mam_cache:user_id(LServer, LUser),
+        UserID = user_id(LServer, LUser),
         BUserID = user_id_to_binary(UserID),
         BMessID = mess_id_to_binary(MessID),
         Key = message_key(BUserID, BMessID),
@@ -256,7 +259,7 @@ purge_single_message(UserJID=#jid{lserver = LServer}, MessID, Now)
         end).
 
 purge_single_message(Conn, #jid{lserver = LServer, luser = LUser}, MessID, Now) ->
-    UserID = mod_mam_cache:user_id(LServer, LUser),
+    UserID = user_id(LServer, LUser),
     BUserID = user_id_to_binary(UserID),
     BMessID = mess_id_to_binary(MessID),
     Key = message_key(BUserID, BMessID),
@@ -292,7 +295,7 @@ purge_multiple_messages(UserJID = #jid{lserver=LServer}, Start, End, Now, WithJI
 
 purge_multiple_messages(Conn, #jid{lserver=LServer, luser=LUser}, Start, End,
                         Now, WithJID) ->
-    UserID = mod_mam_cache:user_id(LServer, LUser),
+    UserID = user_id(LServer, LUser),
     BUserID = user_id_to_binary(UserID),
     BWithJID = maybe_jid_to_opt_binary(LServer, WithJID),
     SecIndex = choose_index(WithJID),
@@ -1456,7 +1459,7 @@ get_message_rows(Conn, Keys) ->
     lists:usort(MessageRows).
 
 get_all_digest_objects(Conn, LServer, LUser) ->
-    UserID = mod_mam_cache:user_id(LServer, LUser),
+    UserID = user_id(LServer, LUser),
     BUserID = user_id_to_binary(UserID),
     LBound = min_digest_key(BUserID),
     UBound = max_digest_key(BUserID),
@@ -1583,21 +1586,21 @@ get_minimum_key_range_before(RQ, Digest, Before, PageSize) ->
 %% @doc Get keys for full JIDs with the same bare JID.
 get_full_jid_digest_keys(Conn, LServer, LUser, BWithBareJID) ->
     %% jid_to_opt_binary
-    UserID = mod_mam_cache:user_id(LServer, LUser),
+    UserID = user_id(LServer, LUser),
     BUserID = user_id_to_binary(UserID),
     LBound = min_full_jid_digest_key(BUserID, BWithBareJID),
     UBound = max_full_jid_digest_key(BUserID, BWithBareJID),
     get_key_range(Conn, digest_bucket(), key_index(), LBound, UBound).
 
 get_all_digest_keys(Conn, LServer, LUser) ->
-    UserID = mod_mam_cache:user_id(LServer, LUser),
+    UserID = user_id(LServer, LUser),
     BUserID = user_id_to_binary(UserID),
     LBound = min_digest_key(BUserID),
     UBound = max_digest_key(BUserID),
     get_key_range(Conn, digest_bucket(), key_index(), LBound, UBound).
 
 get_all_message_keys(Conn, LServer, LUser) ->
-    UserID = mod_mam_cache:user_id(LServer, LUser),
+    UserID = user_id(LServer, LUser),
     BUserID = user_id_to_binary(UserID),
     LBound = message_key(BUserID, min_binary_mess_id()),
     UBound = message_key(BUserID, max_binary_mess_id()),
@@ -2226,13 +2229,13 @@ dormouse_at_party() ->
           user = <<"party">>,  server = <<"wonderland">>,  resource = <<"dormouse">>}.
 
 %% used by eunit
-user_id(<<"alice">>) -> 1;
+archive_id(<<"alice">>) -> 1;
 
 %% Next part of the function called from statem
-user_id(<<"cat">>)      -> 2;
-user_id(<<"hatter">>)   -> 3;
-user_id(<<"duchess">>)  -> 4;
-user_id(<<"dormouse">>) -> 5.
+archive_id(<<"cat">>)      -> 2;
+archive_id(<<"hatter">>)   -> 3;
+archive_id(<<"duchess">>)  -> 4;
+archive_id(<<"dormouse">>) -> 5.
 
 packet() -> <<"hi">>. % any term
 
@@ -2630,10 +2633,10 @@ load_mock(DigestThreshold) ->
     meck:expect(PM, with_connection, fun(mam_cluster, F) ->
             F(conn)
         end),
-    CM = mod_mam_cache,
-    meck:new(CM),
-    meck:expect(CM, user_id, fun(LServer, LUser) ->
-            user_id(LUser)
+    MM = mod_mam,
+    meck:new(MM),
+    meck:expect(MM, archive_id, fun(LServer, LUser) ->
+            archive_id(LUser)
         end),
     ok.
 

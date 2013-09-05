@@ -144,7 +144,7 @@ archive_size(Server, User) ->
 
 archive_id(LServer, LUser) ->
     UM = user_module(LServer),
-    AM:archive_id(LServer, LUser).
+    UM:archive_id(LServer, LUser).
 
 debug_info(LServer) ->
     AM = archive_module(LServer),
@@ -402,7 +402,6 @@ stop(Host) ->
 
 start_for_users(Host, Opts) ->
     ?DEBUG("mod_mam starting", []),
-    start_supervisor_for_users(Host),
     %% `parallel' is the only one recommended here.
     IQDisc = gen_mod:get_opt(iqdisc, Opts, parallel), %% Type
     mod_disco:register_feature(Host, mam_ns_binary()),
@@ -417,7 +416,6 @@ start_for_users(Host, Opts) ->
 
 stop_for_users(Host) ->
     ?DEBUG("mod_mam stopping", []),
-    stop_supervisor_for_users(Host),
     ejabberd_hooks:delete(user_send_packet, Host, ?MODULE, user_send_packet, 90),
     ejabberd_hooks:delete(filter_packet, global, ?MODULE, filter_packet, 90),
     ejabberd_hooks:delete(remove_user, Host, ?MODULE, remove_user, 50),
@@ -426,25 +424,11 @@ stop_for_users(Host) ->
     [stop_module(Host, M) || M <- required_modules(Host)],
     ok.
 
-start_supervisor_for_users(_Host) ->
-    CacheChildSpec =
-    {mod_mam_cache,
-     {mod_mam_cache, start_link, []},
-     permanent,
-     5000,
-     worker,
-     [mod_mam_cache]},
-    supervisor:start_child(ejabberd_sup, CacheChildSpec).
-
-stop_supervisor_for_users(_Host) ->
-    ok.
-
 %% ----------------------------------------------------------------------
 %% Starting and stopping functions for MUC archives
 
 start_for_rooms(Host, Opts) ->
     ?DEBUG("mod_mam_muc starting", []),
-    start_supervisor_for_rooms(Host),
     IQDisc = gen_mod:get_opt(iqdisc, Opts, parallel), %% Type
     mod_disco:register_feature(Host, mam_ns_binary()),
     gen_iq_handler:add_iq_handler(mod_muc_iq, Host, mam_ns_binary(),
@@ -457,25 +441,11 @@ start_for_rooms(Host, Opts) ->
 
 stop_for_rooms(Host) ->
     ?DEBUG("mod_mam stopping", []),
-    stop_supervisor_for_rooms(Host),
     ejabberd_hooks:add(filter_room_packet, Host, ?MODULE,
                        filter_room_packet, 90),
     gen_iq_handler:remove_iq_handler(mod_muc_iq, Host, mam_ns_string()),
     mod_disco:unregister_feature(Host, mam_ns_binary()),
     [stop_module(Host, M) || M <- required_modules(Host)],
-    ok.
-
-start_supervisor_for_rooms(_Host) ->
-    CacheChildSpec =
-    {mod_mam_muc_cache,
-     {mod_mam_muc_cache, start_link, []},
-     permanent,
-     5000,
-     worker,
-     [mod_mam_muc_cache]},
-    supervisor:start_child(ejabberd_sup, CacheChildSpec).
-
-stop_supervisor_for_rooms(_Host) ->
     ok.
 
 %% ----------------------------------------------------------------------
@@ -535,8 +505,7 @@ user_module(Host) ->
     gen_mod:get_module_opt(Host, ?MODULE, user_module, mod_mam_odbc_user).
 
 default_muc_modules() ->
-    [{prefs_module, mod_mam_muc_odbc_prefs}
-    ,{archive_module, mod_mam_muc_odbc_arch}
+    [{archive_module, mod_mam_muc_odbc_arch}
     ,{writer_module, mod_mam_muc_odbc_arch}].
 
 rewrite_default_muc_modules(Host, Opts) ->
@@ -695,14 +664,27 @@ remove_user(User, Server) ->
 filter_room_packet(Packet, FromNick, FromJID,
                    RoomJID=#jid{lserver = LServer, luser = RoomName}) ->
     ?DEBUG("Incoming room packet.", []),
-    case mod_mam_muc_cache:is_logging_enabled(LServer, RoomName) of
-    false -> Packet;
-    true ->
-    Id = generate_message_id(),
-    SrcJID = jlib:jid_replace_resource(RoomJID, FromNick),
-    archive_message(Id, incoming, RoomJID, FromJID, SrcJID, Packet),
-    BareRoomJID = jlib:jid_to_binary(RoomJID),
-    replace_archived_elem(BareRoomJID, mess_id_to_external_binary(Id), Packet)
+    IsComplete = is_complete_message(Packet),
+    case IsComplete of
+        true ->
+        IsInteresting =
+        case get_behaviour(always, RoomJID, FromJID) of
+            always -> true;
+            never  -> false;
+            roster -> true
+        end,
+        case IsInteresting of
+            true -> 
+            Id = generate_message_id(),
+            SrcJID = jlib:jid_replace_resource(RoomJID, FromNick),
+            archive_message(Id, incoming, RoomJID, FromJID, SrcJID, Packet),
+            BareRoomJID = jlib:jid_to_binary(RoomJID),
+            replace_archived_elem(BareRoomJID,
+                                  mess_id_to_external_binary(Id),
+                                  Packet);
+            false -> Packet
+        end;
+        false -> Packet
     end.
 
 %% `process_mam_iq/3' is simular.
@@ -874,10 +856,10 @@ remove_archive(LServer, LUser) ->
     wait_flushing(LServer),
     PM = prefs_module(LServer),
     AM = archive_module(LServer),
+    UM = user_module(LServer),
     PM:remove_archive(LServer, LUser),
     AM:remove_archive(LServer, LUser),
-    mod_mam_cache:remove_archive(LServer, LUser),
-    mod_mam_cache:remove_user_from_cache(LServer, LUser),
+    UM:remove_archive(LServer, LUser),
     ok.
 
 message_row_to_xml({MessID,SrcJID,Packet}, QueryID) ->
