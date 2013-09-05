@@ -667,8 +667,10 @@ filter_room_packet(Packet, FromNick, FromJID,
     IsComplete = is_complete_message(Packet),
     case IsComplete of
         true ->
+        %% Occupant JID <room@service/nick>
+        SrcJID = jlib:jid_replace_resource(RoomJID, FromNick),
         IsInteresting =
-        case get_behaviour(always, RoomJID, FromJID) of
+        case get_behaviour(always, RoomJID, SrcJID) of
             always -> true;
             never  -> false;
             roster -> true
@@ -676,7 +678,6 @@ filter_room_packet(Packet, FromNick, FromJID,
         case IsInteresting of
             true -> 
             Id = generate_message_id(),
-            SrcJID = jlib:jid_replace_resource(RoomJID, FromNick),
             archive_message(Id, incoming, RoomJID, FromJID, SrcJID, Packet),
             BareRoomJID = jlib:jid_to_binary(RoomJID),
             replace_archived_elem(BareRoomJID,
