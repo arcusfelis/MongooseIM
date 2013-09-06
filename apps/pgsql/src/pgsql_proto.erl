@@ -56,10 +56,10 @@
 
 -import(pgsql_util, [option/3]).
 -import(pgsql_util, [socket/1]).
--import(pgsql_util, [send/2, send_int/2, send_msg/3]).
--import(pgsql_util, [recv_msg/2, recv_msg/1, recv_byte/2, recv_byte/1]).
+-import(pgsql_util, [send/2]).
+-import(pgsql_util, [recv_msg/2]).
 -import(pgsql_util, [string/1, make_pair/2, split_pair/2]).
--import(pgsql_util, [count_string/1, to_string/2]).
+-import(pgsql_util, [to_string/2]).
 -import(pgsql_util, [coldescs/3, datacoldescs/3]).
 -import(pgsql_util, [to_integer/1, to_atom/1]).
 
@@ -72,7 +72,7 @@ start_link(Options) ->
     gen_server:start_link(?MODULE, [self(), Options], []).
 
 init([DriverPid, Options]) ->
-    %%io:format("Init~n", []),
+    lager:debug("Init from ~p.", [DriverPid]),
     %% Default values: We connect to localhost on the standard TCP/IP
     %% port.
     Host = option(Options, host, "localhost"),
@@ -91,7 +91,7 @@ init([DriverPid, Options]) ->
     end.
 
 connect(StateData) ->
-    %%io:format("Connect~n", []),
+    lager:debug("Connect", []),
     %% Connection settings for database-login.
     %% TODO: Check if the default values are relevant:
     UserName = option(StateData#state.options, user, "cos"),
@@ -347,6 +347,7 @@ handle_info(_Info, State) ->
 
 
 terminate(_Reason, _State) ->
+    lager:debug("Terminate with reason ~p", [_Reason]),
     ok.
 
 
