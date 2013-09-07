@@ -31,7 +31,12 @@ connect(Host, Database, User, Password, Port) ->
 	     {password, Password}]).
 
 connect(Options) ->
-    pgsql_proto:start(Options).
+    case proplists:get_bool(link, Options) of
+        true ->
+            pgsql_proto:start_link(Options);
+        false ->
+            pgsql_proto:start(Options)
+    end.
 
 %% Close a connection
 terminate(Db) ->

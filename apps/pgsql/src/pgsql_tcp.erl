@@ -51,13 +51,13 @@ handle_info({tcp, Sock, Bin},
 handle_info({tcp_closed, Sock},
 	    #state{socket = Sock,
 		   protopid = ProtoPid} = State) ->
-    io:format("Sock closed~n", []),
+    lager:error("Sock ~p was closed.", [Sock]),
     ProtoPid ! {socket, Sock, closed},
     {stop, tcp_close, State};
 handle_info({tcp_error, Sock, Reason},
 	    #state{socket = Sock,
 		   protopid = ProtoPid} = State) ->
-    io:format("Sock error~n", []),
+    lager:error("Sock ~p failed.", [Sock]),
     ProtoPid ! {socket, Sock, {error, Reason}},
     {stop, tcp_error, State};
 handle_info(_Info, State) ->
