@@ -803,7 +803,7 @@ rewrite_next_state(NewState, {next_state, _, StateData}) ->
 rewrite_next_state(_, {stop, normal, StateData}) ->
     {stop, normal, StateData}.
 
-destroy_temporary_room_if_empty(StateData) ->
+destroy_temporary_room_if_empty(StateData=#state{config=#config{}}) ->
     case (not (StateData#state.config)#config.persistent) andalso
     is_empty_room(StateData) of
     true ->
@@ -822,7 +822,7 @@ destroy_temporary_room_if_empty(StateData) ->
     StateData :: #state{}.
 process_presence1(From, Nick, #xmlel{name = <<"presence">>,
                                      attrs = Attrs} = Packet,
-         StateData) ->
+         StateData=#state{}) ->
     Type = xml:get_attr_s(<<"type">>, Attrs),
     Lang = xml:get_attr_s(<<"xml:lang">>, Attrs),
     case Type of
@@ -851,16 +851,17 @@ process_presence1(From, Nick, #xmlel{name = <<"presence">>,
 
 process_simple_presence(From, Packet, StateData) ->
     NewPacket = check_and_strip_visitor_status(From, Packet, StateData),
-    NewState = add_user_presence(From, NewPacket, StateData),
-    send_new_presence(From, NewState),
-    NewState.
+    NewStateData = add_user_presence(From, NewPacket, StateData),
+    send_new_presence(From, NewStateData),
+    NewStateData.
 
 process_presence_error(From, Packet, Lang, StateData) ->
     case is_user_online(From, StateData) of
         true ->
         ErrorText = <<"This participant is kicked from the room because he sent an error presence">>,
         expulse_participant(Packet, From, StateData,
-            translate:translate(Lang, ErrorText));
+            translate:translate(Lang, ErrorText)),
+        StateData;
         _ ->
         StateData
     end.
@@ -875,7 +876,8 @@ process_presence_unavailable(From, Packet, StateData) ->
             false -> <<>>;
             Status_el -> xml:get_tag_cdata(Status_el)
         end,
-        remove_online_user(From, NewState, Reason);
+        remove_online_user(From, NewState, Reason),
+        StateData;
         _ ->
         StateData
     end.
@@ -1544,7 +1546,8 @@ choose_new_user_strategy(From, Nick, Affiliation, Role, Els, StateData) ->
     end.
 
 add_new_user(From, Nick,
-    #xmlel{attrs = Attrs, children = Els} = Packet, StateData) ->
+             #xmlel{attrs = Attrs, children = Els} = Packet,
+             #state{} = StateData) ->
     Lang = xml:get_attr_s(<<"xml:lang">>, Attrs),
     Affiliation = get_affiliation(From, StateData),
     Role = get_default_role(Affiliation, StateData),
@@ -1565,10 +1568,12 @@ add_new_user(From, Nick,
         StateData;
     require_membership ->
         ErrText = <<"Membership is required to enter this room">>,
-        Err = ?ERRT_REGISTRATION_REQUIRED(Lang, ErrText),
+        Err = jlib:make_error_reply(
+            Packet, ?ERRT_REGISTRATION_REQUIRED(Lang, ErrText)),
         ejabberd_router:route(% TODO: s/Nick/<<>>/
           jlib:jid_replace_resource(StateData#state.jid, Nick),
-          From, Err);
+          From, Err),
+        StateData;
     conflict_use ->
         ErrText = <<"That nickname is already in use by another occupant">>,
         Err = jlib:make_error_reply(Packet, ?ERRT_CONFLICT(Lang, ErrText)),
@@ -3493,7 +3498,7 @@ get_mucroom_disco_items(StateData=#state{jid=RoomJID}) ->
 disco_item(User=#user{nick=Nick}, RoomJID) ->
     #xmlel{
         name = <<"item">>,
-        attrs = [{<<"jid">>, occupant_jid(User, RoomJID)},
+        attrs = [{<<"jid">>, jlib:jid_to_binary(occupant_jid(User, RoomJID))},
                  {<<"name">>, Nick}]}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
