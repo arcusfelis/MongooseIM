@@ -12,7 +12,6 @@
 %%% <li>User's ID generator ({@link mod_mam_muc_user}).</li>
 %%% </ul>
 %%%
-%%% There are two backends: for MySQL and for Riak.
 %%% Preferencies can be also stored in Mnesia ({@link mod_mam_mnesia_prefs}).
 %%% This module handles both MUC and simple archives.
 %%%
