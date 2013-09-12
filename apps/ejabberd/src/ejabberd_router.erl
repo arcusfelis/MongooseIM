@@ -218,16 +218,8 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
-do_route(OrigFrom, OrigTo, OrigPacket) ->
-    case folsom_metrics:metric_exists(route_time) of
-        true ->
-            folsom_metrics:histogram_timed_update(route_time,
-                fun() -> do_route1(OrigFrom, OrigTo, OrigPacket) end);
-        false ->
-            do_route1(OrigFrom, OrigTo, OrigPacket)
-    end.
 
-do_route1(OrigFrom, OrigTo, OrigPacket) ->
+do_route(OrigFrom, OrigTo, OrigPacket) ->
     ?DEBUG("route~n\tfrom ~p~n\tto ~p~n\tpacket ~p~n",
            [OrigFrom, OrigTo, OrigPacket]),
     case ejabberd_hooks:run_fold(filter_packet,
