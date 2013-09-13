@@ -277,21 +277,3 @@ CREATE TABLE mam_muc_message(
 );
 CREATE INDEX i_mam_muc_message_room_name_added_at USING BTREE ON mam_muc_message(room_id, id);
 
-CREATE TABLE mam_muc_room(
-  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  room_name varchar(250) NOT NULL,
-  -- 0 -- save
-  -- 1 -- delete
-  -- NULL -- use default settings
-  delete_archive_after_destruction character(1),
-  -- 0 -- disable archiving
-  -- 1 -- enable archiving
-  -- NULL -- use default settings
-  enable_logging character(1),
-  -- 0 -- disable user calls
-  -- 1 -- enable user calls
-  -- NULL -- use default settings
-  enable_querying character(1)
-);
-CREATE INDEX i_mam_muc_room_name USING BTREE ON mam_muc_room(room_name);
-

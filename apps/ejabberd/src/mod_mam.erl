@@ -661,8 +661,12 @@ remove_user(User, Server) ->
 %% hooks and handlers for MUC
 
 %% @doc Handle public MUC-message.
-filter_room_packet(Packet, FromNick, FromJID,
-                   RoomJID=#jid{lserver = LServer, luser = RoomName}) ->
+-spec filter_room_packet(Packet, FromNick, FromJID, RoomJID) -> Packet when
+    Packet :: term(),
+    FromNick :: binary(),
+    RoomJID :: #jid{},
+    FromJID :: #jid{}.
+filter_room_packet(Packet, FromNick, FromJID, RoomJID) ->
     ?DEBUG("Incoming room packet.", []),
     IsComplete = is_complete_message(Packet),
     case IsComplete of

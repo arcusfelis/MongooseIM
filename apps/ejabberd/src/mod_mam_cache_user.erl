@@ -37,8 +37,8 @@ group_name() ->
 su_key(LServer, LUserName) ->
     {LServer, LUserName}.
 
-required_modules(_LServer) ->
-    [mod_mam_odbc_user].
+required_modules(LServer) ->
+    [user_base_module(LServer)].
 
 %%====================================================================
 %% API
@@ -88,7 +88,7 @@ lookup_archive_id(LServer, UserName) ->
     end.
 
 user_base_module(Host) ->
-    gen_mod:get_module_opt(Host, mod_mam, archive_module, mod_mam_odbc_arch).
+    gen_mod:get_module_opt(Host, mod_mam, user_base_module, mod_mam_odbc_user).
 
 forward_archive_id(LServer, UserName) ->
     M = user_base_module(LServer),
