@@ -332,6 +332,9 @@ handle_info({'EXIT', From, _Reason}, StateName, State=#state{db_ref=From}) ->
 %% Failed to connect. Ignore and wait to reconnect.
 handle_info({'EXIT', _From, _Reason}, connecting, State=#state{db_ref=undefined}) ->
     {next_state, connecting, State};
+%% A shutdown message from poolboy (it is not from parent_pid).
+handle_info({'EXIT', _From, shutdown}, _, State=#state{}) ->
+    {stop, shutdown, State};
 handle_info({'EXIT', From, Reason}, StateName,
             State=#state{db_ref=DbRef, parent_pid=ParentPid}) ->
     ?ERROR_MSG(
@@ -347,16 +350,16 @@ terminate(_Reason, _StateName, #state{db_ref = undefined}) ->
     ok;
 terminate(_Reason, _StateName, State) ->
     case State#state.db_type of
-	mysql ->
-	    %% old versions of mysql driver don't have the stop function
-	    %% so the catch
-	    catch mysql_conn:stop(State#state.db_ref);
-	pgsql ->
-	    pgsql:terminate(State#state.db_ref);
-	odbc ->
-	    odbc:disconnect(State#state.db_ref);
-	_ ->
-	    ok
+        mysql ->
+            %% old versions of mysql driver don't have the stop function
+            %% so the catch
+            catch mysql_conn:stop(State#state.db_ref);
+        pgsql ->
+            pgsql:terminate(State#state.db_ref);
+        odbc ->
+            odbc:disconnect(State#state.db_ref);
+        _ ->
+            ok
     end,
     ok.
 
