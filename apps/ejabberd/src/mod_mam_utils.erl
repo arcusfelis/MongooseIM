@@ -177,6 +177,7 @@ get_one_of_path(_Elem, [], Def) ->
 %% @doc Checks, that the stanza is a message with body.
 %%
 %% Servers SHOULD NOT archive messages that do not have a `<body/>' child tag.
+%% Servers SHOULD NOT delayed messages.
 %% @end
 -spec is_complete_message(Packet::#xmlel{}) -> boolean().
 is_complete_message(Packet=#xmlel{name = <<"message">>}) ->
@@ -185,9 +186,11 @@ is_complete_message(Packet=#xmlel{name = <<"message">>}) ->
               Type == <<"normal">>;
               Type == <<"chat">>;
               Type == <<"groupchat">> ->
-        case xml:get_subtag(Packet, <<"body">>) of
-            false -> false;
-            _     -> true
+        case {xml:get_subtag(Packet, <<"body">>),
+              xml:get_subtag(Packet, <<"delay">>)} of
+            {false, _} -> false;
+            {_, false} -> true;
+            {_,     _} -> false
         end;
     %% Skip <<"error">> type
     _ -> false
