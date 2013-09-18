@@ -402,6 +402,8 @@ stop(Host) ->
 
 start_for_users(Host, Opts) ->
     ?DEBUG("mod_mam starting", []),
+    ejabberd_users:start(Host),
+    [start_module(Host, M) || M <- required_modules(Host)],
     %% `parallel' is the only one recommended here.
     IQDisc = gen_mod:get_opt(iqdisc, Opts, parallel), %% Type
     mod_disco:register_feature(Host, mam_ns_binary()),
@@ -410,8 +412,6 @@ start_for_users(Host, Opts) ->
     ejabberd_hooks:add(user_send_packet, Host, ?MODULE, user_send_packet, 90),
     ejabberd_hooks:add(filter_packet, global, ?MODULE, filter_packet, 90),
     ejabberd_hooks:add(remove_user, Host, ?MODULE, remove_user, 50),
-    ejabberd_users:start(Host),
-    [start_module(Host, M) || M <- required_modules(Host)],
     ok.
 
 stop_for_users(Host) ->
@@ -429,6 +429,7 @@ stop_for_users(Host) ->
 
 start_for_rooms(Host, Opts) ->
     ?DEBUG("mod_mam_muc starting", []),
+    [start_module(Host, M) || M <- required_modules(Host)],
     IQDisc = gen_mod:get_opt(iqdisc, Opts, parallel), %% Type
     mod_disco:register_feature(Host, mam_ns_binary()),
     gen_iq_handler:add_iq_handler(mod_muc_iq, Host, mam_ns_binary(),
@@ -436,7 +437,6 @@ start_for_rooms(Host, Opts) ->
     ejabberd_hooks:add(filter_room_packet, Host, ?MODULE,
                        filter_room_packet, 90),
     ejabberd_hooks:add(forget_room, Host, ?MODULE, forget_room, 90),
-    [start_module(Host, M) || M <- required_modules(Host)],
     ok.
 
 stop_for_rooms(Host) ->
