@@ -6,7 +6,7 @@
 %%%-------------------------------------------------------------------
 -module(mod_mam_odbc_user).
 -export([archive_id/2,
-         remove_archive/2]).
+         remove_archive/3]).
 
 -include("ejabberd.hrl").
 -include("jlib.hrl").
@@ -18,7 +18,7 @@
 archive_id(LServer, UserName) ->
     query_archive_id(LServer, UserName).
 
-remove_archive(LServer, UserName) ->
+remove_archive(LServer, UserName, _UserID) ->
     SUserName = ejabberd_odbc:escape(UserName),
     {updated, _} =
     ejabberd_odbc:sql_query(

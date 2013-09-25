@@ -6,10 +6,10 @@
 %%%-------------------------------------------------------------------
 -module(mod_mam_mnesia_prefs).
 -export([start/1,
-         get_behaviour/3,
-         get_prefs/3,
-         set_prefs/5,
-         remove_archive/2]).
+         get_behaviour/4,
+         get_prefs/4,
+         set_prefs/6,
+         remove_archive/3]).
 
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
@@ -28,6 +28,7 @@ start(_Host) ->
     ok.
 
 get_behaviour(DefaultBehaviour,
+             _UserID,
               LocJID=#jid{},
               RemJID=#jid{}) ->
     case mnesia:dirty_read(mam_prefs_rule, key1(LocJID, RemJID)) of
@@ -43,7 +44,7 @@ get_behaviour(DefaultBehaviour,
         [#mam_prefs_rule{behaviour=B}] -> B
     end.
 
-set_prefs(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs) ->
+set_prefs(LServer, LUser, _UserID, DefaultMode, AlwaysJIDs, NeverJIDs) ->
     NewARules = lists:usort(rules(AlwaysJIDs)),
     NewNRules = lists:usort(rules(NeverJIDs)),
     SU = {LServer, LUser},
@@ -69,7 +70,7 @@ set_prefs(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs) ->
     end),
     ok.
 
-get_prefs(LServer, LUser, GlobalDefaultMode) ->
+get_prefs(LServer, LUser, _UserID, GlobalDefaultMode) ->
     case mnesia:dirty_read(mam_prefs_user, {LServer, LUser}) of
         [] -> 
             {GlobalDefaultMode, [], []};
@@ -80,7 +81,7 @@ get_prefs(LServer, LUser, GlobalDefaultMode) ->
             {DefaultMode, AlwaysJIDs, NeverJIDs}
     end.
 
-remove_archive(LServer, LUser) ->
+remove_archive(LServer, LUser, _UserID) ->
     {atomic, ok} = mnesia:transaction(fun() ->
         case mnesia:read(mam_prefs_user, {LServer, LUser}) of
             [] -> ok; %% already deleted

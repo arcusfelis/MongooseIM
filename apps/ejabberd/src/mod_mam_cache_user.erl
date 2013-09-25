@@ -3,21 +3,25 @@
 %%% @copyright (C) 2013, Uvarov Michael
 %%% @doc Stores cache using ETS-table.
 %%% This module is a proxy for `mod_mam_odbc_user'.
+%%% 
+%%% This module is a tuple module (not parametrized).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(mod_mam_cache_user).
--export([start/1,
+-export([start/2,
          start_link/0,
-         required_modules/1,
-         archive_id/2,
+         required_modules/2,
+         archive_id/3,
          clean_cache/2,
-         remove_archive/2]).
+         remove_archive/4]).
 
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+%-type module() :: atom() | {atom(), term()}.
+-type hidden_state() :: {atom(), atom()}.
 
 -include("ejabberd.hrl").
 -include("jlib.hrl").
@@ -37,39 +41,39 @@ group_name() ->
 su_key(LServer, LUserName) ->
     {LServer, LUserName}.
 
-required_modules(LServer) ->
-    [user_base_module(LServer)].
-
 %%====================================================================
 %% API
 %%====================================================================
 
-start(_Host) ->
+required_modules(LServer, HiddenState) ->
+    [user_base_module(LServer, HiddenState)].
+
+start(_Host, _HiddenState) ->
     WriterChildSpec =
     {mod_mam_cache_user,
      {mod_mam_cache_user, start_link, []},
      permanent,
      5000,
      worker,
-     [mod_mam_odbc_async_writer]},
+     [mod_mam_cache_user]},
     supervisor:start_child(ejabberd_sup, WriterChildSpec).
 
 start_link() ->
     gen_server:start_link({local, srv_name()}, ?MODULE, [], []).
 
-archive_id(LServer, UserName) ->
+archive_id(LServer, UserName, HiddenState) ->
     case lookup_archive_id(LServer, UserName) of
         not_found ->
-            UserId = forward_archive_id(LServer, UserName),
+            UserId = forward_archive_id(LServer, UserName, HiddenState),
             cache_archive_id(LServer, UserName, UserId),
             UserId;
         UserId ->
             UserId
     end.
 
-remove_archive(LServer, UserName) ->
+remove_archive(LServer, UserName, UserId, HiddenState) ->
     clean_cache(LServer, UserName),
-    forward_remove_archive(LServer, UserName).
+    forward_remove_archive(LServer, UserName, UserId, HiddenState).
 
 %%====================================================================
 %% Internal functions
@@ -87,16 +91,17 @@ lookup_archive_id(LServer, UserName) ->
         not_found
     end.
 
-user_base_module(Host) ->
-    gen_mod:get_module_opt(Host, mod_mam, user_base_module, mod_mam_odbc_user).
+-spec user_base_module(Host :: binary(), hidden_state()) -> module().
+user_base_module(_Host, {?MODULE, BaseMod}) ->
+    BaseMod.
 
-forward_archive_id(LServer, UserName) ->
-    M = user_base_module(LServer),
+forward_archive_id(LServer, UserName, HiddenState) ->
+    M = user_base_module(LServer, HiddenState),
     M:archive_id(LServer, UserName).
 
-forward_remove_archive(LServer, UserName) ->
-    M = user_base_module(LServer),
-    M:remove_archive(LServer, UserName).
+forward_remove_archive(LServer, UserName, UserId, HiddenState) ->
+    M = user_base_module(LServer, HiddenState),
+    M:remove_archive(LServer, UserName, UserId).
 
 clean_cache(Server, User) ->
     %% Send a broadcast message.

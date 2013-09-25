@@ -5,25 +5,22 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(mod_mam_odbc_prefs).
--export([get_behaviour/3,
-         get_prefs/3,
-         set_prefs/5,
-         remove_archive/2]).
+-export([get_behaviour/4,
+         get_prefs/4,
+         set_prefs/6,
+         remove_archive/3]).
 
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
 -include_lib("exml/include/exml.hrl").
 
-user_id(LocLServer, LocLUser) ->
-    mod_mam:archive_id(LocLServer, LocLUser).
-
 get_behaviour(DefaultBehaviour,
-              #jid{lserver=LocLServer, luser=LocLUser},
+              UserID,
+              #jid{lserver=LocLServer},
               #jid{} = RemJID) ->
     RemLJID      = jlib:jid_tolower(RemJID),
     SRemLBareJID = esc_jid(jlib:jid_remove_resource(RemLJID)),
     SRemLJID     = esc_jid(jlib:jid_tolower(RemJID)),
-    UserID       = user_id(LocLServer, LocLUser),
     SUserID      = integer_to_list(UserID),
     case query_behaviour(LocLServer, SUserID, SRemLJID, SRemLBareJID) of
         {selected, ["behaviour"], [{Behavour}]} ->
@@ -31,8 +28,7 @@ get_behaviour(DefaultBehaviour,
         _ -> DefaultBehaviour
     end.
 
-set_prefs(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs) ->
-    UserID = user_id(LServer, LUser),
+set_prefs(LServer, _LUser, UserID, DefaultMode, AlwaysJIDs, NeverJIDs) ->
     SUserID = integer_to_list(UserID),
     DelQuery = ["DELETE FROM mam_config WHERE user_id = '", SUserID, "'"],
     InsQuery = ["INSERT INTO mam_config(user_id, behaviour, remote_jid) "
@@ -46,8 +42,7 @@ set_prefs(LServer, LUser, DefaultMode, AlwaysJIDs, NeverJIDs) ->
         sql_transaction_map(LServer, [DelQuery, InsQuery]),
     ok.
 
-get_prefs(LServer, LUser, GlobalDefaultMode) ->
-    UserID = user_id(LServer, LUser),
+get_prefs(LServer, _LUser, UserID, GlobalDefaultMode) ->
     SUserID = integer_to_list(UserID),
     {selected, _ColumnNames, Rows} =
     mod_mam_utils:success_sql_query(
@@ -57,8 +52,7 @@ get_prefs(LServer, LUser, GlobalDefaultMode) ->
        "WHERE user_id='", SUserID, "'"]),
     decode_prefs_rows(Rows, GlobalDefaultMode, [], []).
 
-remove_archive(LServer, LUser) ->
-    UserID = user_id(LServer, LUser),
+remove_archive(LServer, _LUser, UserID) ->
     SUserID = integer_to_list(UserID),
     {updated, _} =
     mod_mam_utils:success_sql_query(

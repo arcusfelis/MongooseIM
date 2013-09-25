@@ -9,7 +9,7 @@
          stop/1,
          start_link/2,
          srv_name/1,
-         archive_message/6,
+         archive_message/7,
          wait_flushing/1,
          queue_length/1]).
 
@@ -64,12 +64,9 @@ start_link(ProcName, Host) ->
 srv_name(Host) ->
     gen_mod:get_module_proc(Host, srv_name()).
 
-user_id(LocLServer, LocLUser) ->
-    mod_mam:archive_id(LocLServer, LocLUser).
-
-archive_message(Id, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
+archive_message(MessID, UserID, Dir,
+               _LocJID=#jid{lserver=LocLServer},
                 RemJID=#jid{lresource=RemLResource}, SrcJID, Packet) ->
-    UserID = user_id(LocLServer, LocLUser),
     SUserID = integer_to_list(UserID),
     SBareRemJID = esc_jid(jlib:jid_tolower(jlib:jid_remove_resource(RemJID))),
     SSrcJID = esc_jid(SrcJID),
@@ -78,13 +75,13 @@ archive_message(Id, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
     Data = term_to_binary(Packet, [compressed]),
     EscFormat = ejabberd_odbc:escape_format(LocLServer),
     SData = ejabberd_odbc:escape_binary(EscFormat, Data),
-    SId = integer_to_list(Id),
-    archive_message(LocLServer, SId, SUserID, SBareRemJID,
+    SMessID = integer_to_list(MessID),
+    archive_message(LocLServer, SMessID, SUserID, SBareRemJID,
                     SRemLResource, SDir, SSrcJID, SData).
 
 
-archive_message(Host, SId, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData) ->
-    Msg = {archive_message, SId, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData},
+archive_message(Host, SMessID, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData) ->
+    Msg = {archive_message, SMessID, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData},
     gen_server:cast(srv_name(Host), Msg).
 
 %% For folsom.
@@ -117,7 +114,7 @@ run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc,
                                 "remote_resource, direction, "
                                 "from_jid, message) "
        "VALUES ", tuples(Acc)]),
-    % [SId, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData]
+    % [SMessID, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData]
     case Result of
         {updated, _Count} -> ok;
         {error, Reason} ->
@@ -177,11 +174,11 @@ handle_call(wait_flushing, From, State=#state{subscribers=Subs}) ->
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
 
-handle_cast({archive_message, SId, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData},
+handle_cast({archive_message, SMessID, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData},
             State=#state{acc=Acc, flush_interval_tref=TRef, flush_interval=Int,
                          max_packet_size=Max}) ->
-    ?DEBUG("Schedule to write ~p.", [SId]),
-    Row = [SId, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData],
+    ?DEBUG("Schedule to write ~p.", [SMessID]),
+    Row = [SMessID, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData],
     TRef2 = case {Acc, TRef} of
             {[], undefined} -> erlang:send_after(Int, self(), flush);
             {_, _} -> TRef

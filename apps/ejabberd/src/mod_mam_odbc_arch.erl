@@ -5,13 +5,13 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(mod_mam_odbc_arch).
--export([archive_size/2,
+-export([archive_size/3,
          wait_flushing/1,
-         archive_message/6,
-         lookup_messages/9,
-         remove_archive/2,
-         purge_single_message/3,
-         purge_multiple_messages/5]).
+         archive_message/7,
+         lookup_messages/10,
+         remove_archive/3,
+         purge_single_message/4,
+         purge_multiple_messages/6]).
 
 %% UID
 -import(mod_mam_utils,
@@ -23,6 +23,7 @@
 
 -type filter() :: iolist().
 -type message_id() :: non_neg_integer().
+-type user_id() :: non_neg_integer().
 -type escaped_message_id() :: binary().
 -type escaped_jid() :: binary().
 -type escaped_resource() :: binary().
@@ -32,11 +33,7 @@
 encode_direction(incoming) -> "I";
 encode_direction(outgoing) -> "O".
 
-user_id(LocLServer, LocLUser) ->
-    mod_mam:archive_id(LocLServer, LocLUser).
-
-archive_size(LServer, LUser) ->
-    UserID = user_id(LServer, LUser),
+archive_size(LServer, _LUser, UserID) ->
     {selected, _ColumnNames, [{BSize}]} =
     mod_mam_utils:success_sql_query(
       LServer,
@@ -48,9 +45,10 @@ archive_size(LServer, LUser) ->
 wait_flushing(_Host) ->
     ok.
 
-archive_message(Id, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
-                RemJID=#jid{lresource=RemLResource}, SrcJID, Packet) ->
-    UserID = user_id(LocLServer, LocLUser),
+archive_message(MessID, UserID, Dir,
+               _LocJID=#jid{lserver=LocLServer},
+                RemJID=#jid{lresource=RemLResource},
+                SrcJID, Packet) ->
     SUserID = integer_to_list(UserID),
     SBareRemJID = esc_jid(jlib:jid_tolower(jlib:jid_remove_resource(RemJID))),
     SSrcJID = esc_jid(SrcJID),
@@ -59,11 +57,11 @@ archive_message(Id, Dir, _LocJID=#jid{luser=LocLUser, lserver=LocLServer},
     Data = term_to_binary(Packet),
     EscFormat = ejabberd_odbc:escape_format(LocLServer),
     SData = ejabberd_odbc:escape_binary(EscFormat, Data),
-    SId = integer_to_list(Id),
-    write_message(LocLServer, SId, SUserID, SBareRemJID,
+    SMessID = integer_to_list(MessID),
+    write_message(LocLServer, SMessID, SUserID, SBareRemJID,
                   SRemLResource, SDir, SSrcJID, SData).
 
-write_message(LServer, SId, SUserID, SBareRemJID,
+write_message(LServer, SMessID, SUserID, SBareRemJID,
               SRemLResource, SDir, SSrcJID, SData) ->
     {updated, 1} =
     mod_mam_utils:success_sql_query(
@@ -71,17 +69,18 @@ write_message(LServer, SId, SUserID, SBareRemJID,
       ["INSERT INTO mam_message(id, user_id, remote_bare_jid, "
                                 "remote_resource, direction, "
                                 "from_jid, message) "
-       "VALUES ('", SId, "', '", SUserID, "', '", SBareRemJID, "', "
+       "VALUES ('", SMessID, "', '", SUserID, "', '", SBareRemJID, "', "
                "'", SRemLResource, "', '", SDir, "', ",
                "'", SSrcJID, "', '", SData, "');"]),
     ok.
 
 
--spec lookup_messages(UserJID, RSM, Start, End, Now, WithJID, PageSize,
-                      LimitPassed, MaxResultLimit) ->
+-spec lookup_messages(UserJID, UserID, RSM, Start, End, Now, WithJID,
+                      PageSize, LimitPassed, MaxResultLimit) ->
     {ok, {TotalCount, Offset, MessageRows}} | {error, 'policy-violation'}
 			     when
     UserJID :: #jid{},
+    UserID  :: user_id(),
     RSM     :: #rsm_in{} | undefined,
     Start   :: unix_timestamp() | undefined,
     End     :: unix_timestamp() | undefined,
@@ -93,10 +92,10 @@ write_message(LServer, SId, SUserID, SBareRemJID,
     TotalCount :: non_neg_integer(),
     Offset  :: non_neg_integer(),
     MessageRows :: list(tuple()).
-lookup_messages(UserJID=#jid{lserver=LServer},
-                RSM, Start, End, _Now, WithJID,
+lookup_messages(#jid{lserver=LServer},
+                UserID, RSM, Start, End, _Now, WithJID,
                 PageSize, LimitPassed, MaxResultLimit) ->
-    Filter = prepare_filter(UserJID, Start, End, WithJID),
+    Filter = prepare_filter(UserID, Start, End, WithJID),
     TotalCount = calc_count(LServer, Filter),
     Offset     = calc_offset(LServer, Filter, PageSize, TotalCount, RSM),
     %% If a query returns a number of stanzas greater than this limit and the
@@ -124,8 +123,7 @@ row_to_uniform_format(LServer, {BMessID,BSrcJID,SData}) ->
     {MessID, SrcJID, Packet}.
 
 
-remove_archive(LServer, LUser) ->
-    UserID = user_id(LServer, LUser),
+remove_archive(LServer, _LUser, UserID) ->
     {updated, _} =
     mod_mam_utils:success_sql_query(
       LServer,
@@ -133,13 +131,13 @@ remove_archive(LServer, LUser) ->
        "WHERE user_id = '", escape_user_id(UserID), "'"]),
     ok.
 
--spec purge_single_message(UserJID, MessID, Now) ->
+-spec purge_single_message(UserJID, UserID, MessID, Now) ->
     ok | {error, 'not-allowed' | 'not-found'} when
     UserJID :: #jid{},
     MessID :: message_id(),
+    UserID :: user_id(),
     Now :: unix_timestamp().
-purge_single_message(#jid{lserver = LServer, luser = LUser}, MessID, _Now) ->
-    UserID = user_id(LServer, LUser),
+purge_single_message(#jid{lserver = LServer}, UserID, MessID, _Now) ->
     Result =
     mod_mam_utils:success_sql_query(
       LServer,
@@ -151,15 +149,17 @@ purge_single_message(#jid{lserver = LServer, luser = LUser}, MessID, _Now) ->
         {updated, 1} -> ok
     end.
 
--spec purge_multiple_messages(UserJID, Start, End, Now, WithJID) ->
+-spec purge_multiple_messages(UserJID, UserID, Start, End, Now, WithJID) ->
     ok | {error, 'not-allowed'} when
     UserJID :: #jid{},
+    UserID  :: user_id(),
     Start   :: unix_timestamp() | undefined,
     End     :: unix_timestamp() | undefined,
     Now     :: unix_timestamp(),
     WithJID :: #jid{} | undefined.
-purge_multiple_messages(UserJID = #jid{lserver=LServer}, Start, End, _Now, WithJID) ->
-    Filter = prepare_filter(UserJID, Start, End, WithJID),
+purge_multiple_messages(#jid{lserver=LServer},
+                        UserID, Start, End, _Now, WithJID) ->
+    Filter = prepare_filter(UserID, Start, End, WithJID),
     {updated, _} =
     mod_mam_utils:success_sql_query(
       LServer,
@@ -248,14 +248,13 @@ calc_count(LServer, Filter) ->
 
 
 %% prepare_filter/4
--spec prepare_filter(UserJID, Start, End, WithJID) -> filter()
+-spec prepare_filter(UserID, Start, End, WithJID) -> filter()
     when
-    UserJID :: #jid{},
+    UserID  :: user_id(),
     Start   :: unix_timestamp() | undefined,
     End     :: unix_timestamp() | undefined,
     WithJID :: #jid{} | undefined.
-prepare_filter(#jid{lserver=LServer, luser=LUser}, Start, End, WithJID) ->
-    UserID = user_id(LServer, LUser),
+prepare_filter(UserID, Start, End, WithJID) ->
     {SWithJID, SWithResource} =
     case WithJID of
         undefined -> {undefined, undefined};

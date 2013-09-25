@@ -321,6 +321,9 @@ maybe_integer(<<>>, Def) -> Def;
 maybe_integer(Bin, _Def) when is_binary(Bin) ->
     list_to_integer(binary_to_list(Bin)).
 
+is_function_exist({M, _}, F, A) ->
+    %% M is a tuple module
+    is_function_exist(M, F, A+1);
 is_function_exist(M, F, A) ->
     lists:member({F, A}, M:module_info(exports)).
 

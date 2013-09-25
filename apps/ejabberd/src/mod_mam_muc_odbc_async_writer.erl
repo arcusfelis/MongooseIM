@@ -9,7 +9,7 @@
          stop/1,
          start_link/2,
          srv_name/1,
-         archive_message/6,
+         archive_message/7,
          wait_flushing/1,
          queue_length/1]).
 
@@ -30,9 +30,6 @@
 
 srv_name() ->
     ejabberd_mod_mam_muc_writer.
-
-room_id(LServer, RoomName) ->
-    mod_mam:archive_id(LServer, RoomName).
 
 %%====================================================================
 %% API
@@ -60,21 +57,20 @@ start_link(ProcName, Host) ->
 srv_name(Host) ->
     gen_mod:get_module_proc(Host, srv_name()).
 
-archive_message(Id, incoming,
-                _LocJID=#jid{lserver=Host, luser=RoomName},
+archive_message(MessID, RoomID, incoming,
+                _LocJID=#jid{lserver=Host, luser=_RoomName},
                 _RemJID=#jid{},
                 _SrcJID=#jid{lresource=FromNick}, Packet) ->
-    archive_message_1(Host, RoomName, Id, FromNick, Packet).
+    archive_message_1(Host, RoomID, MessID, FromNick, Packet).
 
-archive_message_1(Host, RoomName, Id, FromNick, Packet) ->
-    RoomId = room_id(Host, RoomName),
-    SRoomId = integer_to_list(RoomId),
+archive_message_1(Host, RoomID, MessID, FromNick, Packet) ->
+    SRoomID = integer_to_list(RoomID),
     SFromNick = ejabberd_odbc:escape(FromNick),
     Data = term_to_binary(Packet, [compressed]),
     EscFormat = ejabberd_odbc:escape_format(Host),
     SData = ejabberd_odbc:escape_binary(EscFormat, Data),
-    SID = integer_to_list(Id),
-    Msg = {archive_message, SID, SRoomId, SFromNick, SData},
+    SMessID = integer_to_list(MessID),
+    Msg = {archive_message, SMessID, SRoomID, SFromNick, SData},
     gen_server:cast(srv_name(Host), Msg).
 
 %% For folsom.
@@ -104,7 +100,7 @@ run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc}) ->
       Conn,
       ["INSERT INTO mam_muc_message(id, room_id, nick_name, message) "
        "VALUES ", tuples(Acc)]),
-    % [SID, SRoomId, SFromNick, SData]
+    % [SMessID, SRoomID, SFromNick, SData]
     case Result of
         {updated, _Count} -> ok;
         {error, Reason} ->
@@ -158,11 +154,11 @@ handle_call(_, _From, State) ->
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
 
-handle_cast({archive_message, SID, SRoomId, SFromNick, SData},
+handle_cast({archive_message, SMessID, SRoomID, SFromNick, SData},
             State=#state{acc=Acc, flush_interval_tref=TRef, flush_interval=Int,
                          max_packet_size=Max}) ->
-    ?DEBUG("Schedule to write ~p.", [SID]),
-    Row = [SID, SRoomId, SFromNick, SData],
+    ?DEBUG("Schedule to write ~p.", [SMessID]),
+    Row = [SMessID, SRoomID, SFromNick, SData],
     TRef2 = case {Acc, TRef} of
             {[], undefined} -> erlang:send_after(Int, self(), flush);
             {_, _} -> TRef

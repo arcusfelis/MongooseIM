@@ -13,7 +13,7 @@
 %%% </ul>
 %%%
 %%% Preferencies can be also stored in Mnesia ({@link mod_mam_mnesia_prefs}).
-%%% This module handles simple archives.
+%%% This module handles MUC archives.
 %%%
 %%% This module should be started for each host.
 %%% Message archivation is not shaped here (use standard support for this).
@@ -27,8 +27,7 @@
 %%% </ul>
 %%% @end
 %%%-------------------------------------------------------------------
--module(mod_mam).
--behavior(gen_mod).
+-module(mod_mam_muc).
 
 %% ----------------------------------------------------------------------
 %% Exports
@@ -38,19 +37,18 @@
          archive_size/2,
          archive_id/2]).
 
-%% gen_mod handlers
--export([start/2, stop/1]).
-
-%% ejabberd handlers
--export([process_mam_iq/3,
-         user_send_packet/3,
-         remove_user/2,
-         filter_packet/1]).
-
 %% Utils
 -export([create_dump_file/2,
          restore_dump_file/3,
          debug_info/1]).
+
+%% gen_mod handlers
+-export([start/2, stop/1]).
+
+%% ejabberd room handlers
+-export([filter_room_packet/4,
+         room_process_mam_iq/3,
+         forget_room/2]).
 
 %% ----------------------------------------------------------------------
 %% Imports
@@ -83,8 +81,7 @@
 
 %% ejabberd
 -import(mod_mam_utils,
-        [send_message/3,
-         is_jid_in_user_roster/2]).
+        [send_message/3]).
 
 
 -include_lib("ejabberd/include/ejabberd.hrl").
@@ -101,7 +98,6 @@
 -type server_hostname() :: binary().
 -type literal_username() :: binary().
 -type literal_jid() :: binary().
--type elem() :: #xmlel{}.
 
 
 %% ----------------------------------------------------------------------
@@ -142,7 +138,6 @@ archive_size(Server, User) ->
 archive_id(LServer, LUser) ->
     UM = user_module(LServer),
     UM:archive_id(LServer, LUser).
-
 
 %% ----------------------------------------------------------------------
 %% Utils API
@@ -204,8 +199,7 @@ restore_dump_file(LocJID=#jid{lserver=LServer, luser=LUser}, InFileName, Opts) -
     WriterF = fun(MessID, FromJID, ToJID, MessElem) ->
             case LocJID of
                 FromJID ->
-                    archive_message(MessID, ArcID, outgoing, LocJID,
-                                    ToJID, FromJID, MessElem);
+                    {error, outgoing_messages_are_not_supported};
                 ToJID ->
                     archive_message(MessID, ArcID, incoming, LocJID,
                                     FromJID, FromJID, MessElem);
@@ -215,31 +209,31 @@ restore_dump_file(LocJID=#jid{lserver=LServer, luser=LUser}, InFileName, Opts) -
         end,
     mod_mam_dump:restore_dump_file(WriterF, LocJID, InFileName, Opts).
 
-
 %% ----------------------------------------------------------------------
 %% gen_mod callbacks
-%% Starting and stopping functions for users' archives
+%% Starting and stopping functions for MUC archives
 
-start(Host, Opts) ->
-    ?DEBUG("mod_mam starting", []),
-    ejabberd_users:start(Host),
+start(ServerHost, Opts) ->
+    %% MUC host.
+    Host = gen_mod:get_opt_host(ServerHost, Opts, <<"conference.@HOST@">>),
+    ?DEBUG("mod_mam_muc starting", []),
     [start_module(Host, M) || M <- required_modules(Host)],
-    %% `parallel' is the only one recommended here.
     IQDisc = gen_mod:get_opt(iqdisc, Opts, parallel), %% Type
     mod_disco:register_feature(Host, mam_ns_binary()),
-    gen_iq_handler:add_iq_handler(ejabberd_sm, Host, mam_ns_binary(),
-                                  ?MODULE, process_mam_iq, IQDisc),
-    ejabberd_hooks:add(user_send_packet, Host, ?MODULE, user_send_packet, 90),
-    ejabberd_hooks:add(filter_packet, global, ?MODULE, filter_packet, 90),
-    ejabberd_hooks:add(remove_user, Host, ?MODULE, remove_user, 50),
+    gen_iq_handler:add_iq_handler(mod_muc_iq, Host, mam_ns_binary(),
+                                  ?MODULE, room_process_mam_iq, IQDisc),
+    ejabberd_hooks:add(filter_room_packet, Host, ?MODULE,
+                       filter_room_packet, 90),
+    ejabberd_hooks:add(forget_room, Host, ?MODULE, forget_room, 90),
     ok.
 
-stop(Host) ->
+stop(ServerHost) ->
+    %% MUC host.
+    Host = gen_mod:get_module_opt_host(ServerHost, ?MODULE, <<"conference.@HOST@">>),
     ?DEBUG("mod_mam stopping", []),
-    ejabberd_hooks:delete(user_send_packet, Host, ?MODULE, user_send_packet, 90),
-    ejabberd_hooks:delete(filter_packet, global, ?MODULE, filter_packet, 90),
-    ejabberd_hooks:delete(remove_user, Host, ?MODULE, remove_user, 50),
-    gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, mam_ns_string()),
+    ejabberd_hooks:add(filter_room_packet, Host, ?MODULE,
+                       filter_room_packet, 90),
+    gen_iq_handler:remove_iq_handler(mod_muc_iq, Host, mam_ns_string()),
     mod_disco:unregister_feature(Host, mam_ns_binary()),
     [stop_module(Host, M) || M <- required_modules(Host)],
     ok.
@@ -292,28 +286,63 @@ prefs_module(Host) ->
     gen_mod:get_module_opt(Host, ?MODULE, prefs_module, mod_mam_odbc_prefs).
 
 archive_module(Host) ->
-    gen_mod:get_module_opt(Host, ?MODULE, archive_module, mod_mam_odbc_arch).
+    gen_mod:get_module_opt(Host, ?MODULE, archive_module, mod_mam_muc_odbc_arch).
 
 writer_module(Host) ->
-    gen_mod:get_module_opt(Host, ?MODULE, writer_module, mod_mam_odbc_arch).
+    gen_mod:get_module_opt(Host, ?MODULE, writer_module, mod_mam_muc_odbc_arch).
 
 user_module(Host) ->
     gen_mod:get_module_opt(Host, ?MODULE, user_module, mod_mam_odbc_user).
 
-
 %% ----------------------------------------------------------------------
-%% hooks and handlers
+%% hooks and handlers for MUC
+
+%% @doc Handle public MUC-message.
+-spec filter_room_packet(Packet, FromNick, FromJID, RoomJID) -> Packet when
+    Packet :: term(),
+    FromNick :: binary(),
+    RoomJID :: #jid{},
+    FromJID :: #jid{}.
+filter_room_packet(Packet, FromNick,
+                   FromJID=#jid{},
+                   RoomJID=#jid{lserver = LServer, luser = LUser}) ->
+    ?DEBUG("Incoming room packet.", []),
+    IsComplete = is_complete_message(Packet),
+    ArcID = archive_id(LServer, LUser),
+    case IsComplete of
+        true ->
+        %% Occupant JID <room@service/nick>
+        SrcJID = jlib:jid_replace_resource(RoomJID, FromNick),
+        IsInteresting =
+        case get_behaviour(always, ArcID, RoomJID, SrcJID) of
+            always -> true;
+            never  -> false;
+            roster -> true
+        end,
+        case IsInteresting of
+            true -> 
+            MessID = generate_message_id(),
+            archive_message(MessID, ArcID, incoming,
+                            RoomJID, FromJID, SrcJID, Packet),
+            BareRoomJID = jlib:jid_to_binary(RoomJID),
+            replace_archived_elem(BareRoomJID,
+                                  mess_id_to_external_binary(MessID),
+                                  Packet);
+            false -> Packet
+        end;
+        false -> Packet
+    end.
 
 %% `To' is an account or server entity hosting the archive.
 %% Servers that archive messages on behalf of local users SHOULD expose archives 
 %% to the user on their bare JID (i.e. `From.luser'),
 %% while a MUC service might allow MAM queries to be sent to the room's bare JID
 %% (i.e `To.luser').
--spec process_mam_iq(From, To, IQ) -> IQ | ignore when
+-spec room_process_mam_iq(From, To, IQ) -> IQ | ignore when
     From :: jid(),
     To :: jid(),
     IQ :: #iq{}.
-process_mam_iq(From=#jid{lserver=Host}, To, IQ) ->
+room_process_mam_iq(From=#jid{lserver=Host}, To, IQ) ->
     Action = iq_action(IQ),
     case is_action_allowed(Action, From, To) of
         true  -> 
@@ -326,6 +355,13 @@ process_mam_iq(From=#jid{lserver=Host}, To, IQ) ->
         false -> return_action_not_allowed_error_iq(IQ)
     end.
 
+%% This hook is called from `mod_muc:forget_room(Host, Name)'.
+forget_room(LServer, RoomName) ->
+    delete_archive(LServer, RoomName).
+
+%% ----------------------------------------------------------------------
+%% Internal functions
+
 is_action_allowed(Action, From, To=#jid{lserver=Host}) ->
     case acl:match_rule(Host, Action, From) of
         allow   -> true;
@@ -337,12 +373,26 @@ is_action_allowed(Action, From, To=#jid{lserver=Host}) ->
     Action  :: action(),
     From    :: jid(),
     To      :: jid().
-is_action_allowed_by_default(_Action, From, To) ->
-    compare_bare_jids(From, To).
+is_action_allowed_by_default(Action, From, To) ->
+    is_room_action_allowed_by_default(Action, From, To).
 
-compare_bare_jids(JID1, JID2) ->
-    jlib:jid_remove_resource(JID1) =:=
-    jlib:jid_remove_resource(JID2).
+is_room_action_allowed_by_default(Action, From, To) ->
+    case action_type(Action) of
+        set -> is_room_owner(From, To);
+        get -> true
+    end.
+
+is_room_owner(From, To) ->
+    case mod_mam_room:is_room_owner(To, From) of
+        {error, _} -> false;
+        {ok, IsOwner} -> IsOwner
+    end.
+
+action_type(mam_get_prefs)                  -> get;
+action_type(mam_set_prefs)                  -> set;
+action_type(mam_lookup_messages)            -> get;
+action_type(mam_purge_single_message)       -> set;
+action_type(mam_purge_multiple_messages)    -> set.
 
 -spec action_to_shaper_name(action()) -> atom().
 action_to_shaper_name(Action) -> list_to_atom(atom_to_list(Action) ++ "_shaper").
@@ -360,55 +410,6 @@ handle_mam_iq(Action, From, To, IQ) ->
     mam_purge_multiple_messages ->
         handle_purge_multiple_messages(To, IQ)
     end.
-
-%% @doc Handle an outgoing message.
-%%
-%% Note: for outgoing messages, the server MUST use the value of the 'to' 
-%%       attribute as the target JID. 
-user_send_packet(From, To, Packet) ->
-    ?DEBUG("Send packet~n    from ~p ~n    to ~p~n    packet ~p.",
-              [From, To, Packet]),
-    handle_package(outgoing, false, From, To, From, Packet),
-    ok.
-
-%% @doc Handle an incoming message.
-%%
-%% Note: For incoming messages, the server MUST use the value of the
-%%       'from' attribute as the target JID. 
-%%
-%% Return drop to drop the packet, or the original input to let it through.
-%% From and To are jid records.
--spec filter_packet(Value) -> Value when
-    Value :: {From, To, Packet} | drop,
-    From :: jid(),
-    To :: jid(),
-    Packet :: elem().
-filter_packet(drop) ->
-    drop;
-filter_packet({From, To=#jid{luser=LUser, lserver=LServer}, Packet}) ->
-    ?DEBUG("Receive packet~n    from ~p ~n    to ~p~n    packet ~p.",
-              [From, To, Packet]),
-    Packet2 =
-    case ejabberd_users:is_user_exists(LUser, LServer) of
-    false -> Packet;
-    true ->
-        case handle_package(incoming, true, To, From, From, Packet) of
-            undefined -> Packet;
-            MessID -> 
-                ?DEBUG("Archived incoming ~p", [MessID]),
-                BareTo = jlib:jid_to_binary(jlib:jid_remove_resource(To)),
-                replace_archived_elem(BareTo, MessID, Packet)
-        end
-    end,
-    {From, To, Packet2}.
-
-
-%% @doc A ejabberd's callback with diferent order of arguments.
-remove_user(User, Server) ->
-    delete_archive(Server, User).
-
-%% ----------------------------------------------------------------------
-%% Internal functions
 
 iq_action(#iq{type = Action, sub_el = SubEl = #xmlel{name = Category}}) ->
     case {Action, Category} of
@@ -509,44 +510,6 @@ handle_purge_single_message(To=#jid{lserver = LServer, luser = LUser},
     PurgingResult = purge_single_message(To, ArcID, MessID, Now),
     return_purge_single_message_iq(IQ, PurgingResult).
 
--spec handle_package(Dir, ReturnMessID, LocJID, RemJID, SrcJID, Packet) ->
-    MaybeMessID when
-    Dir :: incoming | outgoing,
-    ReturnMessID :: boolean(),
-    LocJID :: jid(),
-    RemJID :: jid(),
-    SrcJID :: jid(),
-    Packet :: elem(),
-    MaybeMessID :: binary() | undefined.
-handle_package(Dir, ReturnMessID,
-               LocJID=#jid{lserver = LServer, luser = LUser},
-               RemJID=#jid{},
-               SrcJID=#jid{}, Packet) ->
-    IsComplete = is_complete_message(Packet),
-    ArcID = archive_id(LServer, LUser),
-    case IsComplete of
-        true ->
-        IsInteresting =
-        case get_behaviour(always, ArcID, LocJID, RemJID) of
-            always -> true;
-            never  -> false;
-            roster -> is_jid_in_user_roster(LocJID, RemJID)
-        end,
-        case IsInteresting of
-            true -> 
-            MessID = generate_message_id(),
-            archive_message(MessID, ArcID, Dir,
-                            LocJID, RemJID, SrcJID, Packet),
-            case ReturnMessID of
-                true  -> mess_id_to_external_binary(MessID);
-                false -> undefined
-            end;
-            false -> undefined
-        end;
-        false -> undefined
-    end.
-
-
 get_behaviour(DefaultBehaviour, ArcID,
               LocJID=#jid{lserver=LServer}, RemJID=#jid{}) ->
     M = prefs_module(LServer),
@@ -581,14 +544,14 @@ remove_archive(LServer, LUser) ->
     UM:remove_archive(LServer, LUser, ArcID),
     ok.
 
+message_row_to_ext_id({MessID,_,_}) ->
+    mess_id_to_external_binary(MessID).
+
 message_row_to_xml({MessID,SrcJID,Packet}, QueryID) ->
     {Microseconds, _NodeMessID} = decode_compact_uuid(MessID),
     DateTime = calendar:now_to_universal_time(microseconds_to_now(Microseconds)),
     BExtMessID = mess_id_to_external_binary(MessID),
     wrap_message(Packet, QueryID, BExtMessID, DateTime, SrcJID).
-
-message_row_to_ext_id({MessID,_,_}) ->
-    mess_id_to_external_binary(MessID).
 
 message_row_to_dump_xml(M) ->
      xml:get_subtag(message_row_to_xml(M, undefined), <<"result">>).
@@ -645,12 +608,13 @@ purge_multiple_messages(ArcJID=#jid{lserver=LServer},
     AM = archive_module(LServer),
     AM:purge_multiple_messages(ArcJID, ArcID, Start, End, Now, WithJID).
 
+%% ----------------------------------------------------------------------
+%% Helpers
+
+
 wait_flushing(LServer) ->
     M = writer_module(LServer),
     M:wait_flushing(LServer).
-
-%% ----------------------------------------------------------------------
-%% Helpers
 
 maybe_jid(<<>>) ->
     undefined;
@@ -710,4 +674,3 @@ return_purge_single_message_iq(IQ, ok) ->
     return_purge_success(IQ);
 return_purge_single_message_iq(IQ, {error, 'not-found'}) ->
     return_purge_not_found_error_iq(IQ).
-
