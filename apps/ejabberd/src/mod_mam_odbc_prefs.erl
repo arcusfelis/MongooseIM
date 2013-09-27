@@ -5,30 +5,27 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(mod_mam_odbc_prefs).
--export([get_behaviour/4,
-         get_prefs/4,
-         set_prefs/6,
-         remove_archive/3]).
+-export([get_behaviour/6,
+         get_prefs/5,
+         set_prefs/7,
+         remove_archive/4]).
 
 -include_lib("ejabberd/include/ejabberd.hrl").
 -include_lib("ejabberd/include/jlib.hrl").
 -include_lib("exml/include/exml.hrl").
 
-get_behaviour(DefaultBehaviour,
-              UserID,
-              #jid{lserver=LocLServer},
-              #jid{} = RemJID) ->
+get_behaviour(Host, _Mod, UserID, _LocJID, RemJID, DefaultBehaviour) ->
     RemLJID      = jlib:jid_tolower(RemJID),
     SRemLBareJID = esc_jid(jlib:jid_remove_resource(RemLJID)),
     SRemLJID     = esc_jid(jlib:jid_tolower(RemJID)),
     SUserID      = integer_to_list(UserID),
-    case query_behaviour(LocLServer, SUserID, SRemLJID, SRemLBareJID) of
+    case query_behaviour(Host, SUserID, SRemLJID, SRemLBareJID) of
         {selected, ["behaviour"], [{Behavour}]} ->
             decode_behaviour(Behavour);
         _ -> DefaultBehaviour
     end.
 
-set_prefs(LServer, _LUser, UserID, DefaultMode, AlwaysJIDs, NeverJIDs) ->
+set_prefs(Host, _Mod, UserID, _ArcJID, DefaultMode, AlwaysJIDs, NeverJIDs) ->
     SUserID = integer_to_list(UserID),
     DelQuery = ["DELETE FROM mam_config WHERE user_id = '", SUserID, "'"],
     InsQuery = ["INSERT INTO mam_config(user_id, behaviour, remote_jid) "
@@ -39,33 +36,33 @@ set_prefs(LServer, _LUser, UserID, DefaultMode, AlwaysJIDs, NeverJIDs) ->
         || JID <- NeverJIDs]],
     %% Run as a transaction
     {atomic, [{updated, _}, {updated, _}]} =
-        sql_transaction_map(LServer, [DelQuery, InsQuery]),
+        sql_transaction_map(Host, [DelQuery, InsQuery]),
     ok.
 
-get_prefs(LServer, _LUser, UserID, GlobalDefaultMode) ->
+get_prefs(Host, _Mod, UserID, _ArcJID, GlobalDefaultMode) ->
     SUserID = integer_to_list(UserID),
     {selected, _ColumnNames, Rows} =
     mod_mam_utils:success_sql_query(
-      LServer,
+      Host,
       ["SELECT remote_jid, behaviour "
        "FROM mam_config "
        "WHERE user_id='", SUserID, "'"]),
     decode_prefs_rows(Rows, GlobalDefaultMode, [], []).
 
-remove_archive(LServer, _LUser, UserID) ->
+remove_archive(Host, _Mod, UserID, _ArcJID) ->
     SUserID = integer_to_list(UserID),
     {updated, _} =
     mod_mam_utils:success_sql_query(
-      LServer,
+      Host,
       ["DELETE "
        "FROM mam_config "
        "WHERE user_id='", SUserID, "'"]),
     ok.
 
-query_behaviour(LServer, SUserID, SRemLJID, SRemLBareJID) ->
+query_behaviour(Host, SUserID, SRemLJID, SRemLBareJID) ->
     Result =
     mod_mam_utils:success_sql_query(
-      LServer,
+      Host,
       ["SELECT behaviour "
        "FROM mam_config "
        "WHERE user_id='", SUserID, "' "

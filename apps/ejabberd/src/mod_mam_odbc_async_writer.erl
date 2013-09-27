@@ -5,13 +5,16 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(mod_mam_odbc_async_writer).
--export([start/1,
-         stop/1,
+%% Backend's callbacks
+-export([start/2,
+         stop/2,
          start_link/2,
          srv_name/1,
-         archive_message/7,
-         wait_flushing/1,
-         queue_length/1]).
+         archive_message/9,
+         wait_flushing/4]).
+
+%% Helpers
+-export([queue_length/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -41,7 +44,7 @@ encode_direction(outgoing) -> "O".
 %% API
 %%====================================================================
 
-start(Host) ->
+start(Host, _Mod) ->
     WriterProc = srv_name(Host),
     WriterChildSpec =
     {WriterProc,
@@ -52,7 +55,7 @@ start(Host) ->
      [mod_mam_odbc_async_writer]},
     supervisor:start_child(ejabberd_sup, WriterChildSpec).
 
-stop(Host) ->
+stop(Host, _Mod) ->
     Proc = srv_name(Host),
     supervisor:terminate_child(ejabberd_sup, Proc),
     supervisor:delete_child(ejabberd_sup, Proc).
@@ -64,24 +67,20 @@ start_link(ProcName, Host) ->
 srv_name(Host) ->
     gen_mod:get_module_proc(Host, srv_name()).
 
-archive_message(MessID, UserID, Dir,
-               _LocJID=#jid{lserver=LocLServer},
-                RemJID=#jid{lresource=RemLResource}, SrcJID, Packet) ->
+archive_message(Host, _Mod, MessID, UserID,
+               _LocJID=#jid{},
+                RemJID=#jid{lresource=RemLResource}, SrcJID, Dir, Packet) ->
     SUserID = integer_to_list(UserID),
     SBareRemJID = esc_jid(jlib:jid_tolower(jlib:jid_remove_resource(RemJID))),
     SSrcJID = esc_jid(SrcJID),
     SDir = encode_direction(Dir),
     SRemLResource = ejabberd_odbc:escape(RemLResource),
     Data = term_to_binary(Packet, [compressed]),
-    EscFormat = ejabberd_odbc:escape_format(LocLServer),
+    EscFormat = ejabberd_odbc:escape_format(Host),
     SData = ejabberd_odbc:escape_binary(EscFormat, Data),
     SMessID = integer_to_list(MessID),
-    archive_message(LocLServer, SMessID, SUserID, SBareRemJID,
-                    SRemLResource, SDir, SSrcJID, SData).
-
-
-archive_message(Host, SMessID, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData) ->
-    Msg = {archive_message, SMessID, SUserID, SBareRemJID, SRemLResource, SDir, SSrcJID, SData},
+    Msg = {archive_message, SMessID, SUserID, SBareRemJID, SRemLResource,
+           SDir, SSrcJID, SData},
     gen_server:cast(srv_name(Host), Msg).
 
 %% For folsom.
@@ -94,7 +93,7 @@ queue_length(Host) ->
         {ok, Len}
     end.
 
-wait_flushing(Host) ->
+wait_flushing(Host, _Mod, _ArcID, _ArcJID) ->
     gen_server:call(srv_name(Host), wait_flushing).
 
 %%====================================================================

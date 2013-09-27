@@ -7,7 +7,7 @@
 
 %% Utils
 -export([create_dump_file/2,
-         restore_dump_file/4]).
+         restore_dump_file/3]).
 
 %% ----------------------------------------------------------------------
 %% Imports
@@ -37,20 +37,20 @@ create_dump_cycle(F, Iter, Acc) ->
     end.
 
 
--spec restore_dump_file(WriterF, LocJID, InFileName, Opts) -> ok when
+-spec restore_dump_file(WriterF, InFileName, Opts) -> ok when
     WriterF :: fun(),
-    LocJID :: #jid{},
     InFileName :: file:filename(),
     Opts :: [Opt],
     Opt :: {rewrite_jids, RewriterF | Substitutions},
     RewriterF :: fun((BinJID) -> BinJID),
     Substitutions :: [{BinJID, BinJID}],
     BinJID :: binary().
-restore_dump_file(WriterF, LocJID, InFileName, Opts) ->
+restore_dump_file(WriterF, InFileName, Opts)
+    when is_function(WriterF, 4) ->
     {ok, StreamAcc} = file:open(InFileName, [read, binary]),
     StreamF = fun read_data/1,
     InsF = fun insert_message_iter/2,
-    InsAcc = {WriterF, LocJID},
+    InsAcc = {WriterF},
     {CallF1, CallAcc1} = apply_rewrite_jids(InsF, InsAcc, Opts),
     prepare_res(parse_xml_stream(StreamF, StreamAcc, CallF1, CallAcc1)).
 
@@ -82,8 +82,8 @@ substitute_fun(Substitutions) ->
     Dict = dict:from_list(Substitutions),
     fun(Orig) -> dict:fetch(Orig, Dict) end.
 
-insert_message_iter(ResElem=#xmlel{}, {WriterF, LocJID}=Acc) ->
-    case insert_xml_message(WriterF, ResElem, LocJID) of
+insert_message_iter(ResElem=#xmlel{}, {WriterF}=Acc) ->
+    case insert_xml_message(WriterF, ResElem) of
         {error, Reason} ->
             {error, Reason, Acc};
         ok ->
@@ -207,13 +207,12 @@ update_tags(_, _, []) ->
 %% @doc Insert a message into archive.
 %% `ResElem' is `<result><forwarded>...</forwarded></result>'.
 %% This format is used inside dump files.
--spec insert_xml_message(WriterF, ResElem, LocJID) ->
+-spec insert_xml_message(WriterF, ResElem) ->
         ok | {error, Reason} when
     WriterF :: fun(),
     ResElem :: #xmlel{},
-    LocJID :: #jid{},
     Reason :: term().
-insert_xml_message(WriterF, ResElem, LocJID) ->
+insert_xml_message(WriterF, ResElem) ->
     FwdElem = xml:get_subtag(ResElem, <<"forwarded">>),
     MessElem = xml:get_subtag(FwdElem, <<"message">>),
     BExtMessID = xml:get_tag_attr_s(<<"id">>, ResElem),
@@ -221,13 +220,6 @@ insert_xml_message(WriterF, ResElem, LocJID) ->
     FromJID = jlib:binary_to_jid(xml:get_tag_attr_s(<<"from">>, MessElem)),
     ToJID   = jlib:binary_to_jid(xml:get_tag_attr_s(<<"to">>, MessElem)),
     ?DEBUG("Restore message with id ~p.", [MessID]),
-    case LocJID of
-    FromJID ->
-        WriterF(MessID, outgoing, LocJID, FromJID, FromJID, MessElem);
-    ToJID ->
-        WriterF(MessID, incoming, LocJID, FromJID, FromJID, MessElem);
-    _ ->
-        {error, no_local_jid}
-    end.
+    WriterF(MessID, FromJID, ToJID, MessElem).
 
 

@@ -342,11 +342,11 @@ is_jid_in_user_roster(#jid{lserver=LServer, luser=LUser},
         {none, []}, [LUser, LServer, RemBareJID]),
     Subscription == from orelse Subscription == both.
 
-success_sql_query(LServer, Query) ->
-    case ejabberd_odbc:sql_query(LServer, Query) of
+success_sql_query(Host, Query) ->
+    case ejabberd_odbc:sql_query(Host, Query) of
         {error, Reason} ->
             ?ERROR_MSG("SQL-error on ~p.~nQuery ~p~nReason ~p~n",
-                       [LServer, Query, Reason]),
+                       [Host, Query, Reason]),
             error(sql_error);
         Result ->
             Result

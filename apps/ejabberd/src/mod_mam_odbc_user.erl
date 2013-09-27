@@ -5,8 +5,8 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(mod_mam_odbc_user).
--export([archive_id/2,
-         remove_archive/3]).
+-export([archive_id/3,
+         remove_archive/4]).
 
 -include("ejabberd.hrl").
 -include("jlib.hrl").
@@ -15,14 +15,14 @@
 %% API
 %%====================================================================
 
-archive_id(LServer, UserName) ->
-    query_archive_id(LServer, UserName).
+archive_id(Host, _Mod, _ArcJID=#jid{luser = UserName}) ->
+    query_archive_id(Host, UserName).
 
-remove_archive(LServer, UserName, _UserID) ->
+remove_archive(Host, _Mod, _ArcID, _ArcJID=#jid{luser = UserName}) ->
     SUserName = ejabberd_odbc:escape(UserName),
     {updated, _} =
     ejabberd_odbc:sql_query(
-      LServer,
+      Host,
       ["DELETE FROM mam_user "
        "WHERE user_name = '", SUserName, "'"]),
     ok.
@@ -31,11 +31,11 @@ remove_archive(LServer, UserName, _UserID) ->
 %% Internal functions
 %%====================================================================
 
-query_archive_id(LServer, UserName) ->
+query_archive_id(Host, UserName) ->
     SUserName = ejabberd_odbc:escape(UserName),
     Result =
     ejabberd_odbc:sql_query(
-      LServer,
+      Host,
       ["SELECT id "
        "FROM mam_user "
        "WHERE user_name='", SUserName, "' "
@@ -46,15 +46,15 @@ query_archive_id(LServer, UserName) ->
             binary_to_integer(IdBin);
         {selected, ["id"], []} ->
             %% The user is not found
-            create_user_archive(LServer, UserName),
-            query_archive_id(LServer, UserName)
+            create_user_archive(Host, UserName),
+            query_archive_id(Host, UserName)
     end.
     
-create_user_archive(LServer, UserName) ->
+create_user_archive(Host, UserName) ->
     SUserName = ejabberd_odbc:escape(UserName),
     {updated, 1} =
     ejabberd_odbc:sql_query(
-      LServer,
+      Host,
       ["INSERT INTO mam_user "
        "(user_name) VALUES ('", SUserName, "')"]),
     ok.

@@ -8,12 +8,12 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(mod_mam_cache_user).
--export([start/2,
+-export([start/3,
          start_link/0,
-         required_modules/2,
-         archive_id/3,
-         clean_cache/2,
-         remove_archive/4]).
+         required_modules/3,
+         archive_id/4,
+         clean_cache/1,
+         remove_archive/5]).
 
 
 %% gen_server callbacks
@@ -38,17 +38,17 @@ tbl_name_archive_id() ->
 group_name() ->
     mod_mam_cache.
 
-su_key(LServer, LUserName) ->
-    {LServer, LUserName}.
+su_key(#jid{lserver = LServer, luser = LUser}) ->
+    {LServer, LUser}.
 
 %%====================================================================
 %% API
 %%====================================================================
 
-required_modules(LServer, HiddenState) ->
-    [user_base_module(LServer, HiddenState)].
+required_modules(_Host, _Mod, HiddenState) ->
+    [user_base_module(HiddenState)].
 
-start(_Host, _HiddenState) ->
+start(_Host, _Mod, _HiddenState) ->
     WriterChildSpec =
     {mod_mam_cache_user,
      {mod_mam_cache_user, start_link, []},
@@ -61,19 +61,19 @@ start(_Host, _HiddenState) ->
 start_link() ->
     gen_server:start_link({local, srv_name()}, ?MODULE, [], []).
 
-archive_id(LServer, UserName, HiddenState) ->
-    case lookup_archive_id(LServer, UserName) of
+archive_id(Host, Mod, ArcJID, HiddenState) ->
+    case lookup_archive_id(ArcJID) of
         not_found ->
-            UserId = forward_archive_id(LServer, UserName, HiddenState),
-            cache_archive_id(LServer, UserName, UserId),
-            UserId;
-        UserId ->
-            UserId
+            UserID = forward_archive_id(Host, Mod, ArcJID, HiddenState),
+            cache_archive_id(ArcJID, UserID),
+            UserID;
+        UserID ->
+            UserID
     end.
 
-remove_archive(LServer, UserName, UserId, HiddenState) ->
-    clean_cache(LServer, UserName),
-    forward_remove_archive(LServer, UserName, UserId, HiddenState).
+remove_archive(Host, Mod, UserID, ArcJID, HiddenState) ->
+    clean_cache(ArcJID),
+    forward_remove_archive(Host, Mod, UserID, ArcJID, HiddenState).
 
 %%====================================================================
 %% Internal functions
@@ -81,33 +81,33 @@ remove_archive(LServer, UserName, UserId, HiddenState) ->
 
 %% @doc Put an user id into cache.
 %% @private
-cache_archive_id(LServer, UserName, UserId) ->
-    gen_server:call(srv_name(), {cache_archive_id, LServer, UserName, UserId}).
+cache_archive_id(ArcJID, UserID) ->
+    gen_server:call(srv_name(), {cache_archive_id, ArcJID, UserID}).
 
-lookup_archive_id(LServer, UserName) ->
+lookup_archive_id(ArcJID) ->
     try
-        ets:lookup_element(tbl_name_archive_id(), su_key(LServer, UserName), 2)
+        ets:lookup_element(tbl_name_archive_id(), su_key(ArcJID), 2)
     catch error:badarg ->
         not_found
     end.
 
--spec user_base_module(Host :: binary(), hidden_state()) -> module().
-user_base_module(_Host, {?MODULE, BaseMod}) ->
+-spec user_base_module(hidden_state()) -> module().
+user_base_module({?MODULE, BaseMod}) ->
     BaseMod.
 
-forward_archive_id(LServer, UserName, HiddenState) ->
-    M = user_base_module(LServer, HiddenState),
-    M:archive_id(LServer, UserName).
+forward_archive_id(Host, Mod, ArcJID, HiddenState) ->
+    M = user_base_module(HiddenState),
+    M:archive_id(Host, Mod, ArcJID).
 
-forward_remove_archive(LServer, UserName, UserId, HiddenState) ->
-    M = user_base_module(LServer, HiddenState),
-    M:remove_archive(LServer, UserName, UserId).
+forward_remove_archive(Host, Mod, UserID, ArcJID, HiddenState) ->
+    M = user_base_module(HiddenState),
+    M:remove_archive(Host, Mod, UserID, ArcJID).
 
-clean_cache(Server, User) ->
+clean_cache(ArcJID) ->
     %% Send a broadcast message.
     case pg2:get_members(group_name()) of
         Pids when is_list(Pids) ->
-            [gen_server:cast(Pid, {remove_user, User, Server})
+            [gen_server:cast(Pid, {remove_user, ArcJID})
             || Pid <- Pids],
             ok;
         {error, _Reason} -> ok
@@ -142,8 +142,8 @@ init([]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call({cache_archive_id, LServer, UserName, UserId}, _From, State) ->
-    ets:insert(tbl_name_archive_id(), {su_key(LServer, UserName), UserId}),
+handle_call({cache_archive_id, ArcJID, UserID}, _From, State) ->
+    ets:insert(tbl_name_archive_id(), {su_key(ArcJID), UserID}),
     {reply, ok, State}.
 
 
@@ -154,8 +154,8 @@ handle_call({cache_archive_id, LServer, UserName, UserId}, _From, State) ->
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
 
-handle_cast({remove_user, User, Server}, State) ->
-    ets:delete(tbl_name_archive_id(), su_key(Server, User)),
+handle_cast({remove_user, ArcJID}, State) ->
+    ets:delete(tbl_name_archive_id(), su_key(ArcJID)),
     {noreply, State};
 handle_cast(Msg, State) ->
     ?WARNING_MSG("Strange message ~p.", [Msg]),

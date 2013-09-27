@@ -95,8 +95,7 @@
 
 %% ----------------------------------------------------------------------
 %% XMPP types
--type server_hostname() :: binary().
--type literal_username() :: binary().
+-type server_host() :: binary().
 -type literal_jid() :: binary().
 
 
@@ -121,46 +120,52 @@ max_result_limit() -> 50.
 %% ----------------------------------------------------------------------
 %% API
 
-delete_archive(Server, User) ->
-    LUser = jlib:nodeprep(User),
-    LServer = jlib:nameprep(Server),
-    ?DEBUG("Remove user ~p from ~p.", [LUser, LServer]),
-    remove_archive(LServer, LUser),
+delete_archive(Server, User)
+    when is_binary(Server), is_binary(User) ->
+    ?DEBUG("Remove user ~p from ~p.", [User, Server]),
+    ArcJID = jlib:make_jid(User, Server, <<>>),
+    Host = server_host(ArcJID),
+    ArcID = archive_id_int(Host, ArcJID),
+    remove_archive(Host, ArcID, ArcJID),
     ok.
 
-archive_size(Server, User) ->
-    LUser = jlib:nodeprep(User),
-    LServer = jlib:nameprep(Server),
-    ArcID = archive_id(LServer, LUser),
-    AM = archive_module(LServer),
-    AM:archive_size(LServer, LUser, ArcID).
+archive_size(Server, User)
+    when is_binary(Server), is_binary(User) ->
+    ArcJID = jlib:make_jid(User, Server, <<>>),
+    Host = server_host(ArcJID),
+    ArcID = archive_id_int(Host, ArcJID),
+    archive_size(Host, ArcID, ArcJID).
 
-archive_id(LServer, LUser) ->
-    UM = user_module(LServer),
-    UM:archive_id(LServer, LUser).
+archive_id(Server, User)
+    when is_binary(Server), is_binary(User) ->
+    ArcJID = jlib:make_jid(User, Server, <<>>),
+    Host = server_host(ArcJID),
+    archive_id_int(Host, ArcJID).
 
 %% ----------------------------------------------------------------------
 %% Utils API
 
-debug_info(LServer) ->
-    AM = archive_module(LServer),
-    WM = writer_module(LServer),
-    PM = prefs_module(LServer),
+debug_info(Host) ->
+    AM = archive_module(Host),
+    WM = writer_module(Host),
+    PM = prefs_module(Host),
     [{archive_module, AM},
      {writer_module, WM},
      {prefs_module, PM}].
 
 
-new_iterator(ArcJID=#jid{lserver = LServer, luser = LUser}) ->
+new_iterator(ArcJID=#jid{}) ->
     Now = mod_mam_utils:now_to_microseconds(now()),
-    ArcID = archive_id(LServer, LUser),
-    new_iterator(ArcJID, ArcID, undefined,
+    Host = server_host(ArcJID),
+    ArcID = archive_id_int(Host, ArcJID),
+    new_iterator(Host, ArcID, ArcJID, undefined,
         undefined, undefined, Now, undefined, 50).
 
-new_iterator(ArcJID, ArcID, RSM, Start, End, Now, WithJID, PageSize) ->
+new_iterator(Host, ArcID, ArcJID, RSM, Start, End, Now, WithJID,
+             PageSize) ->
     fun() ->
         {ok, {TotalCount, Offset, MessageRows}} =
-        lookup_messages(ArcJID, ArcID, RSM, Start, End, Now,
+        lookup_messages(Host, ArcID, ArcJID, RSM, Start, End, Now,
                         WithJID, PageSize, true, PageSize),
         Data = [exml:to_iolist(message_row_to_dump_xml(M))
                 || M <- MessageRows],
@@ -169,12 +174,11 @@ new_iterator(ArcJID, ArcID, RSM, Start, End, Now, WithJID, PageSize) ->
                 fun() -> {error, eof} end;
             true ->
                 new_iterator(
-                    ArcJID, ArcID, after_rsm(MessageRows),
+                    Host, ArcID, ArcJID, after_rsm(MessageRows),
                     Start, End, Now, WithJID, PageSize)
             end,
         {ok, {Data, Cont}}
         end.
-
 
 after_rsm(MessageRows) ->
     {MessID,_SrcJID,_Packet} = lists:last(MessageRows),
@@ -183,31 +187,33 @@ after_rsm(MessageRows) ->
 is_last_page(TotalCount, Offset, PageSize) ->
     Offset - PageSize >= TotalCount.
 
+
 create_dump_file(ArcJID, OutFileName) ->
     mod_mam_dump:create_dump_file(new_iterator(ArcJID), OutFileName).
 
--spec restore_dump_file(LocJID, InFileName, Opts) -> ok when
-    LocJID :: #jid{},
+-spec restore_dump_file(ArcJID, InFileName, Opts) -> ok when
+    ArcJID :: #jid{},
     InFileName :: file:filename(),
     Opts :: [Opt],
     Opt :: {rewrite_jids, RewriterF | Substitutions},
     RewriterF :: fun((BinJID) -> BinJID),
     Substitutions :: [{BinJID, BinJID}],
     BinJID :: binary().
-restore_dump_file(LocJID=#jid{lserver=LServer, luser=LUser}, InFileName, Opts) ->
-    ArcID = archive_id(LServer, LUser),
+restore_dump_file(ArcJID=#jid{}, InFileName, Opts) ->
+    Host = server_host(ArcJID),
+    ArcID = archive_id_int(Host, ArcJID),
     WriterF = fun(MessID, FromJID, ToJID, MessElem) ->
-            case LocJID of
+            case ArcJID of
                 FromJID ->
                     {error, outgoing_messages_are_not_supported};
                 ToJID ->
-                    archive_message(MessID, ArcID, incoming, LocJID,
-                                    FromJID, FromJID, MessElem);
+                    archive_message(Host, MessID, ArcID, ArcJID,
+                                    FromJID, FromJID, incoming, MessElem);
                 _ ->
                     {error, no_local_jid}
             end
         end,
-    mod_mam_dump:restore_dump_file(WriterF, LocJID, InFileName, Opts).
+    mod_mam_dump:restore_dump_file(WriterF, InFileName, Opts).
 
 %% ----------------------------------------------------------------------
 %% gen_mod callbacks
@@ -216,8 +222,9 @@ restore_dump_file(LocJID=#jid{lserver=LServer, luser=LUser}, InFileName, Opts) -
 start(ServerHost, Opts) ->
     %% MUC host.
     Host = gen_mod:get_opt_host(ServerHost, Opts, <<"conference.@HOST@">>),
+    start_host_mapping(Host, ServerHost),
     ?DEBUG("mod_mam_muc starting", []),
-    [start_module(Host, M) || M <- required_modules(Host)],
+    [start_module(ServerHost, M) || M <- required_modules(ServerHost)],
     IQDisc = gen_mod:get_opt(iqdisc, Opts, parallel), %% Type
     mod_disco:register_feature(Host, mam_ns_binary()),
     gen_iq_handler:add_iq_handler(mod_muc_iq, Host, mam_ns_binary(),
@@ -229,28 +236,52 @@ start(ServerHost, Opts) ->
 
 stop(ServerHost) ->
     %% MUC host.
-    Host = gen_mod:get_module_opt_host(ServerHost, ?MODULE, <<"conference.@HOST@">>),
+    Host = gen_mod:get_module_opt_host(
+        ServerHost, ?MODULE, <<"conference.@HOST@">>),
     ?DEBUG("mod_mam stopping", []),
     ejabberd_hooks:add(filter_room_packet, Host, ?MODULE,
                        filter_room_packet, 90),
     gen_iq_handler:remove_iq_handler(mod_muc_iq, Host, mam_ns_string()),
     mod_disco:unregister_feature(Host, mam_ns_binary()),
-    [stop_module(Host, M) || M <- required_modules(Host)],
+    [stop_module(ServerHost, M) || M <- required_modules(ServerHost)],
+    stop_host_mapping(Host, ServerHost),
     ok.
+
+%% ----------------------------------------------------------------------
+%% Host to ServerHost mapping
+
+-record(mam_host, {host, server_host}).
+
+start_host_mapping(Host, ServerHost) ->
+    mnesia:create_table(mam_host,
+            [{ram_copies, [node()]},
+             {type, set},
+             {attributes, record_info(fields, mam_host)}]),
+    mnesia:dirty_write(#mam_host{host = Host, server_host = ServerHost}).
+
+stop_host_mapping(Host, ServerHost) ->
+    mnesia:dirty_delete_object(
+        #mam_host{host = Host, server_host = ServerHost}).
+
+server_host(#jid{lserver=Host}) ->
+    [#mam_host{
+        server_host = ServerHost
+    }] = mnesia:dirty_read(mam_host, Host),
+    ServerHost.
 
 %% ----------------------------------------------------------------------
 %% Control modules
 
 start_module(Host, M) ->
-    case is_function_exist(M, start, 1) of
-        true  -> M:start(Host);
+    case is_function_exist(M, start, 2) of
+        true  -> M:start(Host, ?MODULE);
         false -> ok
     end,
     ok.
 
 stop_module(Host, M) ->
-    case is_function_exist(M, stop, 1) of
-        true  -> M:stop(Host);
+    case is_function_exist(M, stop, 2) of
+        true  -> M:stop(Host, ?MODULE);
         false -> ok
     end,
     ok.
@@ -261,15 +292,16 @@ required_modules(Host) ->
 expand_modules(Host, Mods) ->
     expand_modules(Host, Mods, []).
 
+required_modules(Host, M) ->
+    case is_function_exist(M, required_modules, 2) of
+        true  -> M:required_modules(Host, ?MODULE);
+        false -> []
+    end.
+    
 expand_modules(Host, [H|T], Acc) ->
-    case is_function_exist(H, required_modules, 1) of
-        true  ->
-            %% Do not load the same module twice.
-            ReqMods = skip_expanded_modules(H:required_modules(Host), Acc),
-            expand_modules(Host, T, [H] ++ ReqMods ++ Acc);
-        false ->
-            expand_modules(Host, T, [H|Acc])
-    end;
+    %% Do not load the same module twice.
+    ReqMods = skip_expanded_modules(required_modules(Host, H), Acc),
+    expand_modules(Host, T, [H] ++ ReqMods ++ Acc);
 expand_modules(_, [], Acc) ->
     lists:reverse(Acc).
 
@@ -305,16 +337,17 @@ user_module(Host) ->
     FromJID :: #jid{}.
 filter_room_packet(Packet, FromNick,
                    FromJID=#jid{},
-                   RoomJID=#jid{lserver = LServer, luser = LUser}) ->
+                   RoomJID=#jid{}) ->
     ?DEBUG("Incoming room packet.", []),
     IsComplete = is_complete_message(Packet),
-    ArcID = archive_id(LServer, LUser),
+    Host = server_host(RoomJID),
+    ArcID = archive_id_int(Host, RoomJID),
     case IsComplete of
         true ->
         %% Occupant JID <room@service/nick>
         SrcJID = jlib:jid_replace_resource(RoomJID, FromNick),
         IsInteresting =
-        case get_behaviour(always, ArcID, RoomJID, SrcJID) of
+        case get_behaviour(Host, ArcID, RoomJID, SrcJID, always) of
             always -> true;
             never  -> false;
             roster -> true
@@ -322,8 +355,8 @@ filter_room_packet(Packet, FromNick,
         case IsInteresting of
             true -> 
             MessID = generate_message_id(),
-            archive_message(MessID, ArcID, incoming,
-                            RoomJID, FromJID, SrcJID, Packet),
+            archive_message(Host, MessID, ArcID,
+                            RoomJID, FromJID, SrcJID, incoming, Packet),
             BareRoomJID = jlib:jid_to_binary(RoomJID),
             replace_archived_elem(BareRoomJID,
                                   mess_id_to_external_binary(MessID),
@@ -346,7 +379,8 @@ room_process_mam_iq(From=#jid{lserver=Host}, To, IQ) ->
     Action = iq_action(IQ),
     case is_action_allowed(Action, From, To) of
         true  -> 
-            case shaper_srv:wait(Host, action_to_shaper_name(Action), From, 1) of
+            ShaperName = action_to_shaper_name(Action),
+            case shaper_srv:wait(Host, ShaperName, From, 1) of
                 ok ->
                     handle_mam_iq(Action, From, To, IQ);
                 {error, max_delay_reached} ->
@@ -395,7 +429,8 @@ action_type(mam_purge_single_message)       -> set;
 action_type(mam_purge_multiple_messages)    -> set.
 
 -spec action_to_shaper_name(action()) -> atom().
-action_to_shaper_name(Action) -> list_to_atom(atom_to_list(Action) ++ "_shaper").
+action_to_shaper_name(Action) ->
+    list_to_atom(atom_to_list(Action) ++ "_shaper").
 
 handle_mam_iq(Action, From, To, IQ) ->
     case Action of
@@ -423,33 +458,36 @@ iq_action(#iq{type = Action, sub_el = SubEl = #xmlel{name = Category}}) ->
             end
     end.
 
-handle_set_prefs(#jid{luser = LUser, lserver = LServer},
+handle_set_prefs(ArcJID=#jid{},
                  IQ=#iq{sub_el = PrefsEl}) ->
     {DefaultMode, AlwaysJIDs, NeverJIDs} = parse_prefs(PrefsEl),
     ?DEBUG("Parsed data~n\tDefaultMode ~p~n\tAlwaysJIDs ~p~n\tNeverJIDS ~p~n",
               [DefaultMode, AlwaysJIDs, NeverJIDs]),
-    ArcID = archive_id(LServer, LUser),
-    set_prefs(LServer, LUser, ArcID, DefaultMode, AlwaysJIDs, NeverJIDs),
+    Host = server_host(ArcJID),
+    ArcID = archive_id_int(Host, ArcJID),
+    set_prefs(Host, ArcID, ArcJID, DefaultMode, AlwaysJIDs, NeverJIDs),
     ResultPrefsEl = result_prefs(DefaultMode, AlwaysJIDs, NeverJIDs),
     IQ#iq{type = result, sub_el = [ResultPrefsEl]}.
 
-handle_get_prefs(#jid{luser = LUser, lserver = LServer}, IQ) ->
-    ArcID = archive_id(LServer, LUser),
+handle_get_prefs(ArcJID=#jid{}, IQ=#iq{}) ->
+    Host = server_host(ArcJID),
+    ArcID = archive_id_int(Host, ArcJID),
     {DefaultMode, AlwaysJIDs, NeverJIDs} =
-        get_prefs(LServer, LUser, ArcID, always),
+        get_prefs(Host, ArcID, ArcJID, always),
     ?DEBUG("Extracted data~n\tDefaultMode ~p~n\tAlwaysJIDs ~p~n\tNeverJIDS ~p~n",
               [DefaultMode, AlwaysJIDs, NeverJIDs]),
     ResultPrefsEl = result_prefs(DefaultMode, AlwaysJIDs, NeverJIDs),
     IQ#iq{type = result, sub_el = [ResultPrefsEl]}.
     
 handle_lookup_messages(
-        From,
-        To=#jid{luser = LUser, lserver = LServer},
+        From=#jid{},
+        ArcJID=#jid{},
         IQ=#iq{sub_el = QueryEl}) ->
     Now = mod_mam_utils:now_to_microseconds(now()),
-    ArcID = archive_id(LServer, LUser),
+    Host = server_host(ArcJID),
+    ArcID = archive_id_int(Host, ArcJID),
     QueryID = xml:get_tag_attr_s(<<"queryid">>, QueryEl),
-    wait_flushing(LServer),
+    wait_flushing(Host, ArcID, ArcJID),
     %% Filtering by date.
     %% Start :: integer() | undefined
     Start = elem_to_start_microseconds(QueryEl),
@@ -461,10 +499,10 @@ handle_lookup_messages(
     PageSize = min(max_result_limit(),
                    maybe_integer(Limit, default_result_limit())),
     LimitPassed = Limit =/= <<>>,
-    case lookup_messages(To, ArcID, RSM, Start, End, Now, With, PageSize,
-                         LimitPassed, max_result_limit()) of
+    case lookup_messages(Host, ArcID, ArcJID, RSM, Start, End, Now, With,
+                         PageSize, LimitPassed, max_result_limit()) of
     {error, 'policy-violation'} ->
-        ?DEBUG("Policy violation by ~p.", [LUser]),
+        ?DEBUG("Policy violation by ~p.", [jlib:jid_to_binary(From)]),
         ErrorEl = ?STANZA_ERRORT(<<"">>, <<"modify">>, <<"policy-violation">>,
                                  <<"en">>, <<"Too many results">>),          
         IQ#iq{type = error, sub_el = [ErrorEl]};
@@ -475,7 +513,7 @@ handle_lookup_messages(
                 [_|_] -> {message_row_to_ext_id(hd(MessageRows)),
                           message_row_to_ext_id(lists:last(MessageRows))}
             end,
-        [send_message(To, From, message_row_to_xml(M, QueryID))
+        [send_message(ArcJID, From, message_row_to_xml(M, QueryID))
          || M <- MessageRows],
         ResultSetEl = result_set(FirstMessID, LastMessID, Offset, TotalCount),
         ResultQueryEl = result_query(ResultSetEl),
@@ -486,82 +524,86 @@ handle_lookup_messages(
     end.
 
 %% Purging multiple messages.
-handle_purge_multiple_messages(To=#jid{lserver = LServer, luser = LUser},
+handle_purge_multiple_messages(ArcJID=#jid{},
                                IQ=#iq{sub_el = PurgeEl}) ->
     Now = mod_mam_utils:now_to_microseconds(now()),
-    wait_flushing(LServer),
+    Host = server_host(ArcJID),
+    ArcID = archive_id_int(Host, ArcJID),
+    wait_flushing(Host, ArcID, ArcJID),
     %% Filtering by date.
     %% Start :: integer() | undefined
     Start = elem_to_start_microseconds(PurgeEl),
     End   = elem_to_end_microseconds(PurgeEl),
     %% Filtering by contact.
     With  = elem_to_with_jid(PurgeEl),
-    ArcID = archive_id(LServer, LUser),
-    purge_multiple_messages(To, ArcID, Start, End, Now, With),
+    purge_multiple_messages(Host, ArcID, ArcJID, Start, End, Now, With),
     return_purge_success(IQ).
 
-handle_purge_single_message(To=#jid{lserver = LServer, luser = LUser},
+handle_purge_single_message(ArcJID=#jid{},
                             IQ=#iq{sub_el = PurgeEl}) ->
     Now = mod_mam_utils:now_to_microseconds(now()),
-    wait_flushing(LServer),
+    Host = server_host(ArcJID),
+    ArcID = archive_id_int(Host, ArcJID),
+    wait_flushing(Host, ArcID, ArcJID),
     BExtMessID = xml:get_tag_attr_s(<<"id">>, PurgeEl),
     MessID = mod_mam_utils:external_binary_to_mess_id(BExtMessID),
-    ArcID = archive_id(LServer, LUser),
-    PurgingResult = purge_single_message(To, ArcID, MessID, Now),
+    PurgingResult = purge_single_message(Host, MessID, ArcID, ArcJID, Now),
     return_purge_single_message_iq(IQ, PurgingResult).
 
-get_behaviour(DefaultBehaviour, ArcID,
-              LocJID=#jid{lserver=LServer}, RemJID=#jid{}) ->
-    M = prefs_module(LServer),
-    M:get_behaviour(DefaultBehaviour, ArcID, LocJID, RemJID).
+%% ----------------------------------------------------------------------
+%% Backend wrappers
 
-set_prefs(LServer, LUser, ArcID, DefaultMode, AlwaysJIDs, NeverJIDs) ->
-    M = prefs_module(LServer),
-    M:set_prefs(LServer, LUser, ArcID, DefaultMode, AlwaysJIDs, NeverJIDs).
+archive_id_int(Host, ArcJID=#jid{}) ->
+    UM = user_module(Host),
+    UM:archive_id(Host, ?MODULE, ArcJID).
+
+archive_size(Host, ArcID, ArcJID=#jid{}) ->
+    AM = archive_module(Host),
+    AM:archive_size(Host, ?MODULE, ArcID, ArcJID).
+
+get_behaviour(Host, ArcID,
+              LocJID=#jid{},
+              RemJID=#jid{}, DefaultBehaviour) ->
+    M = prefs_module(Host),
+    M:get_behaviour(Host, ?MODULE,
+                    ArcID, LocJID, RemJID, DefaultBehaviour).
+
+set_prefs(Host, ArcID, ArcJID, DefaultMode, AlwaysJIDs, NeverJIDs) ->
+    M = prefs_module(Host),
+    M:set_prefs(Host, ?MODULE,
+                ArcID, ArcJID, DefaultMode, AlwaysJIDs, NeverJIDs).
 
 %% @doc Load settings from the database.
--spec get_prefs(LServer, LUser, ArcID, GlobalDefaultMode) -> Result when
-    LServer     :: server_hostname(),
-    LUser       :: literal_username(),
+-spec get_prefs(Host, ArcID, ArcJID, GlobalDefaultMode) -> Result when
+    Host        :: server_host(),
     ArcID       :: archive_id(),
+    ArcJID      :: jid(),
     DefaultMode :: archive_behaviour(),
     GlobalDefaultMode :: archive_behaviour(),
     Result      :: {DefaultMode, AlwaysJIDs, NeverJIDs},
     AlwaysJIDs  :: [literal_jid()],
     NeverJIDs   :: [literal_jid()].
-get_prefs(LServer, LUser, ArcID, GlobalDefaultMode) ->
-    M = prefs_module(LServer),
-    M:get_prefs(LServer, LUser, ArcID, GlobalDefaultMode).
+get_prefs(Host, ArcID, ArcJID, GlobalDefaultMode) ->
+    M = prefs_module(Host),
+    M:get_prefs(Host, ?MODULE, ArcID, ArcJID, GlobalDefaultMode).
 
-remove_archive(LServer, LUser) ->
-    ArcID = archive_id(LServer, LUser),
-    wait_flushing(LServer),
-    PM = prefs_module(LServer),
-    AM = archive_module(LServer),
-    UM = user_module(LServer),
-    PM:remove_archive(LServer, LUser, ArcID),
-    AM:remove_archive(LServer, LUser, ArcID),
-    UM:remove_archive(LServer, LUser, ArcID),
+remove_archive(Host, ArcID, ArcJID=#jid{}) ->
+    wait_flushing(Host, ArcID, ArcJID),
+    PM = prefs_module(Host),
+    AM = archive_module(Host),
+    UM = user_module(Host),
+    PM:remove_archive(Host, ?MODULE, ArcID, ArcJID),
+    AM:remove_archive(Host, ?MODULE, ArcID, ArcJID),
+    UM:remove_archive(Host, ?MODULE, ArcID, ArcJID),
     ok.
 
-message_row_to_ext_id({MessID,_,_}) ->
-    mess_id_to_external_binary(MessID).
-
-message_row_to_xml({MessID,SrcJID,Packet}, QueryID) ->
-    {Microseconds, _NodeMessID} = decode_compact_uuid(MessID),
-    DateTime = calendar:now_to_universal_time(microseconds_to_now(Microseconds)),
-    BExtMessID = mess_id_to_external_binary(MessID),
-    wrap_message(Packet, QueryID, BExtMessID, DateTime, SrcJID).
-
-message_row_to_dump_xml(M) ->
-     xml:get_subtag(message_row_to_xml(M, undefined), <<"result">>).
-
--spec lookup_messages(ArcJID, ArcID, RSM, Start, End, Now, WithJID,
+-spec lookup_messages(Host, ArcID, ArcJID, RSM, Start, End, Now, WithJID,
                       PageSize, LimitPassed, MaxResultLimit) ->
     {ok, {TotalCount, Offset, MessageRows}} | {error, 'policy-violation'}
     when
-    ArcJID  :: #jid{},
+    Host    :: server_host(),
     ArcID   :: archive_id(),
+    ArcJID  :: #jid{},
     RSM     :: #rsm_in{} | undefined,
     Start   :: unix_timestamp() | undefined,
     End     :: unix_timestamp() | undefined,
@@ -573,48 +615,63 @@ message_row_to_dump_xml(M) ->
     TotalCount :: non_neg_integer(),
     Offset  :: non_neg_integer(),
     MessageRows :: list(tuple()).
-lookup_messages(ArcJID=#jid{lserver=LServer}, ArcID, RSM, Start, End, Now,
+lookup_messages(Host, ArcID, ArcJID, RSM, Start, End, Now,
                 WithJID, PageSize, LimitPassed, MaxResultLimit) ->
-    AM = archive_module(LServer),
-    AM:lookup_messages(ArcJID, ArcID, RSM, Start, End, Now, WithJID,
+    AM = archive_module(Host),
+    AM:lookup_messages(Host, ?MODULE,
+                       ArcID, ArcJID, RSM, Start, End, Now, WithJID,
                        PageSize, LimitPassed, MaxResultLimit).
 
-archive_message(MessID, ArcID, Dir,
-                LocJID=#jid{lserver=LServer}, RemJID, SrcJID, Packet) ->
-    M = writer_module(LServer),
-    M:archive_message(MessID, ArcID, Dir, LocJID, RemJID, SrcJID, Packet).
+archive_message(Host, MessID, ArcID, LocJID, RemJID, SrcJID, Dir, Packet) ->
+    M = writer_module(Host),
+    M:archive_message(Host, ?MODULE,
+                      MessID, ArcID, LocJID, RemJID, SrcJID, Dir, Packet).
 
 
--spec purge_single_message(ArcJID, ArcID, MessID, Now) ->
+-spec purge_single_message(Host, MessID, ArcID, ArcJID, Now) ->
     ok | {error, 'not-found'} when
-    ArcJID :: #jid{},
-    ArcID  :: archive_id(),
+    Host   :: server_host(),
     MessID :: message_id(),
+    ArcID  :: archive_id(),
+    ArcJID :: jid(),
     Now :: unix_timestamp().
-purge_single_message(ArcJID=#jid{lserver=LServer}, ArcID, MessID, Now) ->
-    AM = archive_module(LServer),
-    AM:purge_single_message(ArcJID, ArcID, MessID, Now).
+purge_single_message(Host, MessID, ArcID, ArcJID, Now) ->
+    AM = archive_module(Host),
+    AM:purge_single_message(Host, ?MODULE,
+                            MessID, ArcID, ArcJID, Now).
 
--spec purge_multiple_messages(ArcJID, ArcID, Start, End, Now, WithJID) -> ok
+-spec purge_multiple_messages(Host, ArcID, ArcJID, Start, End, Now, WithJID) -> ok
     when
-    ArcJID  :: #jid{},
+    Host    :: server_host(),
     ArcID   :: archive_id(),
+    ArcJID  :: jid(),
     Start   :: unix_timestamp() | undefined,
     End     :: unix_timestamp() | undefined,
     Now     :: unix_timestamp(),
-    WithJID :: #jid{} | undefined.
-purge_multiple_messages(ArcJID=#jid{lserver=LServer},
-    ArcID, Start, End, Now, WithJID) ->
-    AM = archive_module(LServer),
-    AM:purge_multiple_messages(ArcJID, ArcID, Start, End, Now, WithJID).
+    WithJID :: jid() | undefined.
+purge_multiple_messages(Host, ArcID, ArcJID, Start, End, Now, WithJID) ->
+    AM = archive_module(Host),
+    AM:purge_multiple_messages(Host, ?MODULE,
+                               ArcID, ArcJID, Start, End, Now, WithJID).
+
+wait_flushing(Host, ArcID, ArcJID) ->
+    M = writer_module(Host),
+    M:wait_flushing(Host, ?MODULE, ArcID, ArcJID).
 
 %% ----------------------------------------------------------------------
 %% Helpers
 
+message_row_to_xml({MessID,SrcJID,Packet}, QueryID) ->
+    {Microseconds, _NodeMessID} = decode_compact_uuid(MessID),
+    DateTime = calendar:now_to_universal_time(microseconds_to_now(Microseconds)),
+    BExtMessID = mess_id_to_external_binary(MessID),
+    wrap_message(Packet, QueryID, BExtMessID, DateTime, SrcJID).
 
-wait_flushing(LServer) ->
-    M = writer_module(LServer),
-    M:wait_flushing(LServer).
+message_row_to_ext_id({MessID,_,_}) ->
+    mess_id_to_external_binary(MessID).
+
+message_row_to_dump_xml(M) ->
+     xml:get_subtag(message_row_to_xml(M, undefined), <<"result">>).
 
 maybe_jid(<<>>) ->
     undefined;

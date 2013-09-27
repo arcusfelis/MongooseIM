@@ -5,13 +5,13 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(mod_mam_muc_odbc_arch).
--export([archive_size/3,
-         wait_flushing/1,
-         lookup_messages/10,
-         remove_archive/3,
-         archive_message/7,
-         purge_single_message/4,
-         purge_multiple_messages/6]).
+-export([archive_size/4,
+         wait_flushing/4,
+         lookup_messages/12,
+         remove_archive/4,
+         archive_message/9,
+         purge_single_message/6,
+         purge_multiple_messages/8]).
 
 %% UMessID
 -import(mod_mam_utils,
@@ -26,25 +26,25 @@
 -type message_id() :: non_neg_integer().
 -type escaped_message_id() :: binary().
 -type escaped_jid() :: binary().
--type server_hostname() :: binary().
+-type server_host() :: binary().
 -type unix_timestamp() :: non_neg_integer().
 
-archive_size(LServer, _LRoom, RoomID) ->
+archive_size(Host, _Mod, RoomID, _RoomJID) ->
     {selected, _ColumnNames, [{BSize}]} =
     mod_mam_utils:success_sql_query(
-      LServer,
+      Host,
       ["SELECT COUNT(*) "
        "FROM mam_muc_message "
        "WHERE room_id = '", escape_room_id(RoomID), "'"]),
     list_to_integer(binary_to_list(BSize)).
 
-wait_flushing(_Host) ->
+wait_flushing(_Host, _Mod, _RoomID, _RoomJID) ->
     ok.
 
-archive_message(MessID, RoomID, incoming,
-                _LocJID=#jid{lserver=Host, luser=_RoomName},
+archive_message(Host, _Mod, MessID, RoomID,
+                _LocJID=#jid{luser=_RoomName},
                 _RemJID=#jid{},
-                _SrcJID=#jid{lresource=FromNick}, Packet) ->
+                _SrcJID=#jid{lresource=FromNick}, incoming, Packet) ->
     archive_message_1(Host, RoomID, MessID, FromNick, Packet).
 
 archive_message_1(Host, RoomID, MessID, FromNick, Packet) ->
@@ -65,10 +65,12 @@ write_message(Host, SMessID, SRoomID, SFromNick, SData) ->
                "'", SFromNick, "', '", SData, "')"]),
     ok.
 
--spec lookup_messages(RoomJID, RoomID, RSM, Start, End, Now, WithJID,
+-spec lookup_messages(Host, _Mod,
+                      RoomID, RoomJID, RSM, Start, End, Now, WithJID,
                       PageSize, LimitPassed, MaxResultLimit) ->
     {ok, {TotalCount, Offset, MessageRows}} | {error, 'policy-violation'}
 			     when
+    Host    :: server_host(),
     RoomJID :: #jid{},
     RoomID  :: room_id(),
     RSM     :: #rsm_in{} | undefined,
@@ -82,12 +84,12 @@ write_message(Host, SMessID, SRoomID, SFromNick, SData) ->
     TotalCount :: non_neg_integer(),
     Offset  :: non_neg_integer(),
     MessageRows :: list(tuple()).
-lookup_messages(RoomJID = #jid{lserver=LServer},
-                RoomID, RSM, Start, End, _Now, WithJID,
+lookup_messages(Host, _Mod, RoomID, RoomJID = #jid{},
+                RSM, Start, End, _Now, WithJID,
                 PageSize, LimitPassed, MaxResultLimit) ->
     Filter = prepare_filter(RoomID, Start, End, WithJID),
-    TotalCount = calc_count(LServer, Filter),
-    Offset     = calc_offset(LServer, Filter, PageSize, TotalCount, RSM),
+    TotalCount = calc_count(Host, Filter),
+    Offset     = calc_offset(Host, Filter, PageSize, TotalCount, RSM),
     %% If a query returns a number of stanzas greater than this limit and the
     %% client did not specify a limit using RSM then the server should return
     %% a policy-violation error to the client. 
@@ -96,43 +98,44 @@ lookup_messages(RoomJID = #jid{lserver=LServer},
             {error, 'policy-violation'};
 
         false ->
-            MessageRows = extract_messages(LServer, Filter, Offset, PageSize),
+            MessageRows = extract_messages(Host, Filter, Offset, PageSize),
             {ok, {TotalCount, Offset,
-                  rows_to_uniform_format(MessageRows, LServer, RoomJID)}}
+                  rows_to_uniform_format(MessageRows, Host, RoomJID)}}
     end.
 
 
-rows_to_uniform_format(MessageRows, LServer, RoomJID) ->
-    [row_to_uniform_format(Row, LServer, RoomJID) || Row <- MessageRows].
+rows_to_uniform_format(MessageRows, Host, RoomJID) ->
+    [row_to_uniform_format(Row, Host, RoomJID) || Row <- MessageRows].
 
-row_to_uniform_format({BMessID,BNick,SData}, LServer, RoomJID) ->
+row_to_uniform_format({BMessID,BNick,SData}, Host, RoomJID) ->
     MessID = list_to_integer(binary_to_list(BMessID)),
     SrcJID = jlib:jid_replace_resource(RoomJID, BNick),
-    EscFormat = ejabberd_odbc:escape_format(LServer),
+    EscFormat = ejabberd_odbc:escape_format(Host),
     Data = ejabberd_odbc:unescape_binary(EscFormat, SData),
     Packet = binary_to_term(Data),
     {MessID, SrcJID, Packet}.
 
 
-remove_archive(LServer, _LRoomName, RoomID) ->
+remove_archive(Host, _Mod, RoomID, _RoomJID) ->
     {updated, _} =
     mod_mam_utils:success_sql_query(
-      LServer,
+      Host,
       ["DELETE FROM mam_muc_message "
        "WHERE room_id = '", escape_room_id(RoomID), "'"]),
     ok.
 
--spec purge_single_message(RoomJID, RoomID, MessID, Now) ->
+-spec purge_single_message(Host, Mod, MessID, RoomID, RoomJID, Now) ->
     ok | {error, 'not-allowed' | 'not-found'} when
+    Host    :: server_host(),
+    Mod     :: module(),
+    MessID  :: message_id(),
+    RoomID  :: room_id(),
     RoomJID :: #jid{},
-    RoomID :: room_id(),
-    MessID :: message_id(),
-    Now :: unix_timestamp().
-purge_single_message(#jid{lserver = LServer, luser = _LRoomName},
-                     RoomID, MessID, _Now) ->
+    Now     :: unix_timestamp().
+purge_single_message(Host, _Mod, MessID, RoomID, _RoomJID, _Now) ->
     Result =
     mod_mam_utils:success_sql_query(
-      LServer,
+      Host,
       ["DELETE FROM mam_muc_message "
        "WHERE room_id = '", escape_room_id(RoomID), "' "
        "AND id = '", escape_message_id(MessID), "'"]),
@@ -141,37 +144,40 @@ purge_single_message(#jid{lserver = LServer, luser = _LRoomName},
         {updated, 1} -> ok
     end.
 
--spec purge_multiple_messages(RoomJID, RoomID, Start, End, Now, WithJID) ->
+-spec purge_multiple_messages(Host, Mod,
+                              RoomID, RoomJID, Start, End, Now, WithJID) ->
     ok | {error, 'not-allowed'} when
-    RoomJID :: #jid{},
+    Host    :: server_host(),
+    Mod     :: module(),
     RoomID  :: room_id(),
+    RoomJID :: #jid{},
     Start   :: unix_timestamp() | undefined,
     End     :: unix_timestamp() | undefined,
     Now     :: unix_timestamp(),
     WithJID :: #jid{} | undefined.
-purge_multiple_messages(#jid{lserver=LServer},
-                        RoomID, Start, End, _Now, WithJID) ->
+purge_multiple_messages(Host, _Mod, RoomID, _RoomJID,
+                        Start, End, _Now, WithJID) ->
     Filter = prepare_filter(RoomID, Start, End, WithJID),
     {updated, _} =
     mod_mam_utils:success_sql_query(
-      LServer,
+      Host,
       ["DELETE FROM mam_muc_message ", Filter]),
     ok.
 
 %% Columns are `["id","nick_name","message"]'.
--spec extract_messages(LServer, Filter, IOffset, IMax) ->
+-spec extract_messages(Host, Filter, IOffset, IMax) ->
     [Record] when
-    LServer :: server_hostname(),
+    Host    :: server_host(),
     Filter  :: filter(),
     IOffset :: non_neg_integer(),
     IMax    :: pos_integer(),
-    Record :: tuple().
-extract_messages(_LServer, _Filter, _IOffset, 0) ->
+    Record  :: tuple().
+extract_messages(_Host, _Filter, _IOffset, 0) ->
     [];
-extract_messages(LServer, Filter, IOffset, IMax) ->
+extract_messages(Host, Filter, IOffset, IMax) ->
     {selected, _ColumnNames, MessageRows} =
     mod_mam_utils:success_sql_query(
-      LServer,
+      Host,
       ["SELECT id, nick_name, message "
        "FROM mam_muc_message ",
         Filter,
@@ -189,16 +195,16 @@ extract_messages(LServer, Filter, IOffset, IMax) ->
 %% If the element does not exists, the MessID of the next element will
 %% be returned instead.
 %% "SELECT COUNT(*) as "index" FROM mam_muc_message WHERE id <= '",  UMessID
--spec calc_index(LServer, Filter, SUMessID) -> Count
+-spec calc_index(Host, Filter, SUMessID) -> Count
     when
-    LServer  :: server_hostname(),
+    Host     :: server_host(),
     Filter   :: filter(),
-    SUMessID     :: escaped_message_id(),
+    SUMessID :: escaped_message_id(),
     Count    :: non_neg_integer().
-calc_index(LServer, Filter, SUMessID) ->
+calc_index(Host, Filter, SUMessID) ->
     {selected, _ColumnNames, [{BIndex}]} =
     mod_mam_utils:success_sql_query(
-      LServer,
+      Host,
       ["SELECT COUNT(*) FROM mam_muc_message ", Filter, " AND id <= '", SUMessID, "'"]),
     list_to_integer(binary_to_list(BIndex)).
 
@@ -206,31 +212,31 @@ calc_index(LServer, Filter, SUMessID) ->
 %% The element with the passed UMessID can be already deleted.
 %% @end
 %% "SELECT COUNT(*) as "count" FROM mam_muc_message WHERE id < '",  UMessID
--spec calc_before(LServer, Filter, SUMessID) -> Count
+-spec calc_before(Host, Filter, SUMessID) -> Count
     when
-    LServer  :: server_hostname(),
+    Host     :: server_host(),
     Filter   :: filter(),
-    SUMessID     :: escaped_message_id(),
+    SUMessID :: escaped_message_id(),
     Count    :: non_neg_integer().
-calc_before(LServer, Filter, SUMessID) ->
+calc_before(Host, Filter, SUMessID) ->
     {selected, _ColumnNames, [{BIndex}]} =
     mod_mam_utils:success_sql_query(
-      LServer,
+      Host,
       ["SELECT COUNT(*) FROM mam_muc_message ", Filter, " AND id < '", SUMessID, "'"]),
     list_to_integer(binary_to_list(BIndex)).
 
 
 %% @doc Get the total result set size.
 %% "SELECT COUNT(*) as "count" FROM mam_muc_message WHERE "
--spec calc_count(LServer, Filter) -> Count
+-spec calc_count(Host, Filter) -> Count
     when
-    LServer  :: server_hostname(),
+    Host  :: server_host(),
     Filter   :: filter(),
     Count    :: non_neg_integer().
-calc_count(LServer, Filter) ->
+calc_count(Host, Filter) ->
     {selected, _ColumnNames, [{BCount}]} =
     mod_mam_utils:success_sql_query(
-      LServer,
+      Host,
       ["SELECT COUNT(*) FROM mam_muc_message ", Filter]),
     list_to_integer(binary_to_list(BCount)).
 
@@ -276,9 +282,9 @@ prepare_filter_1(RoomID, IStart, IEnd, SWithNick) ->
 %%    direction = before | aft | undefined,
 %%    id = binary() | undefined,
 %%    index = non_neg_integer() | undefined}
--spec calc_offset(LServer, Filter, PageSize, TotalCount, RSM) -> Offset
+-spec calc_offset(Host, Filter, PageSize, TotalCount, RSM) -> Offset
     when
-    LServer  :: server_hostname(),
+    Host     :: server_host(),
     Filter   :: filter(),
     PageSize :: non_neg_integer(),
     TotalCount :: non_neg_integer(),
@@ -290,14 +296,14 @@ calc_offset(_LS, _F, _PS, _TC, #rsm_in{direction = undefined, index = Index})
 %% Requesting the Last Page in a Result Set
 calc_offset(_LS, _F, PS, TC, #rsm_in{direction = before, id = undefined}) ->
     max(0, TC - PS);
-calc_offset(LServer, F, PS, _TC, #rsm_in{direction = before, id = MessID})
+calc_offset(Host, F, PS, _TC, #rsm_in{direction = before, id = MessID})
     when is_integer(MessID) ->
     SMessID = escape_message_id(MessID),
-    max(0, calc_before(LServer, F, SMessID) - PS);
-calc_offset(LServer, F, _PS, _TC, #rsm_in{direction = aft, id = MessID})
+    max(0, calc_before(Host, F, SMessID) - PS);
+calc_offset(Host, F, _PS, _TC, #rsm_in{direction = aft, id = MessID})
     when is_integer(MessID) ->
     SMessID = escape_message_id(MessID),
-    calc_index(LServer, F, SMessID);
+    calc_index(Host, F, SMessID);
 calc_offset(_LS, _F, _PS, _TC, _RSM) ->
     0.
 

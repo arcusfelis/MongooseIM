@@ -5,13 +5,16 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(mod_mam_muc_odbc_async_writer).
--export([start/1,
-         stop/1,
+%% Backend's callbacks
+-export([start/2,
+         stop/2,
          start_link/2,
          srv_name/1,
-         archive_message/7,
-         wait_flushing/1,
-         queue_length/1]).
+         archive_message/9,
+         wait_flushing/4]).
+
+%% Helpers
+-export([queue_length/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -26,6 +29,7 @@
     host,
     conn,
     acc=[],
+    subscribers=[],
     flush_interval_tref}).
 
 srv_name() ->
@@ -35,7 +39,7 @@ srv_name() ->
 %% API
 %%====================================================================
 
-start(Host) ->
+start(Host, _Mod) ->
     WriterProc = srv_name(Host),
     WriterChildSpec =
     {WriterProc,
@@ -46,7 +50,7 @@ start(Host) ->
      [?MODULE]},
     supervisor:start_child(ejabberd_sup, WriterChildSpec).
 
-stop(Host) ->
+stop(Host, _Mod) ->
     Proc = srv_name(Host),
     supervisor:terminate_child(ejabberd_sup, Proc),
     supervisor:delete_child(ejabberd_sup, Proc).
@@ -57,10 +61,10 @@ start_link(ProcName, Host) ->
 srv_name(Host) ->
     gen_mod:get_module_proc(Host, srv_name()).
 
-archive_message(MessID, RoomID, incoming,
-                _LocJID=#jid{lserver=Host, luser=_RoomName},
+archive_message(Host, _Mod, MessID, RoomID,
+                _LocJID=#jid{luser=_RoomName},
                 _RemJID=#jid{},
-                _SrcJID=#jid{lresource=FromNick}, Packet) ->
+                _SrcJID=#jid{lresource=FromNick}, incoming, Packet) ->
     archive_message_1(Host, RoomID, MessID, FromNick, Packet).
 
 archive_message_1(Host, RoomID, MessID, FromNick, Packet) ->
@@ -83,8 +87,8 @@ queue_length(Host) ->
         {ok, Len}
     end.
 
-wait_flushing(_Host) ->
-    timer:sleep(1000).
+wait_flushing(Host, _Mod, _ArcID, _ArcJID) ->
+    gen_server:call(srv_name(Host), wait_flushing).
 
 %%====================================================================
 %% Internal functions
@@ -92,7 +96,8 @@ wait_flushing(_Host) ->
 
 run_flush(State=#state{acc=[]}) ->
     State;
-run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc}) ->
+run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc,
+                       subscribers=Subs}) ->
     TRef =/= undefined andalso erlang:cancel_timer(TRef),
     ?DEBUG("Flushed ~p entries.", [length(Acc)]),
     Result =
@@ -107,6 +112,7 @@ run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc}) ->
             ?ERROR_MSG("archive_message query failed with reason ~p", [Reason]),
             ok
     end,
+    [gen_server:reply(Sub, ok) || Sub <- Subs],
     State#state{acc=[], flush_interval_tref=undefined}.
 
 join([H|T]) ->
@@ -143,8 +149,10 @@ init([Host]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call(_, _From, State) ->
-    {reply, ok, State}.
+handle_call(wait_flushing, _From, State=#state{acc=[]}) ->
+    {reply, ok, State};
+handle_call(wait_flushing, From, State=#state{subscribers=Subs}) ->
+    {noreply, State#state{subscribers=[From|Subs]}}.
 
 
 %%--------------------------------------------------------------------
