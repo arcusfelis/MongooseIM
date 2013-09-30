@@ -1,4 +1,4 @@
-%% @doc Stores a table of custom IQ-hanlers for mod_muc_room.
+%% @doc Stores a table of custom IQ-handlers for mod_muc_room.
 -module(mod_muc_iq).
 -export([start_link/0,
          process_iq/4,
@@ -10,6 +10,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-compile({inline, [srv_name/0, tbl_name/0]}).
 
 -include("ejabberd.hrl").
 -include("jlib.hrl").
@@ -18,10 +19,10 @@
 
 %% @private
 srv_name() ->
-    mod_muc_iq.
+    ejabberd_mod_muc_iq.
 
 tbl_name() ->
-    mod_muc_iq_table.
+    ejabberd_mod_muc_iq_table.
 
 %%====================================================================
 %% API
@@ -101,8 +102,7 @@ handle_cast({register_iq_handler, Host, XMLNS, Module, Function, Opts}, State) -
 handle_cast({unregister_iq_handler, Host, XMLNS}, State) ->
     ets:delete(tbl_name(), {XMLNS, Host}),
     {noreply, State};
-handle_cast(Msg, State) ->
-    ?WARNING_MSG("Strange message ~p.", [Msg]),
+handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %%--------------------------------------------------------------------
