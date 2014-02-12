@@ -60,7 +60,14 @@
          encode_base64/1,
          ip_to_list/1,
          rsm_encode/1,
-         rsm_decode/1]).
+         rsm_decode/1,
+         binary_to_integer/1,
+         binary_to_integer/2,
+         integer_to_binary/1,
+         integer_to_binary/2,
+         atom_to_binary/1,
+         binary_to_atom/1,
+         tuple_to_binary/1]).
 
 -include("jlib.hrl").
 
@@ -802,3 +809,25 @@ ip_to_list({A,B,C,D}) ->
     lists:flatten(io_lib:format("~w.~w.~w.~w",[A,B,C,D]));
 ip_to_list(IP) ->
     lists:flatten(io_lib:format("~w", [IP])).
+
+binary_to_atom(Bin) ->
+    erlang:binary_to_atom(Bin, utf8).
+
+binary_to_integer(Bin) ->
+    list_to_integer(binary_to_list(Bin)).
+
+binary_to_integer(Bin, Base) ->
+    list_to_integer(binary_to_list(Bin), Base).
+
+integer_to_binary(I) ->
+    list_to_binary(integer_to_list(I)).
+
+integer_to_binary(I, Base) ->
+    list_to_binary(erlang:integer_to_list(I, Base)).
+
+tuple_to_binary(T) ->
+    iolist_to_binary(tuple_to_list(T)).
+
+atom_to_binary(A) ->
+    erlang:atom_to_binary(A, utf8).
+
