@@ -1274,13 +1274,13 @@ unsubscribe_user(Entity, Owner) ->
 %% user remove hook handling function
 %%
 
+%% Do not return until all user's data is deleted.
 remove_user(User, Server) ->
     LUser = jlib:nodeprep(User),
     LServer = jlib:nameprep(Server),
     Entity = jlib:make_jid(LUser, LServer, <<"">>),
     Host = host(LServer),
     HomeTreeBase = <<"/home/", LServer/binary, "/", LUser/binary>>,
-    spawn(fun () ->
 		  lists:foreach(fun (PType) ->
 					{result, Subscriptions} =
 					    node_action(Host, PType,
@@ -1337,8 +1337,7 @@ remove_user(User, Server) ->
 						      end,
 						      Affiliations)
 				end,
-				plugins(Host))
-	  end).
+				plugins(Host)).
 
 handle_call(server_host, _From, State) ->
     {reply, State#state.server_host, State};
