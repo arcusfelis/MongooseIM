@@ -52,7 +52,6 @@
 	 c2s_broadcast_recipients/5]).
 
 -include("ejabberd.hrl").
--include("logger.hrl").
 
 -include("jlib.hrl").
 
@@ -305,8 +304,8 @@ init([Host, Opts]) ->
 			 {local_content, true},
 			 {attributes, record_info(fields, caps_features)}]),
     mnesia:add_table_copy(caps_features, node(), disc_only_copies),
-    MaxSize = gen_mod:get_opt(cache_size, Opts, fun(CS) when is_integer(CS) -> CS end, 1000),
-    LifeTime = gen_mod:get_opt(cache_life_time, Opts, fun(CL) when is_integer(CL) -> CL end, timer:hours(24) div 1000),
+    MaxSize = gen_mod:get_opt(cache_size, Opts, 1000),
+    LifeTime = gen_mod:get_opt(cache_life_time, Opts, timer:hours(24) div 1000),
     cache_tab:new(caps_features, [{max_size, MaxSize}, {life_time, LifeTime}]),
     ejabberd_hooks:add(c2s_presence_in, Host,
 		       ?MODULE, c2s_presence_in, 75),
