@@ -1110,7 +1110,7 @@ disco_items(Host, <<>>, From) ->
 					{<<"jid">>,
 					 case Host of
 					   {_, _, _} ->
-					       jlib:jid_to_string(Host);
+					       jlib:jid_to_binary(Host);
 					   _Host -> Host
 					 end}
 					| case get_option(Options, title) of
@@ -1139,7 +1139,7 @@ disco_items(Host, Node, From) ->
 					[{<<"jid">>,
 					  case Host of
 					    {_, _, _} ->
-						jlib:jid_to_string(Host);
+						jlib:jid_to_binary(Host);
 					    _Host -> Host
 					  end},
 					 {<<"name">>, ItemID}],
@@ -2195,7 +2195,7 @@ get_pending_nodes(Host, Owner, Plugins) ->
 send_pending_auth_events(Host, Node, Owner) ->
     ?DEBUG("Sending pending auth events for ~s on "
 	   "~s:~s",
-	   [jlib:jid_to_string(Owner), Host, Node]),
+	   [jlib:jid_to_binary(Owner), Host, Node]),
     Action = fun (#pubsub_node{id = NodeID, type = Type}) ->
 		     case lists:member(<<"get-pending">>, features(Type)) of
 		       true ->
@@ -2283,7 +2283,7 @@ send_authorization_request(#pubsub_node{owners = Owners, nodeid = {Host, Node}},
 							attrs = [],
 							children =
 							    [{xmlcdata,
-							      jlib:jid_to_string(Subscriber)}]}]},
+							      jlib:jid_to_binary(Subscriber)}]}]},
 				     #xmlel{name = <<"field">>,
 					    attrs =
 						[{<<"var">>,
@@ -2348,7 +2348,7 @@ send_authorization_approval(Host, JID, SNode, Subscription) ->
 	       end,
     Stanza = event_stanza([#xmlel{name = <<"subscription">>,
 				  attrs =
-				      [{<<"jid">>, jlib:jid_to_string(JID)}
+				      [{<<"jid">>, jlib:jid_to_binary(JID)}
 				       | nodeAttr(SNode)]
 					++ SubAttrs,
 				  children = []}]),
@@ -2825,7 +2825,7 @@ subscribe_node(Host, Node, From, JID, Configuration) ->
 				       subscription_to_string(Other)},
 				      {<<"node">>, Node}]
 			       end,
-		    Fields = [{<<"jid">>, jlib:jid_to_string(Subscriber)}
+		    Fields = [{<<"jid">>, jlib:jid_to_binary(Subscriber)}
 			      | SubAttrs],
 		    [#xmlel{name = <<"pubsub">>,
 			    attrs = [{<<"xmlns">>, ?NS_PUBSUB}],
@@ -3516,7 +3516,7 @@ get_affiliations(Host, Node, JID) ->
 					   [#xmlel{name = <<"affiliation">>,
 						   attrs =
 						       [{<<"jid">>,
-							 jlib:jid_to_string(AJID)},
+							 jlib:jid_to_binary(AJID)},
 							{<<"affiliation">>,
 							 affiliation_to_string(Affiliation)}],
 						   children = []}]
@@ -3695,7 +3695,7 @@ read_sub(Subscriber, Node, NodeID, SubID, Lang) ->
     end,
     OptionsEl = #xmlel{name = <<"options">>,
 			attrs =
-			    [{<<"jid">>, jlib:jid_to_string(Subscriber)},
+			    [{<<"jid">>, jlib:jid_to_binary(Subscriber)},
 			    {<<"subid">>, SubID}
 			    | nodeAttr(Node)],
 			children = Children},
@@ -3819,7 +3819,7 @@ get_subscriptions(Host, Node, JID, Plugins) when is_list(Plugins) ->
 							     <<"subscription">>,
 							 attrs =
 							     [{<<"jid">>,
-							       jlib:jid_to_string(SubJID)},
+							       jlib:jid_to_binary(SubJID)},
 							      {<<"subid">>,
 							       SubID},
 							      {<<"subscription">>,
@@ -3831,7 +3831,7 @@ get_subscriptions(Host, Node, JID, Plugins) when is_list(Plugins) ->
 							     <<"subscription">>,
 							 attrs =
 							     [{<<"jid">>,
-							       jlib:jid_to_string(SubJID)},
+							       jlib:jid_to_binary(SubJID)},
 							      {<<"subid">>,
 							       SubID},
 							      {<<"subscription">>,
@@ -3847,7 +3847,7 @@ get_subscriptions(Host, Node, JID, Plugins) when is_list(Plugins) ->
 							     <<"subscription">>,
 							 attrs =
 							     [{<<"jid">>,
-							       jlib:jid_to_string(SubJID)},
+							       jlib:jid_to_binary(SubJID)},
 							      {<<"subscription">>,
 							       subscription_to_string(Subscription)}
 							      | nodeAttr(SubsNode)],
@@ -3857,7 +3857,7 @@ get_subscriptions(Host, Node, JID, Plugins) when is_list(Plugins) ->
 							     <<"subscription">>,
 							 attrs =
 							     [{<<"jid">>,
-							       jlib:jid_to_string(SubJID)},
+							       jlib:jid_to_binary(SubJID)},
 							      {<<"subscription">>,
 							       subscription_to_string(Subscription)}],
 							 children = []}];
@@ -3899,7 +3899,7 @@ get_subscriptions(Host, Node, JID) ->
 					   [#xmlel{name = <<"subscription">>,
 						   attrs =
 						       [{<<"jid">>,
-							 jlib:jid_to_string(AJID)},
+							 jlib:jid_to_binary(AJID)},
 							{<<"subscription">>,
 							 subscription_to_string(Subscription)}],
 						   children = []}];
@@ -3907,7 +3907,7 @@ get_subscriptions(Host, Node, JID) ->
 					   [#xmlel{name = <<"subscription">>,
 						   attrs =
 						       [{<<"jid">>,
-							 jlib:jid_to_string(AJID)},
+							 jlib:jid_to_binary(AJID)},
 							{<<"subscription">>,
 							 subscription_to_string(Subscription)},
 							{<<"subid">>, SubId}],
@@ -3969,7 +3969,7 @@ set_subscriptions(Host, Node, From, EntitiesEls) ->
 								       <<"subscription">>,
 								   attrs =
 								       [{<<"jid">>,
-									 jlib:jid_to_string(JID)},
+									 jlib:jid_to_binary(JID)},
 									{<<"subscription">>,
 									 subscription_to_string(Sub)}
 									| nodeAttr(Node)],
@@ -4455,7 +4455,7 @@ broadcast_stanza({LUser, LServer, LResource}, Publisher, Node, NodeId, Type, Nod
 	        {pep_message, binary_to_list(Node)++"+notify"},
 	        _Sender = jlib:make_jid(LUser, LServer, ""),
 	        _StanzaToSend = add_extended_headers(Stanza,
-	            _ReplyTo = extended_headers([jlib:jid_to_string(Publisher)])));
+	            _ReplyTo = extended_headers([jlib:jid_to_binary(Publisher)])));
 	_ ->
 	    ?DEBUG("~p@~p has no session; can't deliver ~p to contacts", [LUser, LServer, BaseStanza])
     end;
@@ -4655,8 +4655,8 @@ max_items(Host, Options) ->
 	?LISTXFIELD(Label,
 		    <<"pubsub#",
 		      (iolist_to_binary(atom_to_list(Var)))/binary>>,
-		    (jlib:jid_to_string(get_option(Options, Var))),
-		    [jlib:jid_to_string(O) || O <- Opts])).
+		    (jlib:jid_to_binary(get_option(Options, Var))),
+		    [jlib:jid_to_binary(O) || O <- Opts])).
 
 -define(ALIST_CONFIG_FIELD(Label, Var, Opts),
 	?LISTXFIELD(Label,
@@ -5388,7 +5388,7 @@ export(_Server) ->
                 string:join([string:right(integer_to_list(I),6,$0)||I<-[C1,C2,C3]],":")),
               MODIFICATION = ejabberd_odbc:escape(
                 string:join([string:right(integer_to_list(I),6,$0)||I<-[M1,M2,M3]],":")),
-              PUBLISHER = ejabberd_odbc:escape(jlib:jid_to_string(Cusr)),
+              PUBLISHER = ejabberd_odbc:escape(jlib:jid_to_binary(Cusr)),
               [PayloadEl] = [El || {xmlelement,_,_,_} = El <- Payload],
               PAYLOAD = ejabberd_odbc:escape(xml:element_to_binary(PayloadEl)),
               ["delete from pubsub_item where itemid='", ITEMID, "';\n"
@@ -5410,7 +5410,7 @@ export(_Server) ->
                                affiliation = Affiliation,
                                subscriptions = Subscriptions}) ->
               STATEID = integer_to_list(Stateid),
-              JID = ejabberd_odbc:escape(jlib:jid_to_string(Jid)),
+              JID = ejabberd_odbc:escape(jlib:jid_to_binary(Jid)),
               NODEID = "unknown", %% TODO: integer_to_list(Nodeidx),
               AFFILIATION = string:substr(atom_to_list(Affiliation),1,1),
               SUBSCRIPTIONS = parse_subscriptions(Subscriptions),
@@ -5433,7 +5433,7 @@ export(_Server) ->
                               owners = Owners,
                               options = Options}) ->
               HOST = case Hostid of
-                    {U,S,R} -> ejabberd_odbc:escape(jlib:jid_to_string({U,S,R}));
+                    {U,S,R} -> ejabberd_odbc:escape(jlib:jid_to_binary({U,S,R}));
                     _ -> ejabberd_odbc:escape(Hostid)
                     end,
               NODE = ejabberd_odbc:escape(Nodeid),
@@ -5449,7 +5449,7 @@ export(_Server) ->
                            io_lib:format("~p", [Val]), "');\n"] || {Name,Val} <- Options],
                "delete from pubsub_node_owner where nodeid='", NODEID, "';\n",
                [["insert into pubsub_node_owner(nodeid,owner)\n"
-                 " values (", NODEID, ", '", jlib:jid_to_string(Usr), "');\n"] || Usr <- Owners],"\n"];
+                 " values (", NODEID, ", '", jlib:jid_to_binary(Usr), "');\n"] || Usr <- Owners],"\n"];
          (_Host, _R) ->
               []
       end}].
