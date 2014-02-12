@@ -29,7 +29,6 @@
 -include_lib("stdlib/include/qlc.hrl").
 
 -include("ejabberd.hrl").
--include("logger.hrl").
 
 -include("pubsub.hrl").
 

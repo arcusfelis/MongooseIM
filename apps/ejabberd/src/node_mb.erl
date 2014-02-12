@@ -39,7 +39,6 @@
 -author('eric@ohmforce.com').
 
 -include("ejabberd.hrl").
--include("logger.hrl").
 
 -include("pubsub.hrl").
 

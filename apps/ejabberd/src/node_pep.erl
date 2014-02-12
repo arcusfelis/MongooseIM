@@ -33,7 +33,6 @@
 -author('christophe.romain@process-one.net').
 
 -include("ejabberd.hrl").
--include("logger.hrl").
 
 -include("pubsub.hrl").
 
