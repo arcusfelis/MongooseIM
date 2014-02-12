@@ -358,6 +358,60 @@
 
 -record(rsm_out, {count, index, first, last}).
 
+-type xmlel() :: #xmlel{}.
 -type jid() :: #jid{}.
--type iq() :: #iq{}.
+-type ljid() :: {binary(), binary(), binary()}.
+
+-type(iq_get()
+  :: #iq{
+         id     :: binary(),
+         type   :: get,
+         xmlns  :: binary(),
+         lang   :: binary(),
+         sub_el :: xmlel()
+     }
+).
+
+-type(iq_set()
+  :: #iq{
+         id     :: binary(),
+         type   :: set,
+         xmlns  :: binary(),
+         lang   :: binary(),
+         sub_el :: xmlel()
+     }
+).
+
+-type iq_request() :: iq_get() | iq_set().
+
+-type(iq_result()
+  :: #iq{
+         id     :: binary(),
+         type   :: result,
+         xmlns  :: binary(),
+         lang   :: binary(),
+         sub_el :: [xmlel()]
+     }
+).
+
+
+-type(iq_error()
+  :: #iq{
+         id     :: binary(),
+         type   :: error,
+         xmlns  :: binary(),
+         lang   :: binary(),
+         sub_el :: [xmlel()]
+     }
+).
+
+-type iq_reply() :: iq_result() | iq_error() .
+
+-type(iq() :: iq_request() | iq_reply()).
+
+
+-type(rsm_in() :: #rsm_in{}).
+
+-type(rsm_out() :: #rsm_out{}).
+
 
