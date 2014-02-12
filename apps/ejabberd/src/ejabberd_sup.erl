@@ -169,11 +169,20 @@ init([]) ->
          brutal_kill,
          worker,
          [mod_muc_iq]},
+    CacheTabSup =
+       {cache_tab_sup,
+        {cache_tab_sup, start_link, []},
+        permanent,
+        infinity,
+        supervisor,
+        [cache_tab_sup]},
+
     ShaperSpecs = shaper_srv:child_specs(),
 
     {ok, {{one_for_one, 10, 1},
           ShaperSpecs ++
           [Randoms,
+           CacheTabSup,
            Hooks,
            SMBackendSupervisor,
            Router,
