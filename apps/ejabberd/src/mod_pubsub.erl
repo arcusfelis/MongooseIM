@@ -272,16 +272,11 @@ stop(Host) ->
 init([ServerHost, Opts]) ->
     ?DEBUG("pubsub init ~p ~p", [ServerHost, Opts]),
     Host = gen_mod:get_opt_host(ServerHost, Opts, <<"pubsub.@HOST@">>),
-    Access = gen_mod:get_opt(access_createnode, Opts,
-        fun(A) when is_atom(A) -> A end, all),
-    PepOffline = gen_mod:get_opt(ignore_pep_from_offline, Opts,
-				 fun(A) when is_boolean(A) -> A end, true),
-    IQDisc = gen_mod:get_opt(iqdisc, Opts,
-                fun(A) when is_atom(A) -> A end, one_queue),
-    LastItemCache = gen_mod:get_opt(last_item_cache, Opts,
-				    fun(A) when is_boolean(A) -> A end, false),
-    MaxItemsNode = gen_mod:get_opt(max_items_node, Opts,
-				   fun(A) when is_integer(A) andalso A >= 0 -> A end, ?MAXITEMS),
+    Access = gen_mod:get_opt(access_createnode, Opts, all),
+    PepOffline = gen_mod:get_opt(ignore_pep_from_offline, Opts, true),
+    IQDisc = gen_mod:get_opt(iqdisc, Opts, one_queue),
+    LastItemCache = gen_mod:get_opt(last_item_cache, Opts, false),
+    MaxItemsNode = gen_mod:get_opt(max_items_node, Opts, ?MAXITEMS),
     pubsub_index:init(Host, ServerHost, Opts),
     ets:new(gen_mod:get_module_proc(Host, config),
 	    [set, named_table]),
@@ -386,14 +381,11 @@ init_send_loop(ServerHost, State) ->
 init_plugins(Host, ServerHost, Opts) ->
     TreePlugin =
 	jlib:binary_to_atom(<<(?TREE_PREFIX)/binary,
-				(gen_mod:get_opt(nodetree, Opts, fun(A) when is_list(A) -> A end,
-						 ?STDTREE))/binary>>),
+				(to_binary(gen_mod:get_opt(nodetree, Opts, ?STDTREE)))/binary>>),
     ?DEBUG("** tree plugin is ~p", [TreePlugin]),
     TreePlugin:init(Host, ServerHost, Opts),
-    Plugins = gen_mod:get_opt(plugins, Opts,
-        fun(A) when is_list(A) -> A end, [?STDNODE]),
-    PepMapping = gen_mod:get_opt(pep_mapping, Opts,
-        fun(A) when is_list(A) -> A end, []),
+    Plugins = to_binary_list(gen_mod:get_opt(plugins, Opts, [?STDNODE])),
+    PepMapping = to_binary_list(gen_mod:get_opt(pep_mapping, Opts, [])),
     ?DEBUG("** PEP Mapping : ~p~n", [PepMapping]),
     PluginsOK = lists:foldl(fun (Name, Acc) ->
 				    Plugin =
@@ -5470,3 +5462,8 @@ parse_subscriptions([{State, Item}]) ->
     end,
     string:join([STATE, Item],":").
 
+to_binary_list(Xs) ->
+    [iolist_to_binary(X) || X <- Xs].
+
+to_binary(X) ->
+    iolist_to_binary(X).
