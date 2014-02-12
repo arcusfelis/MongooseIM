@@ -2362,7 +2362,7 @@ handle_authorization_response(Host, From, To, Packet, XFields) ->
       {{value, {_, [Node]}}, {value, {_, [SSubscriber]}},
        {value, {_, [SAllow]}}} ->
 %	  Node = string_to_node(SNode),
-	  Subscriber = jlib:string_to_jid(SSubscriber),
+	  Subscriber = jlib:binary_to_jid(SSubscriber),
 	  Allow = case SAllow of
 		    <<"1">> -> true;
 		    <<"true">> -> true;
@@ -2769,7 +2769,7 @@ subscribe_node(Host, Node, From, JID, Configuration) ->
 		{result, GoodSubOpts} -> GoodSubOpts;
 		_ -> invalid
 	      end,
-    Subscriber = case jlib:string_to_jid(JID) of
+    Subscriber = case jlib:binary_to_jid(JID) of
 		   error -> {<<"">>, <<"">>, <<"">>};
 		   J ->
 		    case jlib:jid_tolower(J) of
@@ -2886,7 +2886,7 @@ subscribe_node(Host, Node, From, JID, Configuration) ->
 ).
 unsubscribe_node(Host, Node, From, JID, SubId)
     when is_binary(JID) ->
-    Subscriber = case jlib:string_to_jid(JID) of
+    Subscriber = case jlib:binary_to_jid(JID) of
 		   error -> {<<"">>, <<"">>, <<"">>};
 		   J ->
 		    case jlib:jid_tolower(J) of
@@ -3551,7 +3551,7 @@ set_affiliations(Host, Node, From, EntitiesEls) ->
 					   #xmlel{name = <<"affiliation">>,
 						  attrs = Attrs} ->
 					       JID =
-						   jlib:string_to_jid(xml:get_attr_s(<<"jid">>,
+						   jlib:binary_to_jid(xml:get_attr_s(<<"jid">>,
 										     Attrs)),
 					       Affiliation =
 						   string_to_affiliation(xml:get_attr_s(<<"affiliation">>,
@@ -3652,7 +3652,7 @@ get_options(Host, Node, JID, SubID, Lang) ->
     end.
 
 get_options_helper(JID, Lang, Node, NodeID, SubID, Type) ->
-    Subscriber = case jlib:string_to_jid(JID) of
+    Subscriber = case jlib:binary_to_jid(JID) of
 		   error -> {<<"">>, <<"">>, <<"">>};
 		   J -> case jlib:jid_tolower(J) of
 		    error -> {<<"">>, <<"">>, <<"">>};
@@ -3729,7 +3729,7 @@ set_options_helper(Configuration, JID, NodeID, SubID, Type) ->
 		{result, GoodSubOpts} -> GoodSubOpts;
 		_ -> invalid
 	      end,
-    Subscriber = case jlib:string_to_jid(JID) of
+    Subscriber = case jlib:binary_to_jid(JID) of
 		   error -> {<<"">>, <<"">>, <<"">>};
 		   J -> jlib:jid_tolower(J)
 		 end,
@@ -3934,7 +3934,7 @@ set_subscriptions(Host, Node, From, EntitiesEls) ->
 					   #xmlel{name = <<"subscription">>,
 						  attrs = Attrs} ->
 					       JID =
-						   jlib:string_to_jid(xml:get_attr_s(<<"jid">>,
+						   jlib:binary_to_jid(xml:get_attr_s(<<"jid">>,
 										     Attrs)),
 					       Subscription =
 						   string_to_subscription(xml:get_attr_s(<<"subscription">>,
