@@ -36,6 +36,7 @@
          bounce_offline_message/3,
          disconnect_removed_user/2,
          get_user_resources/2,
+         get_user_present_resources/2,
          set_presence/7,
          unset_presence/6,
          close_session_unset_presence/5,
@@ -138,6 +139,13 @@ get_user_resources(User, Server) ->
     LServer = jlib:nameprep(Server),
     Ss = ?SM_BACKEND:get_sessions(LUser, LServer),
     [element(3, S#session.usr) || S <- clean_session_list(Ss)].
+
+get_user_present_resources(User, Server) ->
+    LUser = jlib:nodeprep(User),
+    LServer = jlib:nameprep(Server),
+    Ss = ?SM_BACKEND:get_sessions(LUser, LServer),
+    [element(3, S#session.usr) ||
+        S <- clean_session_list(Ss), is_integer(S#session.priority)].
 
 get_session_ip(User, Server, Resource) ->
     LUser = jlib:nodeprep(User),
@@ -395,7 +403,7 @@ do_route_no_resource_presence(_, _, _, _) ->
 do_route_no_resource(<<"presence">>, Type, From, To, Packet) ->
 	case do_route_no_resource_presence(Type, From, To, Packet) of
 	    true ->
-            PResources = get_user_present_resources(To#jid.luser, To#jid.lserver),
+            PResources = get_user_present_resources_by_priority(To#jid.luser, To#jid.lserver),
 		    lists:foreach(
 		      fun({_, R}) ->
                       do_route(From, jlib:jid_replace_resource(To, R), Packet)
@@ -459,7 +467,7 @@ is_privacy_allow(From, To, Packet, PrivacyList) ->
 route_message(From, To, Packet) ->
     LUser = To#jid.luser,
     LServer = To#jid.lserver,
-    PrioRes = get_user_present_resources(LUser, LServer),
+    PrioRes = get_user_present_resources_by_priority(LUser, LServer),
     case catch lists:max(PrioRes) of
         {Priority, _R} when is_integer(Priority), Priority >= 0 ->
             lists:foreach(
@@ -534,7 +542,7 @@ clean_session_list([S1, S2 | Rest], Res) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-get_user_present_resources(LUser, LServer) ->
+get_user_present_resources_by_priority(LUser, LServer) ->
     Ss = ?SM_BACKEND:get_sessions(LUser, LServer),
     [{S#session.priority, element(3, S#session.usr)} ||
         S <- clean_session_list(Ss), is_integer(S#session.priority)].

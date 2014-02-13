@@ -4137,21 +4137,17 @@ node_to_deliver(LJID, NodeOptions) ->
   _      :: boolean())
     -> boolean()
 ).
+
+%% Subscriber JID is bare and subscriber has at least one present session;
+%% Subscriber JID is full and session with this resource is present.
+%% Present session has Priority =/= undefined.
 presence_can_deliver(_, false) -> true;
+presence_can_deliver({User, Server, <<>>}, true) ->
+    Resources = ejabberd_sm:get_user_present_resources(User, Server),
+    length(Resources) > 0;
 presence_can_deliver({User, Server, Resource}, true) ->
-    case mnesia:dirty_match_object({session, '_', '_', {User, Server}, '_', '_'}) of
-    [] -> false;
-    Ss ->
-	lists:foldl(fun(_, true) -> true;
-		       ({session, _, _ , _, undefined, _}, _Acc) -> false;
-		       ({session, _, {_, _, R}, _, _Priority, _}, _Acc) ->
-			   case Resource of
-			       [] -> true;
-			       R -> true;
-			       _ -> false
-			   end
-	end, false, Ss)
-    end.
+    Resources = ejabberd_sm:get_user_present_resources(User, Server),
+    lists:member(Resource, Resources).
 
 -spec(state_can_deliver/2 ::
 (
