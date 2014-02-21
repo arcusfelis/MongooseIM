@@ -171,12 +171,12 @@ receive_all(US, Msgs) ->
 written_offline_messages([], _, _) ->
     ok;
 written_offline_messages(WrittenMsgs, LUser, LServer) ->
-    ejabberd_hooks:run(written_offline_messages, [WrittenMsgs, LUser, LServer]).
+    ejabberd_hooks:run(written_offline_messages, LServer, [WrittenMsgs, LUser, LServer]).
 
 discarded_offline_messages([], _, _) ->
     ok;
 discarded_offline_messages(DiscardedMsgs, LUser, LServer) ->
-    ejabberd_hooks:run(discarded_offline_messages, [DiscardedMsgs, LUser, LServer]).
+    ejabberd_hooks:run(discarded_offline_messages, LServer, [DiscardedMsgs, LUser, LServer]).
 
 %% Supervision
 %% ------------------------------------------------------------------
