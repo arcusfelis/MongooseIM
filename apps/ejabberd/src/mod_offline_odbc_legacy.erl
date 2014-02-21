@@ -116,7 +116,7 @@ record_to_row(SUser, #offline_msg{from = From, to = To,
     odbc_queries:add_spool_sql(SUser, SPacket).
 
 discard_all_messages_t(Msgs) ->
-    {discarded, Msgs}.
+    {discarded, Msgs, []}.
 
 remove_user(LUser, LServer) ->
     SUser = ejabberd_odbc:escape(LUser),

@@ -34,6 +34,9 @@
          privacy_iq_set/4,
          privacy_check_packet/6,
          privacy_list_push/3,
+         pop_offline_messages/3,
+         written_offline_messages/3,
+         discarded_offline_messages/3,
          mam_get_prefs/4,
          mam_set_prefs/7,
          mam_remove_archive/3,
@@ -81,6 +84,9 @@ get_hooks(Host) ->
      [privacy_iq_set,         Host, ?MODULE, privacy_iq_set, 1],
      [privacy_check_packet,   Host, ?MODULE, privacy_check_packet, 55],
      [sm_broadcast,           Host, ?MODULE, privacy_list_push, 1],
+     [resend_offline_messages_hook, Host, ?MODULE, pop_offline_messages, 100],
+     [written_offline_messages,     Host, ?MODULE, written_offline_messages, 100],
+     [discarded_offline_messages,   Host, ?MODULE, discarded_offline_messages, 100],
      [mam_set_prefs, Host, ?MODULE, mam_set_prefs, 50],
      [mam_get_prefs, Host, ?MODULE, mam_get_prefs, 50],
      [mam_archive_message, Host, ?MODULE, mam_archive_message, 50],
@@ -244,6 +250,23 @@ privacy_check_packet(Acc, _, Server, _, _, _) ->
             ok
     end,
     Acc.
+
+
+%% ----------------------------------------------------------------------------
+%% mod_offline
+
+pop_offline_messages(Messages, _User, Server) ->
+    folsom_metrics:notify({Server, modOfflineMessagePopped}, length(Messages)),
+    Messages.
+
+written_offline_messages(Messages, _User, Server) ->
+    folsom_metrics:notify({Server, modOfflineMessageWritten}, length(Messages)),
+    Messages.
+
+discarded_offline_messages(Messages, _User, Server) ->
+    folsom_metrics:notify({Server, modOfflineMessageDiscarded}, length(Messages)),
+    Messages.
+
 
 %% ----------------------------------------------------------------------------
 %% mod_mam

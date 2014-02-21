@@ -112,7 +112,7 @@ write_all_messages_t(Len, Msgs) ->
     ok.
 
 discard_all_messages_t(Msgs) ->
-    {discarded, Msgs}.
+    {discarded, Msgs, []}.
 
 count_offline_messages(LUser, LServer) ->
     US = {LUser, LServer},

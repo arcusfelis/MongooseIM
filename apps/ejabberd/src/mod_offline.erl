@@ -139,13 +139,17 @@ handle_offline_msg(#offline_msg{us=US} = Msg, AccessMaxOfflineMsgs) ->
         AccessMaxOfflineMsgs, LUser, LServer),
     case ?BACKEND:write_messages(LUser, LServer, Msgs, MaxOfflineMsgs) of
         ok ->
+            written_offline_messages(Msgs, LUser, LServer),
             ok;
-        {discarded, DiscardedMsgs} ->
-            discard_warn_sender(DiscardedMsgs);
+        {discarded, DiscardedMsgs, WrittenMsgs} ->
+            written_offline_messages(WrittenMsgs, LUser, LServer),
+            discard_warn_sender(DiscardedMsgs),
+            discarded_offline_messages(DiscardedMsgs, LUser, LServer);
         {error, Reason} ->
             ?ERROR_MSG("~ts@~ts: write_messages failed with ~p.",
                 [LUser, LServer, Reason]),
-            discard_warn_sender(Msgs)
+            discard_warn_sender(Msgs),
+            discarded_offline_messages(Msgs, LUser, LServer)
     end.
 
 %% Function copied from ejabberd_sm.erl:
@@ -163,6 +167,16 @@ receive_all(US, Msgs) ->
     after 0 ->
 	    Msgs
     end.
+
+written_offline_messages([], _, _) ->
+    ok;
+written_offline_messages(WrittenMsgs, LUser, LServer) ->
+    ejabberd_hooks:run(written_offline_messages, [WrittenMsgs, LUser, LServer]).
+
+discarded_offline_messages([], _, _) ->
+    ok;
+discarded_offline_messages(DiscardedMsgs, LUser, LServer) ->
+    ejabberd_hooks:run(discarded_offline_messages, [DiscardedMsgs, LUser, LServer]).
 
 %% Supervision
 %% ------------------------------------------------------------------

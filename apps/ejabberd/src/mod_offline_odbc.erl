@@ -123,7 +123,7 @@ record_to_row(SUser, SServer, #offline_msg{
     odbc_queries:prepare_offline_message(SUser, SServer, STimeStamp, SExpire, SFrom, SPacket).
 
 discard_all_messages_t(Msgs) ->
-    {discarded, Msgs}.
+    {discarded, Msgs, []}.
 
 remove_user(LUser, LServer) ->
     SUser   = ejabberd_odbc:escape(LUser),
