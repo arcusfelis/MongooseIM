@@ -64,7 +64,11 @@ pop_messages(LUser, LServer) ->
             {ok, []};
         {ok, {Bins, Size}} ->
             set_offset(US, Offset + Size),
-            {ok, binaries_to_records(US, To, Bins)}
+            {ok, binaries_to_records(US, To, Bins)};
+        {error, Reason} ->
+            ?ERROR_MSG("Fetch for ~p with offset ~p failed with reason ~p",
+                [Topic, Offset, Reason]),
+            {error, kafka_error}
     end.
 
 get_offset(US) ->
