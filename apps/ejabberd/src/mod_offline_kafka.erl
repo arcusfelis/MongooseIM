@@ -40,16 +40,16 @@
 
 -define(OFFLINE_TABLE_LOCK_THRESHOLD, 1000).
 
--record(offline_msg_offsets, {us, offset}).
+-record(offline_msg_offset, {us, offset}).
 
 init(_Host, Opts) ->
     %% Servers will not be stopped with module.
     Servers = gen_mod:get_opt(kafka_servers, Opts, [{0, '127.0.0.1', 9092}]),
     kafka_server_sup:start_link(Servers),
-    mnesia:create_table(offline_msg_offsets,
+    mnesia:create_table(offline_msg_offset,
             [{disc_copies, [node()]},
              {type, bag},
-             {attributes, record_info(fields, offline_msg_offsets)}]),
+             {attributes, record_info(fields, offline_msg_offset)}]),
     ok.
 
 pop_messages(LUser, LServer) ->
@@ -72,15 +72,15 @@ pop_messages(LUser, LServer) ->
     end.
 
 get_offset(US) ->
-    case mnesia:dirty_read(offline_msg_offsets, US) of
-        [#offline_msg_offsets{offset = Offset}] ->
+    case mnesia:dirty_read(offline_msg_offset, US) of
+        [#offline_msg_offset{offset = Offset}] ->
             Offset;
         [] ->
             0
     end.
 
 set_offset(US, Offset) ->
-    mnesia:dirty_write(#offline_msg_offsets{us = US, offset = Offset}).
+    mnesia:dirty_write(#offline_msg_offset{us = US, offset = Offset}).
 
 binaries_to_records(US, To, Bins) ->
     [binary_to_record(US, To, Bin) || Bin <- Bins].
