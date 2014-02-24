@@ -80,7 +80,7 @@ start(Host, Opts) ->
                                            max_user_offline_messages),
     start_backend_module(Opts),
     ?BACKEND:init(Host, Opts),
-    start_worker(Host, AccessMaxOfflineMsgs),
+    start_workers(Host, AccessMaxOfflineMsgs),
     ejabberd_hooks:add(offline_message_hook, Host,
 		       ?MODULE, inspect_packet, 50),
     ejabberd_hooks:add(resend_offline_messages_hook, Host,
@@ -106,7 +106,7 @@ stop(Host) ->
 			  ?MODULE, remove_user, 50),
     ejabberd_hooks:delete(disco_sm_features, Host, ?MODULE, get_sm_features, 50),
     ejabberd_hooks:delete(disco_local_features, Host, ?MODULE, get_sm_features, 50),
-    stop_worker(Host),
+    stop_workers(Host),
     ok.
 
 
@@ -181,8 +181,19 @@ discarded_offline_messages(DiscardedMsgs, LUser, LServer) ->
 %% Supervision
 %% ------------------------------------------------------------------
 
-start_worker(Host, AccessMaxOfflineMsgs) ->
-    Proc = srv_name(Host),
+pool_size(_Host) ->
+    16.
+
+start_workers(Host, AccessMaxOfflineMsgs) ->
+    [start_worker(Host, AccessMaxOfflineMsgs, N)
+    || N <- lists:seq(1, pool_size(Host))].
+
+stop_workers(Host) ->
+    [stop_worker(Host, N)
+    || N <- lists:seq(1, pool_size(Host))].
+    
+start_worker(Host, AccessMaxOfflineMsgs, N) ->
+    Proc = srv_name(Host, N),
     ChildSpec =
     {Proc,
      {?MODULE, start_link, [Proc, Host, AccessMaxOfflineMsgs]},
@@ -193,19 +204,25 @@ start_worker(Host, AccessMaxOfflineMsgs) ->
     supervisor:start_child(ejabberd_sup, ChildSpec),
     ok.
 
-stop_worker(Host) ->
-    Proc = srv_name(Host),
+stop_worker(Host, N) ->
+    Proc = srv_name(Host, N),
     supervisor:terminate_child(ejabberd_sup, Proc),
     supervisor:delete_child(ejabberd_sup, Proc).
 
 start_link(Name, Host, AccessMaxOfflineMsgs) ->
     gen_server:start_link({local, Name}, ?MODULE, [Host, AccessMaxOfflineMsgs], []).
 
-srv_name() ->
-    mod_offline.
+rand_srv_name(Host) ->
+    Size = pool_size(Host),
+    {_,_,Micro} = now(),
+    %% N = 1 .. Size
+    N = (Micro rem Size) + 1,
+    srv_name(Host, N).
 
-srv_name(Host) ->
-    gen_mod:get_module_proc(Host, srv_name()).
+srv_name(Host, N) when is_binary(Host), is_integer(N) ->
+    SHost = binary_to_list(Host),
+    SN = integer_to_list(N),
+    list_to_atom("mod_offline_" ++ SHost ++ "_" ++ SN).
 
 %%====================================================================
 %% gen_server callbacks
@@ -314,7 +331,7 @@ store_packet(
         Packet = #xmlel{children = Els}) ->
     TimeStamp = now(),
     Expire = find_x_expire(TimeStamp, Els),
-    Pid = srv_name(LServer),
+    Pid = rand_srv_name(LServer),
     Msg = #offline_msg{us = {LUser, LServer},
              timestamp = TimeStamp,
              expire = Expire,
