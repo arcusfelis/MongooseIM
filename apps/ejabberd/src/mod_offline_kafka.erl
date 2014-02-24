@@ -48,7 +48,7 @@ init(_Host, Opts) ->
     kafka_server_sup:start_link(Servers),
     mnesia:create_table(offline_msg_offset,
             [{disc_copies, [node()]},
-             {type, bag},
+             {type, set},
              {attributes, record_info(fields, offline_msg_offset)}]),
     ok.
 
