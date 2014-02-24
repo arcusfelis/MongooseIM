@@ -59,7 +59,7 @@ pop_messages(LUser, LServer) ->
     Broker  = 0,
     Part    = 0,
     Offset = get_offset(US),
-    try kafka_simple_api:fetch(Broker, Topic, Part, Offset) of
+    case kafka_simple_api:fetch(Broker, Topic, Part, Offset) of
         {ok, []} ->
             {ok, []};
         {ok, {Bins, Size}} ->
