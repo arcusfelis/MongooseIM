@@ -212,11 +212,10 @@ stop_worker(Host, N) ->
 start_link(Name, Host, AccessMaxOfflineMsgs) ->
     gen_server:start_link({local, Name}, ?MODULE, [Host, AccessMaxOfflineMsgs], []).
 
-rand_srv_name(Host) ->
+choose_server(Host, LUser) ->
     Size = pool_size(Host),
-    {_,_,Micro} = now(),
     %% N = 1 .. Size
-    N = (Micro rem Size) + 1,
+    N = erlang:phash2(LUser, Size) + 1,
     srv_name(Host, N).
 
 srv_name(Host, N) when is_binary(Host), is_integer(N) ->
@@ -331,7 +330,7 @@ store_packet(
         Packet = #xmlel{children = Els}) ->
     TimeStamp = now(),
     Expire = find_x_expire(TimeStamp, Els),
-    Pid = rand_srv_name(LServer),
+    Pid = choose_server(LServer, LUser),
     Msg = #offline_msg{us = {LUser, LServer},
              timestamp = TimeStamp,
              expire = Expire,
