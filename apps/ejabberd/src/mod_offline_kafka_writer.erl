@@ -136,7 +136,8 @@ run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc}) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([Host, Broker]) ->
-    {ok, #state{host=Host, conn=Broker}}.
+    {ok, Conn} = kafka_server:start_link(['10.100.0.43', 9092]),
+    {ok, #state{host=Host, conn=Conn}}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |

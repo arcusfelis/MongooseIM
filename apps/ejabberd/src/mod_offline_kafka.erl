@@ -56,9 +56,6 @@
 -record(offline_msg_offset, {us, offset}).
 
 init(Host, Opts) ->
-    %% Servers will not be stopped with module.
-    Servers = gen_mod:get_opt(kafka_servers, Opts, [{0, '127.0.0.1', 9092}]),
-    kafka_server_sup:start_link(Servers),
     mnesia:create_table(offline_msg_offset,
             [{disc_copies, [node()]},
              {type, set},
@@ -238,7 +235,8 @@ run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc}) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([Host, Broker]) ->
-    {ok, #state{host=Host, conn=Broker}}.
+    {ok, Conn} = kafka_server:start_link(['10.100.0.43', 9092]),
+    {ok, #state{host=Host, conn=Conn}}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
