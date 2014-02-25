@@ -1,11 +1,5 @@
 %%%----------------------------------------------------------------------
-%%% File    : mod_offline_odbc.erl
-%%% Author  : Alexey Shchepin <alexey@process-one.net>
-%%% Purpose : Store and manage offline messages in relational database.
-%%% Created :  5 Jan 2003 by Alexey Shchepin <alexey@process-one.net>
-%%%
-%%%
-%%% ejabberd, Copyright (C) 2002-2011   ProcessOne
+%%% MongooseIM
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -24,15 +18,11 @@
 %%%
 %%%----------------------------------------------------------------------
 
--module(mod_offline_kafka).
--behaviour(mod_offline).
+-module(mod_offline_kafka_writer).
 
--export([init/2,
-         pop_messages/2,
-         write_messages/4,
-         remove_expired_messages/1,
-         remove_old_messages/2,
-         remove_user/2]).
+-export([start/2,
+         stop/1,
+         produce/6]).
 
 %% Internal exports
 -export([start_link/3]).
@@ -53,18 +43,12 @@
     acc=[],
     flush_interval_tref}).
 
--record(offline_msg_offset, {us, offset}).
-
-init(Host, Opts) ->
-    %% Servers will not be stopped with module.
-    Servers = gen_mod:get_opt(kafka_servers, Opts, [{0, '127.0.0.1', 9092}]),
-    kafka_server_sup:start_link(Servers),
-    mnesia:create_table(offline_msg_offset,
-            [{disc_copies, [node()]},
-             {type, set},
-             {attributes, record_info(fields, offline_msg_offset)}]),
+start(Host, Opts) ->
     start_workers(Host),
-    mod_offline_kafka_writer:start(Host, Opts),
+    ok.
+
+stop(Host) ->
+    stop_workers(Host),
     ok.
 
 %% Supervision
@@ -110,106 +94,18 @@ choose_server(Host, LUser) ->
 srv_name(Host, N) when is_binary(Host), is_integer(N) ->
     SHost = binary_to_list(Host),
     SN = integer_to_list(N),
-    list_to_atom("mod_offline_" ++ SHost ++ "_" ++ SN).
+    list_to_atom("mod_offline_writer_" ++ SHost ++ "_" ++ SN).
 
 
 %% API
 %% ------------------------------------------------------------------
 
-pop_messages(LUser, LServer) ->
-    US = {LUser, LServer},
-    To = jlib:make_jid(LUser, LServer, <<>>),
-    Topic   = make_topic(LUser, LServer),
-    Broker  = 0,
-    Part    = 0,
-    Offset = get_offset(US),
+produce(LUser, LServer, Broker, Topic, Part, Bins) ->
     Server = choose_server(LServer, LUser),
-    MaxSize = 65535,
-    case fetch_request(Server, Topic, Part, Offset, MaxSize) of
-        {ok, []} ->
-            {ok, []};
-        {ok, {Bins, Size}} ->
-            set_offset(US, Offset + Size),
-            {ok, binaries_to_records(US, To, Bins)};
-        {error, Reason} ->
-            ?ERROR_MSG("Fetch for ~p with offset ~p failed with reason ~p",
-                [Topic, Offset, Reason]),
-            {error, kafka_error}
-    end.
+    produce_request(Server, Topic, Part, Bins).
 
-fetch_request(Server, Topic, Part, Offset, MaxSize) ->
-    gen_server:call(Server, {fetch_request, {Topic, Part, Offset, MaxSize}}).
-
-get_offset(US) ->
-    case mnesia:dirty_read(offline_msg_offset, US) of
-        [#offline_msg_offset{offset = Offset}] ->
-            Offset;
-        [] ->
-            0
-    end.
-
-set_offset(US, Offset) ->
-    mnesia:dirty_write(#offline_msg_offset{us = US, offset = Offset}).
-
-binaries_to_records(US, To, Bins) ->
-    [binary_to_record(US, To, Bin) || Bin <- Bins].
-
-binary_to_record(US, To, Bin) ->
-    term_to_record(US, To, binary_to_term(Bin)).
-
-term_to_record(US, To, {TimeStamp, From, Packet}) ->
-    #offline_msg{us = US,
-             timestamp = TimeStamp,
-             expire = undefined,
-             from = From,
-             to = To,
-             packet = Packet}.
-
-
-write_messages(LUser, LServer, Msgs, MaxOfflineMsgs) ->
-    case is_message_count_threshold_reached(
-                 LUser, LServer, Msgs, MaxOfflineMsgs) of
-        false ->
-            write_all_messages_t(LUser, LServer, Msgs);
-        true ->
-            discard_all_messages_t(Msgs)
-    end.
-
-write_all_messages_t(LUser, LServer, Msgs) ->
-    Topic   = make_topic(LUser, LServer),
-    Broker  = 0,
-    Part    = 0,
-    Bins = [record_to_binary(Msg) || Msg <- Msgs],
-    mod_offline_kafka_writer:produce(LUser, LServer, Broker, Topic, Part, Bins).
-
-make_topic(LUser, LServer) ->
-    make_binary_jid(LUser, LServer).
-
-make_binary_jid(LUser, LServer) ->
-    <<LUser/binary, "@", LServer/binary>>.
-
-%% Ignore the expire field.
-record_to_binary(#offline_msg{
-        from = From, packet = Packet, timestamp = TimeStamp}) ->
-    term_to_binary({TimeStamp, From, Packet}).
-
-discard_all_messages_t(Msgs) ->
-    {discarded, Msgs, []}.
-
-is_message_count_threshold_reached(_LUser, _LServer, _Msgs, _MaxOfflineMsgs) ->
-    %% TODO
-    false.
-
-%% Not supported by Kafka.
-%% Messages will be deleted by timeout.
-remove_user(_LUser, _LServer) ->
-    ok.
-
-remove_expired_messages(_LServer) ->
-    ok.
-
-remove_old_messages(_LServer, _Days) ->
-    ok.
+produce_request(Server, Topic, Part, Bins) ->
+    gen_server:cast(Server, {produce_request, {Topic, Part, Bins}}).
 
 %%====================================================================
 %% Internal functions
@@ -218,12 +114,14 @@ remove_old_messages(_LServer, _Days) ->
 run_flush(State=#state{acc=[]}) ->
     State;
 run_flush(State=#state{conn=Conn, flush_interval_tref=TRef, acc=Acc}) ->
-    ?DEBUG("Multifetch ~p topics.", [length(Acc)]),
-    {Clients, TopicPartitionOffsets} = lists:unzip(Acc),
+    ?DEBUG("Multiproduce to ~p topics.", [length(Acc)]),
+    Magic = 1,
+    Compression = 0,
+    TopicPartMsgs = [
+        {Topic, Part, [{Magic, Compression, Msg} || Msg <- Msgs]}
+        || {Topic, Part, Msgs} <- Acc],
+    kafka_simple_api:multi_produce(Conn, TopicPartMsgs),
     TRef =/= undefined andalso erlang:cancel_timer(TRef),
-    {ok, Messages} = kafka_simple_api:multi_fetch(Conn, TopicPartitionOffsets),
-    [gen_server:reply(From, {ok, Message})
-     || {From, Message} <- lists:zip(Clients, Messages)],
     State#state{acc=[], flush_interval_tref=undefined}.
 
 %%====================================================================
@@ -249,19 +147,8 @@ init([Host, Broker]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call({fetch_request, TopicPartitionOffset}, From,
-            State=#state{acc=Acc, flush_interval_tref=TRef, flush_interval=Int,
-                         max_packet_size=Max}) ->
-    TRef2 = case {Acc, TRef} of
-            {[], undefined} -> erlang:send_after(Int, self(), flush);
-            {_, _} -> TRef
-            end,
-    Req = {From, TopicPartitionOffset},
-    State2 = State#state{acc=[Req|Acc], flush_interval_tref=TRef2},
-    case length(Acc) + 1 >= Max of
-        true -> {noreply, run_flush(State2)};
-        false -> {noreply, State2}
-    end.
+handle_call(_, _From, State) ->
+    {reply, ok, State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -270,6 +157,19 @@ handle_call({fetch_request, TopicPartitionOffset}, From,
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
 
+handle_cast({produce_request, TopicPartBins},
+            State=#state{acc=Acc, flush_interval_tref=TRef, flush_interval=Int,
+                         max_packet_size=Max}) ->
+    TRef2 = case {Acc, TRef} of
+            {[], undefined} -> erlang:send_after(Int, self(), flush);
+            {_, _} -> TRef
+            end,
+    Req = TopicPartBins,
+    State2 = State#state{acc=[Req|Acc], flush_interval_tref=TRef2},
+    case length(Acc) + 1 >= Max of
+        true -> {noreply, run_flush(State2)};
+        false -> {noreply, State2}
+    end;
 handle_cast(Msg, State) ->
     ?WARNING_MSG("Strange message ~p.", [Msg]),
     {noreply, State}.
