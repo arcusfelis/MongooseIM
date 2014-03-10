@@ -729,7 +729,7 @@ select_offline_messages_sql(SUser, SServer, STimeStamp) ->
             "where server = '">>, SServer, <<"' and "
                   "username = '">>, SUser, <<"' and "
                   "(expire is null or expire > ">>, STimeStamp, <<") "
-             "ORDER BY timestamp">>].
+             "ORDER BY id">>].
 
 delete_offline_messages_sql(SUser, SServer) ->
     [<<"delete from offline_message "
