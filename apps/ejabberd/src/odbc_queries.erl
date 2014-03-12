@@ -719,8 +719,12 @@ pop_offline_messages(LServer, SUser, SServer, STimeStamp) ->
     DeleteSQL = delete_offline_messages_sql(SUser, SServer),
     F = fun() ->
 	      Res = ejabberd_odbc:sql_query_t(SelectSQL),
-          ejabberd_odbc:sql_query_t(DeleteSQL),
-          Res
+          case Res of
+            {selected, _, []} ->
+                Res;
+            _ ->
+                ejabberd_odbc:sql_query_t(DeleteSQL)
+          end
         end,
     ejabberd_odbc:sql_transaction(LServer, F).
 
