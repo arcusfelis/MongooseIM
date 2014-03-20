@@ -52,7 +52,6 @@ metrics_hooks(Op, Host) ->
          sessionAuthAnonymous,
          sessionAuthFails,
          sessionLogouts,
-         odbcLag,
          xmppMessageSent,
          xmppMessageReceived,
          xmppMessageBounced,
@@ -110,7 +109,8 @@ get_general_counters(Host) ->
     [{Host, Counter} || Counter <- ?GENERAL_COUNTERS].
 
 -define (TOTAL_COUNTERS, [
-         sessionCount
+         sessionCount,
+         odbcLag
          ]).
 
 get_total_counters(Host) ->
