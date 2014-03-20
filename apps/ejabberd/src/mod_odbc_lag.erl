@@ -72,7 +72,7 @@ stop(Host) ->
 %%====================================================================
 init([Host, Opts]) ->
     PingInterval = gen_mod:get_opt(ping_interval, Opts, ?DEFAULT_PING_INTERVAL),
-    timer:send_interval(PingInterval, ping),
+    timer:send_interval(PingInterval * 1000, ping),
     {ok, #state{host = Host, ping_interval = PingInterval}}.
 
 handle_call(stop, _From, State) ->
