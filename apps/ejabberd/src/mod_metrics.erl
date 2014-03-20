@@ -52,6 +52,7 @@ metrics_hooks(Op, Host) ->
          sessionAuthAnonymous,
          sessionAuthFails,
          sessionLogouts,
+         odbcLag,
          xmppMessageSent,
          xmppMessageReceived,
          xmppMessageBounced,

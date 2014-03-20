@@ -34,6 +34,7 @@
          privacy_iq_set/4,
          privacy_check_packet/6,
          privacy_list_push/3,
+         odbc_lag/2,
          mam_get_prefs/4,
          mam_set_prefs/7,
          mam_remove_archive/3,
@@ -81,6 +82,7 @@ get_hooks(Host) ->
      [privacy_iq_set,         Host, ?MODULE, privacy_iq_set, 1],
      [privacy_check_packet,   Host, ?MODULE, privacy_check_packet, 55],
      [sm_broadcast,           Host, ?MODULE, privacy_list_push, 1],
+     [odbc_lag, Host, ?MODULE, odbc_lag, 50],
      [mam_set_prefs, Host, ?MODULE, mam_set_prefs, 50],
      [mam_get_prefs, Host, ?MODULE, mam_get_prefs, 50],
      [mam_archive_message, Host, ?MODULE, mam_archive_message, 50],
@@ -244,6 +246,9 @@ privacy_check_packet(Acc, _, Server, _, _, _) ->
             ok
     end,
     Acc.
+
+odbc_lag(Host, Mcs) ->
+    folsom_metrics:notify({Host, odbcLag}, Mcs).
 
 %% ----------------------------------------------------------------------------
 %% mod_mam
