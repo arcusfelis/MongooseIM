@@ -40,7 +40,14 @@ init_folsom(Host) ->
     lists:foreach(fun(Name) ->
         folsom_metrics:new_counter(Name),
         folsom_metrics:tag_metric(Name, Host)
-    end, get_total_counters(Host)).
+    end, get_total_counters(Host)),
+
+    lists:foreach(fun(Name) ->
+        folsom_metrics:new_gauge(Name),
+        folsom_metrics:tag_metric(Name, Host)
+    end, get_simple_variables(Host)).
+
+    
 
 metrics_hooks(Op, Host) ->
     lists:foreach(fun(Hook) ->
@@ -109,12 +116,18 @@ get_general_counters(Host) ->
     [{Host, Counter} || Counter <- ?GENERAL_COUNTERS].
 
 -define (TOTAL_COUNTERS, [
-         sessionCount,
+         sessionCount
+         ]).
+
+-define (SIMPLE_VARIABLES, [
          odbcLag
          ]).
 
 get_total_counters(Host) ->
     [{Host, Counter} || Counter <- ?TOTAL_COUNTERS].
+
+get_simple_variables(Host) ->
+    [{Host, Var} || Var <- ?SIMPLE_VARIABLES].
 
 cowboy_router_paths(BasePath) ->
     [
