@@ -47,6 +47,7 @@
 
 -record(state, {host,
                 max_age,
+                page_size,
                 retry_interval}).
 
 default_max_age() ->
@@ -55,6 +56,9 @@ default_max_age() ->
 
 default_retry_interval() ->
     timer:minutes(1).
+
+default_page_size() ->
+    5000.
 
 %%====================================================================
 %% API
@@ -83,10 +87,12 @@ stop(Host) ->
 init([Host, Opts]) ->
     %% In milliseconds
     MaxAge = gen_mod:get_opt(max_age, Opts, default_max_age()),
+    PageSize = gen_mod:get_opt(page_size, Opts, default_page_size()),
     RetryInterval = gen_mod:get_opt(retry_interval, Opts, default_retry_interval()),
     retry_after(Host, RetryInterval),
     {ok, #state{host = Host,
                 max_age = MaxAge,
+                page_size = PageSize,
                 retry_interval = RetryInterval}}.
 
 handle_call(stop, _From, State) ->
@@ -100,8 +106,9 @@ handle_cast(_Msg, State) ->
 handle_info(retry_now,
             State=#state{host = Host,
                          max_age = MaxAge,
+                         page_size = PageSize,
                          retry_interval = RetryInterval}) ->
-    try_delete_old_messages_and_wait(Host, MaxAge, RetryInterval),
+    try_delete_old_messages_and_wait(Host, MaxAge, RetryInterval, PageSize),
     {noreply, State};
 handle_info({delete_now, NextId},
             State=#state{host = Host,
@@ -121,8 +128,8 @@ terminate(_Reason, #state{}) ->
 %% Internal
 %%====================================================================
 
-maximum_row_to_delete_next(Host) ->
-    Res = ejabberd_odbc:sql_query(Host, maximum_row_to_delete_next_sql()),
+maximum_row_to_delete_next(Host, PageSize) ->
+    Res = ejabberd_odbc:sql_query(Host, maximum_row_to_delete_next_sql(PageSize)),
     case Res of
         {selected, [<<"id">>, <<"timestamp">>], [{BId, BTimeStamp}]} ->
             Id = bin_to_int(BId),
@@ -136,9 +143,9 @@ maximum_row_to_delete_next(Host) ->
             {error, Reason}
     end.
 
-maximum_row_to_delete_next_sql() ->
-    <<"SELECT id, timestamp FROM offline_message "
-      "ORDER BY id LIMIT 1 OFFSET 5000">>.
+maximum_row_to_delete_next_sql(PageSize) ->
+    [<<"SELECT id, timestamp FROM offline_message "
+       "ORDER BY id LIMIT 1 OFFSET ">>, integer_to_list(PageSize)].
 
 delete_old_messages(Host, Id) ->
     ejabberd_odbc:sql_query(Host, delete_old_messages_sql(Id)).
@@ -148,9 +155,9 @@ delete_old_messages_sql(Id) ->
        "WHERE id <= ">>, integer_to_list(Id)].
 
 
-try_delete_old_messages_and_wait(Host, MaxAge, RetryInterval) ->
+try_delete_old_messages_and_wait(Host, MaxAge, RetryInterval, PageSize) ->
     CurTimestamp = now_to_milliseconds(now()),
-    case maximum_row_to_delete_next(Host) of
+    case maximum_row_to_delete_next(Host, PageSize) of
         {ok, {NextId, NextTimeStamp}} ->
             case select_strategy(CurTimestamp, NextTimeStamp, MaxAge) of
                 {wait, Delay} ->
