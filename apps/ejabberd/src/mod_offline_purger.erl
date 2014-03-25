@@ -132,6 +132,7 @@ maximum_row_to_delete_next(Host) ->
             %% Table contains less than 5000 records
             {error, not_enough};
         {error, Reason} ->
+            ?DEBUG("SQL error ~p", [Reason]),
             {error, Reason}
     end.
 
