@@ -28,7 +28,7 @@
 -author('michael.uvarov@erlang-solutions.com').
 
 -behavior(gen_mod).
--behavior(gen_server).
+-behaviour(locks_leader).
 
 -include("ejabberd.hrl").
 -include("jlib.hrl").
@@ -36,18 +36,29 @@
 -define(SUPERVISOR, ejabberd_sup).
 
 %% API
--export([start_link/2]).
+-export([start_link/2,
+         next_purge/1]).
 
 %% gen_mod callbacks
 -export([start/2, stop/1]).
 
-%% gen_server callbacks
--export([init/1, terminate/2, handle_call/3, handle_cast/2,
-         handle_info/2, code_change/3]).
+-export([init/1,
+         elected/3,
+         surrendered/3,
+         handle_DOWN/3,
+         handle_leader_call/4,
+         handle_leader_cast/3,
+         from_leader/3,
+         handle_call/4,
+         handle_cast/3,
+         handle_info/3,
+         terminate/2,
+         code_change/4]).
 
 -record(state, {host,
                 max_age,
                 page_size,
+                retry_tref,
                 retry_interval}).
 
 default_max_age() ->
@@ -65,7 +76,11 @@ default_page_size() ->
 %%====================================================================
 start_link(Host, Opts) ->
     Proc = gen_mod:get_module_proc(Host, ?MODULE),
-    gen_server:start_link({local, Proc}, ?MODULE, [Host, Opts], []).
+    locks_leader:start_link(Proc, ?MODULE, [Host, Opts], []).
+
+next_purge(Host) ->
+    Proc = gen_mod:get_module_proc(Host, ?MODULE),
+    locks_leader:leader_call(Proc, next_purge).
 
 %%====================================================================
 %% gen_mod callbacks
@@ -89,36 +104,70 @@ init([Host, Opts]) ->
     MaxAge = gen_mod:get_opt(max_age, Opts, default_max_age()),
     PageSize = gen_mod:get_opt(page_size, Opts, default_page_size()),
     RetryInterval = gen_mod:get_opt(retry_interval, Opts, default_retry_interval()),
-    retry_after(Host, RetryInterval),
     {ok, #state{host = Host,
                 max_age = MaxAge,
                 page_size = PageSize,
                 retry_interval = RetryInterval}}.
 
-handle_call(stop, _From, State) ->
+elected(State=#state{retry_tref = undefined,
+                     host = Host, retry_interval = RetryInterval}, _I, _Cand) ->
+    %% Start counting
+    ?INFO_MSG("Become a purging leader", []),
+    RetryTRef = retry_after(Host, RetryInterval),
+    {ok, sync, State#state{retry_tref = RetryTRef}};
+elected(State, _I, _Cand) ->
+    %% Already started
+    {ok, sync, State}.
+
+surrendered(State=#state{retry_tref = undefined}, sync, _I) ->
+    {ok, State};
+surrendered(State=#state{retry_tref = RetryTRef}, sync, _I) ->
+    %% Stop counting
+    ?INFO_MSG("Stop being a purging leader", []),
+    erlang:cancel_timer(RetryTRef),
+    {ok, State#state{retry_tref = undefined}}.
+
+handle_DOWN(_Pid, State, _I) ->
+    {ok, State}.
+
+handle_leader_call(next_purge, _From, #state{retry_tref = RetryTRef} = State, _I) ->
+    TimerInfo = timer_info(RetryTRef),
+    {reply, {node(), TimerInfo}, State};
+handle_leader_call(_Msg, _From, #state{} = State, _I) ->
+    ?WARNING_MSG("Unexpected message ~p from ~p", [_Msg, _From]),
+    {reply, ok, State}.
+
+handle_leader_cast(_Msg, #state{} = State, _I) ->
+    ?WARNING_MSG("Unexpected async message ~p", [_Msg]),
+    {ok, State}.
+
+from_leader(sync, #state{} = State, _I) ->
+    {ok, State}.
+
+handle_call(stop, _From, State, _I) ->
     {stop, normal, ok, State};
-handle_call(_Req, _From, State) ->
+handle_call(_Req, _From, State, _I) ->
     {reply, {error, badarg}, State}.
 
-handle_cast(_Msg, State) ->
+handle_cast(_Msg, State, _I) ->
     {noreply, State}.
 
 handle_info(retry_now,
             State=#state{host = Host,
                          max_age = MaxAge,
                          page_size = PageSize,
-                         retry_interval = RetryInterval}) ->
-    try_delete_old_messages_and_wait(Host, MaxAge, RetryInterval, PageSize),
-    {noreply, State};
+                         retry_interval = RetryInterval}, _I) ->
+    RetryTRef = try_delete_old_messages_and_wait(Host, MaxAge, RetryInterval, PageSize),
+    {noreply, State#state{retry_tref = RetryTRef}};
 handle_info({delete_now, NextId},
             State=#state{host = Host,
-                         retry_interval = RetryInterval}) ->
-    delete_old_messages_and_wait(Host, NextId, RetryInterval),
-    {noreply, State};
-handle_info(_Info, State) ->
+                         retry_interval = RetryInterval}, _I) ->
+    RetryTRef = delete_old_messages_and_wait(Host, NextId, RetryInterval),
+    {noreply, State#state{retry_tref = RetryTRef}};
+handle_info(_Info, State, _I) ->
     {noreply, State}.
 
-code_change(_OldVsn, State, _Extra) ->
+code_change(_OldVsn, State, _I, _Extra) ->
     {ok, State}.
 
 terminate(_Reason, #state{}) ->
@@ -197,3 +246,8 @@ now_to_milliseconds(Now) ->
 
 micro_to_milliseconds(Microseconds) ->
     Microseconds div 1000.
+
+timer_info(undefined) ->
+    undefined;
+timer_info(RetryTRef) ->
+    erlang:read_timer(RetryTRef).
