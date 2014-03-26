@@ -186,6 +186,7 @@ maximum_row_to_delete_next(Host, PageSize) ->
             {ok, {Id, TimeStamp}};
         {selected, _, []} ->
             %% Table contains less than 5000 records
+            ?INFO_MSG("Not enough messages. Do nothing", []),
             {error, not_enough};
         {error, Reason} ->
             ?DEBUG("SQL error ~p", [Reason]),
@@ -219,10 +220,12 @@ try_delete_old_messages_and_wait(Host, MaxAge, RetryInterval, PageSize) ->
     end.
 
 delete_old_messages_and_wait(Host, NextId, RetryInterval) ->
+    ?INFO_MSG("Deleting old messages up to ~p", [NextId]),
     delete_old_messages(Host, NextId),
     retry_after(Host, RetryInterval).
 
 delete_old_messages_after(_Host, Delay, NextId) ->
+    ?INFO_MSG("Wait ~p to delete old messages up to ~p", [Delay, NextId]),
     erlang:send_after(Delay, self(), {delete_now, NextId}).
 
 retry_after(_Host, Delay) ->
