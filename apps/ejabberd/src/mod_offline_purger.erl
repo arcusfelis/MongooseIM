@@ -59,7 +59,8 @@
                 max_age,
                 page_size,
                 retry_tref,
-                retry_interval}).
+                retry_interval,
+                purge_interval}).
 
 default_max_age() ->
     %% 3 weeks
@@ -104,9 +105,11 @@ init([Host, Opts]) ->
     MaxAge = gen_mod:get_opt(max_age, Opts, default_max_age()),
     PageSize = gen_mod:get_opt(page_size, Opts, default_page_size()),
     RetryInterval = gen_mod:get_opt(retry_interval, Opts, default_retry_interval()),
+    PurgeInterval = gen_mod:get_opt(purge_interval, Opts, RetryInterval),
     {ok, #state{host = Host,
                 max_age = MaxAge,
                 page_size = PageSize,
+                purge_interval = PurgeInterval,
                 retry_interval = RetryInterval}}.
 
 elected(State=#state{retry_tref = undefined,
@@ -156,13 +159,15 @@ handle_info(retry_now,
             State=#state{host = Host,
                          max_age = MaxAge,
                          page_size = PageSize,
-                         retry_interval = RetryInterval}, _I) ->
-    RetryTRef = try_delete_old_messages_and_wait(Host, MaxAge, RetryInterval, PageSize),
+                         retry_interval = RetryInterval,
+                         purge_interval = PurgeInterval}, _I) ->
+    RetryTRef = try_delete_old_messages_and_wait(Host, MaxAge,
+        RetryInterval, PurgeInterval, PageSize),
     {noreply, State#state{retry_tref = RetryTRef}};
 handle_info({delete_now, NextId},
             State=#state{host = Host,
-                         retry_interval = RetryInterval}, _I) ->
-    RetryTRef = delete_old_messages_and_wait(Host, NextId, RetryInterval),
+                         purge_interval = PurgeInterval}, _I) ->
+    RetryTRef = delete_old_messages_and_wait(Host, NextId, PurgeInterval),
     {noreply, State#state{retry_tref = RetryTRef}};
 handle_info(_Info, State, _I) ->
     {noreply, State}.
@@ -205,7 +210,7 @@ delete_old_messages_sql(Id) ->
        "WHERE id <= ">>, integer_to_list(Id)].
 
 
-try_delete_old_messages_and_wait(Host, MaxAge, RetryInterval, PageSize) ->
+try_delete_old_messages_and_wait(Host, MaxAge, RetryInterval, PurgeInterval, PageSize) ->
     CurTimestamp = now_to_milliseconds(now()),
     case maximum_row_to_delete_next(Host, PageSize) of
         {ok, {NextId, NextTimeStamp}} ->
@@ -213,18 +218,16 @@ try_delete_old_messages_and_wait(Host, MaxAge, RetryInterval, PageSize) ->
                 {wait, Delay} ->
                     delete_old_messages_after(Host, Delay, NextId);
                 delete_now ->
-                    delete_old_messages_and_wait(Host, NextId, RetryInterval)
+                    delete_old_messages_and_wait(Host, NextId, PurgeInterval)
             end;
-        {ok, {NextId, NextTimeStamp}} ->
-            retry_after(Host, RetryInterval);
         {error, _} ->
             retry_after(Host, RetryInterval)
     end.
 
-delete_old_messages_and_wait(Host, NextId, RetryInterval) ->
+delete_old_messages_and_wait(Host, NextId, PurgeInterval) ->
     ?INFO_MSG("Deleting old messages up to ~p", [NextId]),
     delete_old_messages(Host, NextId),
-    retry_after(Host, RetryInterval).
+    retry_after(Host, PurgeInterval).
 
 delete_old_messages_after(_Host, Delay, NextId) ->
     ?INFO_MSG("Wait ~p to delete old messages up to ~p", [Delay, NextId]),
