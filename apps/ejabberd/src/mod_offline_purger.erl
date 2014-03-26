@@ -215,6 +215,8 @@ try_delete_old_messages_and_wait(Host, MaxAge, RetryInterval, PageSize) ->
                 delete_now ->
                     delete_old_messages_and_wait(Host, NextId, RetryInterval)
             end;
+        {ok, {NextId, NextTimeStamp}} ->
+            retry_after(Host, RetryInterval);
         {error, _} ->
             retry_after(Host, RetryInterval)
     end.
@@ -234,7 +236,7 @@ retry_after(_Host, Delay) ->
 select_strategy(CurTimestamp, NextTimeStamp, MaxAge)
     %% Too young to die
     when (CurTimestamp - NextTimeStamp) < MaxAge ->
-    {wait, CurTimestamp - NextTimeStamp - MaxAge};
+    {wait, MaxAge - CurTimestamp + NextTimeStamp};
 select_strategy(_CurTimestamp, _NextTimeStamp, _MaxAge) ->
     delete_now.
 
