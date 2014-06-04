@@ -53,7 +53,8 @@
          user_resources/2,
          get_session_pid/3,
          get_session/3,
-         get_session_ip/3
+         get_session_ip/3,
+         is_privacy_allow/3
         ]).
 
 %% gen_server callbacks
