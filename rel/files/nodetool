@@ -62,11 +62,37 @@ main(Args) ->
                 Other ->
                     io:format("~p\n", [Other])
             end;
+        ["rpceval", Command] ->
+            %% Try to parse locally, before calling the remote server
+            try_to_parse(Command),
+            try
+                {ok, Tokens, _} = rpc:call(TargetNode, erl_scan, string, [Command], 60000),
+                {ok, Exprs} = rpc:call(TargetNode, erl_parse, parse_exprs, [Tokens], 60000),
+                rpc:call(TargetNode, erl_eval, exprs, [Exprs, []])
+            of {value, Value, _} ->
+                    io:format("~p\n", [Value]);
+                {badrpc, Reason} ->
+                    io:format("RPC to ~p failed: ~p\n", [TargetNode, Reason]),
+                    halt(1)
+                catch Type:Reason ->
+                    io:format("RPC preparation ~p failed: ~p:~p\n", [TargetNode, Type, Reason]),
+                    halt(1)
+            end;
         Other ->
             io:format("Other: ~p\n", [Other]),
             io:format("Usage: nodetool {ping|stop|restart|reboot}\n")
     end,
     net_kernel:stop().
+
+try_to_parse(Command) ->
+    try
+        {ok, Tokens, _} = erl_scan:string(Command),
+        {ok, _Exprs} = erl_parse:parse_exprs(Tokens),
+        ok
+    catch Type:Reason ->
+        io:format("Parsing ~p failed: ~p:~p\n", [Command, Type, Reason]),
+        halt(1)
+    end.
 
 process_args([], Acc, TargetNode) ->
     {lists:reverse(Acc), TargetNode};
