@@ -436,8 +436,8 @@ init_modules(C, muc04, Config) ->
 
 init_modules(ca, muc_with_pm, Config) ->
     %% TODO add mod_mam with Cassandra
-    init_module(host(), mod_mam_ca_arch, []),
-    init_module(host(), mod_mam_muc_ca_arch, []),
+    init_module(host(), mod_mam_cassandra_arch, []),
+    init_module(host(), mod_mam_muc_cassandra_arch, []),
     init_module(host(), mod_mam, [add_archived_element]),
     init_module(host(), mod_mam_muc, [{host, "muc.@HOST@"}, add_archived_element]),
     Config;
@@ -515,7 +515,7 @@ init_modules(odbc_mnesia_cache, muc_with_pm, Config) ->
     Config;
 
 init_modules(ca, muc, Config) ->
-    init_module(host(), mod_mam_muc_ca_arch, []),
+    init_module(host(), mod_mam_muc_cassandra_arch, []),
     init_module(host(), mod_mam_muc, [{host, "muc.@HOST@"}, add_archived_element]),
     Config;
 init_modules(odbc, muc, Config) ->
@@ -586,8 +586,8 @@ init_modules(odbc_simple, _, Config) ->
     init_module(host(), mod_mam_odbc_user, [pm]),
     Config;
 init_modules(ca, _, Config) ->
-    init_module(host(), mod_mam_ca_arch, [pm]),
-    init_module(host(), mod_mam_ca_prefs, [pm]),
+    init_module(host(), mod_mam_cassandra_arch, [pm]),
+    init_module(host(), mod_mam_cassandra_prefs, [pm]),
     init_module(host(), mod_mam, [add_archived_element]),
     Config;
 init_modules(odbc_async, _, Config) ->
@@ -648,9 +648,9 @@ end_modules(_, _, Config) ->
 mam_modules() ->
     [mod_mam,
      mod_mam_muc,
-     mod_mam_ca_arch,
-     mod_mam_muc_ca_arch,
-     mod_mam_ca_prefs,
+     mod_mam_cassandra_arch,
+     mod_mam_muc_cassandra_arch,
+     mod_mam_cassandra_prefs,
      mod_mam_odbc_arch,
      mod_mam_muc_odbc_arch,
      mod_mam_odbc_async_pool_writer,
