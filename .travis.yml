@@ -1,8 +1,9 @@
 language: erlang
+sudo: required
 before_install:
         - sudo apt-get update
-        - sudo apt-get install libpam0g-dev libexpat1-dev odbc-postgresql libmyodbc
-        - if [ $PRESET = 'ldap_mnesia' ]; then sudo apt-get install slapd ldap-utils; fi
+        - sudo apt-get install -y libpam0g-dev libexpat1-dev odbc-postgresql libmyodbc
+        - if [ $PRESET = 'ldap_mnesia' ]; then sudo apt-get install -y slapd ldap-utils; fi
         - tools/travis-generate-pass.sh
 install:
         - tools/travis-build.sh
@@ -26,6 +27,8 @@ after_success:
 
 services:
         - redis-server
+        - docker
+        - riak
 branches:
         only:
                 - master
@@ -34,6 +37,7 @@ branches:
 otp_release:
         - 17.5
 env:
+        - PRESET=cassandra_mnesia DB=cassandra REL_CONFIG=with-cassandra CASSANDRA_VERSION=3.1
         - PRESET=internal_redis DB=mnesia REL_CONFIG=with-redis
         - PRESET=internal_mnesia DB=mnesia REL_CONFIG=minimal
         - PRESET=mysql_mnesia DB=mysql REL_CONFIG=with-mysql
