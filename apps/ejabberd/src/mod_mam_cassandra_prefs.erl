@@ -190,9 +190,8 @@ remove_archive(_Host, _UserID, UserJID) ->
     ok.
 
 
--spec query_behaviour(ejabberd:server(), UserJID :: ejabberd:jid(), BUserJID :: string(),
-        BRemJID :: binary() | string(), BRemBareJID :: binary() | string()
-        ) -> any().
+-spec query_behaviour(ejabberd:server(), UserJID :: ejabberd:jid(), BUserJID :: binary(),
+        BRemJID :: binary(), BRemBareJID :: binary()) -> any().
 query_behaviour(_Host, UserJID, BUserJID, BRemJID, BRemBareJID) ->
     PoolName = pool_name(UserJID),
     case BRemJID of
@@ -218,11 +217,9 @@ decode_behaviour(<<"R">>) -> roster;
 decode_behaviour(<<"A">>) -> always;
 decode_behaviour(<<"N">>) -> never.
 
-bare_jid(undefined) -> undefined;
 bare_jid(JID) ->
     jid:to_binary(jid:to_bare(jid:to_lower(JID))).
 
-full_jid(undefined) -> undefined;
 full_jid(JID) ->
     jid:to_binary(jid:to_lower(JID)).
 

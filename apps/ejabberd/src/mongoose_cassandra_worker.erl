@@ -70,13 +70,19 @@ start_link(PoolName, Addr, Port, ClientOptions) ->
 %%
 %% UserJID is used for rate-limiting, statistics and debugging
 cql_query(Worker, _UserJID, Module, QueryName, Params) when is_pid(Worker) ->
-    ResultF = gen_server:call(Worker, {cql_query, Module, QueryName, Params}),
-    {ok, Result} = ResultF(),
-    case Result of
-        void ->
-            {ok, []};
-        _ ->
-            {ok, seestar_result:rows(Result)}
+    try gen_server:call(Worker, {cql_query, Module, QueryName, Params}) of
+        {error, Reason} ->
+            {error, Reason};
+        ResultF ->
+            {ok, Result} = ResultF(),
+            case Result of
+                void ->
+                    {ok, []};
+                _ ->
+                    {ok, seestar_result:rows(Result)}
+            end
+    catch Class:Reason ->
+          {error, {Class, Reason}}
     end.
 
 cql_query_async(Worker, _UserJID, Module, QueryName, Params) when is_pid(Worker) ->
@@ -88,13 +94,19 @@ cql_query_multi_async(Worker, _UserJID, Module, QueryName, MultiParams) when is_
 cql_batch(Worker, UserJID, Module, Queries, not_batch) ->
     cql_query_multi(Worker, UserJID, Module, Queries);
 cql_batch(Worker, _UserJID, Module, Queries, BatchType) ->
-    ResultF = gen_server:call(Worker, {cql_batch, Module, BatchType, Queries}),
-    {ok, Result} = ResultF(),
-    case Result of
-        void ->
-            {ok, []};
-        _ ->
-            {ok, seestar_result:rows(Result)}
+    try gen_server:call(Worker, {cql_batch, Module, BatchType, Queries}) of
+        {error, Reason} ->
+            {error, Reason};
+        ResultF ->
+            {ok, Result} = ResultF(),
+            case Result of
+                void ->
+                    {ok, []};
+                _ ->
+                    {ok, seestar_result:rows(Result)}
+            end
+    catch Class:Reason ->
+          {error, {Class, Reason}}
     end.
 
 %% @doc Run queries, abort if an error. No rollback
@@ -164,7 +176,7 @@ test_query(PoolName) ->
 test_query(PoolName, UserJID) ->
     Workers = mongoose_cassandra_sup:get_all_workers(PoolName),
     [{Worker, try cql_query(Worker, UserJID, ?MODULE, test_query, []) of
-                  [[_Now]] -> ok;
+                  {ok, [[_Now]]} -> ok;
                   Other -> {error, Other}
               catch Class:Reason -> {error, {Class, Reason}}
               end} || Worker <- Workers].

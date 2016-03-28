@@ -521,7 +521,7 @@ purge_single_message(_Result, _Host, MessID, _UserID, UserJID, _Now) ->
             Messages = [#mam_message{
               id = MessID,
               user_jid = BUserJID,
-              remote_jid = RemFullJID, %% set the field for debugging
+              remote_jid = BRemFullJID, %% set the field for debugging
               with_jid = BWithJID
               } || BWithJID <- BWithJIDs],
             delete_messages(Worker, UserJID, Messages),
@@ -718,7 +718,7 @@ filter_to_cql() ->
     TotalCount   :: non_neg_integer(),
     RSM          :: #rsm_in{} | undefined,
     Offset       :: non_neg_integer().
-calc_offset(_W, _UserJID, _LS, _F, _PS, _TC, #rsm_in{direction = undefined, index = Index})
+calc_offset(_W, _UserJID, _LS, _F, _PS, _TC, #rsm_in{index = Index})
     when is_integer(Index) ->
     Index;
 %% Requesting the Last Page in a Result Set
@@ -742,7 +742,6 @@ bare_jid(undefined) -> undefined;
 bare_jid(JID) ->
     jid:to_binary(jid:to_bare(jid:to_lower(JID))).
 
-full_jid(undefined) -> undefined;
 full_jid(JID) ->
     jid:to_binary(jid:to_lower(JID)).
 

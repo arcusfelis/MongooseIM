@@ -189,8 +189,7 @@ handle_empty_result({ok, _}, _Pos) -> ok;
 handle_empty_result({error, Other}, Pos) ->
     ?ERROR_MSG("issue=\"handle_empty_result failed\", position=~p, reason=~1000p",
                [Pos, Other]),
-    {error, Other};
-handle_empty_result(Other, Pos) -> handle_empty_result({error, Other}, Pos).
+    {error, Other}.
 
 list_exists(LUser, LServer, Name) ->
     Names = get_list_names_only(LUser, LServer),
