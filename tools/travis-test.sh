@@ -50,6 +50,7 @@ run_tests() {
 	[ "$SKIP_SMALL" = "1" ] || make ct
 	
 	SMALL_STATUS=$?
+    echo "SMALL_STATUS=$SMALL_STATUS"
 
 	echo "############################"
 	echo "Running ejabberd_tests"
