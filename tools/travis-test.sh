@@ -4,6 +4,13 @@ PRESET=$1
 
 source tools/travis-common-vars.sh
 
+# Print ct_progress_hook output
+echo "" > /tmp/progress
+tail -f /tmp/progress &
+
+# Kill children
+trap "trap - SIGTERM && kill -- -$$" SIGINT SIGTERM EXIT
+
 echo ${BASE}
 
 EJD1=${BASE}/dev/mongooseim_node1
@@ -39,9 +46,11 @@ run_tests() {
 	echo "Running embeded common tests"
 	echo "############################"
 
-	make ct
+    echo "Use SKIP_SMALL=1 to skip embeded common tests"
+	[ "$SKIP_SMALL" = "1" ] || make ct
 	
 	SMALL_STATUS=$?
+    echo "SMALL_STATUS=$SMALL_STATUS"
 
 	echo "############################"
 	echo "Running ejabberd_tests"
