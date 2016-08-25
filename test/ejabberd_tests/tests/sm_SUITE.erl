@@ -12,6 +12,34 @@
                        has_mod_vcard_xupdate/0,
                        server_string/1]).
 -import(escalus_stanza, [setattr/3]).
+-compile({parse_transform, story_transform}).
+-story_cases([
+     server_announces_sm,
+     server_enables_sm_before_session,
+     server_enables_sm_after_session,
+     server_returns_failed_after_start,
+     server_returns_failed_after_auth,
+     server_enables_resumption,
+     basic_ack,
+     h_ok_before_session,
+     h_ok_after_session_enabled_before_session,
+     h_ok_after_session_enabled_after_session,
+%    h_ok_after_a_chat,
+     resend_unacked_on_reconnection,
+     session_established,
+     wait_for_resumption,
+%    resume_session,
+
+     client_acks_more_than_sent,
+     too_many_unacked_stanzas,
+     preserve_order,
+     resend_unacked_after_resume_timeout,
+     resume_session_state_send_message,
+     resume_session_state_stop_c2s,
+     server_requests_ack_after_session,
+     resend_more_offline_messages_than_buffer_size,
+     server_requests_ack]).
+
 
 -define(SHORT_RESUME_TIMEOUT, 5).
 -define(SMALL_SM_BUFFER, 3).
@@ -811,7 +839,8 @@ get_bjid(UserSpec) ->
 
 given_fresh_spec(Config, User) ->
     NewConfig = escalus_fresh:create_users(Config, [{User, 1}]),
-    escalus_users:get_userspec(NewConfig, User).
+    UserSpec = escalus_users:get_userspec(NewConfig, User),
+    escalus_helper:attach_event_manager(NewConfig, UserSpec).
 
 given_fresh_user(Config, UserName) ->
     Spec = given_fresh_spec(Config, UserName),
