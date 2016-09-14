@@ -12,6 +12,34 @@
                        has_mod_vcard_xupdate/0,
                        server_string/1]).
 -import(escalus_stanza, [setattr/3]).
+-compile({parse_transform, story_transform}).
+-story_cases([
+     server_announces_sm,
+     server_enables_sm_before_session,
+     server_enables_sm_after_session,
+     server_returns_failed_after_start,
+     server_returns_failed_after_auth,
+     server_enables_resumption,
+     basic_ack,
+     h_ok_before_session,
+     h_ok_after_session_enabled_before_session,
+     h_ok_after_session_enabled_after_session,
+%    h_ok_after_a_chat,
+     resend_unacked_on_reconnection,
+     session_established,
+     wait_for_resumption,
+%    resume_session,
+
+     client_acks_more_than_sent,
+     too_many_unacked_stanzas,
+     preserve_order,
+     resend_unacked_after_resume_timeout,
+     resume_session_state_send_message,
+     resume_session_state_stop_c2s,
+     server_requests_ack_after_session,
+     resend_more_offline_messages_than_buffer_size,
+     server_requests_ack]).
+
 
 -define(SHORT_RESUME_TIMEOUT, 5).
 -define(SMALL_SM_BUFFER, 3).
@@ -532,15 +560,20 @@ resume_session_state_send_message(Config) ->
 
     AliceSpec = given_fresh_spec(Config, alice),
     {ok, Alice, _, _} = escalus_connection:start(AliceSpec, ConnSteps++[stream_resumption]),
-    escalus_connection:send(Alice, escalus_stanza:presence(<<"available">>)),
+    escalus_connection:send(Alice, presence_status(<<"Old connection">>)),
     escalus_connection:get_stanza(Alice, presence),
 
     escalus:assert(is_sm_ack_request, escalus_connection:get_stanza(Alice, ack)),
 
     escalus_connection:send(Bob, escalus_stanza:chat_to(get_bjid(AliceSpec), <<"msg-1">>)),
+
+    {ok, C2SPid} = get_session_pid(AliceSpec, server_string("escalus-default-resource")),
+
     %% kill alice connection
     kill_connection(Alice),
     ct:sleep(1000), %% alice should be in resume_session_state
+
+    resume_session = get_process_statename(C2SPid),
 
     U = proplists:get_value(username, AliceSpec),
     S = proplists:get_value(server, AliceSpec),
@@ -552,12 +585,13 @@ resume_session_state_send_message(Config) ->
 
     %% alice comes back and receives unacked message
     {ok, NewAlice, _, _} = escalus_connection:start(AliceSpec, ConnSteps),
-    escalus_connection:send(NewAlice, escalus_stanza:presence(<<"available">>)),
+    escalus_connection:send(NewAlice, presence_status(<<"New connection">>)),
 
-    Stanzas = [escalus_connection:get_stanza(NewAlice, msg) || _ <- lists:seq(1,4) ],
+    Stanzas = [escalus_connection:get_stanza(NewAlice, msg) || _ <- lists:seq(1,5) ],
 
     % what about order ?
-    escalus_new_assert:mix_match([is_presence,
+    escalus_new_assert:mix_match([is_presence_with_type(<<"available">>),
+                                  is_presence_with_type(<<"available">>),
                                   is_chat(<<"msg-1">>),
                                   is_chat(<<"msg-2">>),
                                   is_chat(<<"msg-3">>)],
@@ -606,7 +640,7 @@ resume_session_state_stop_c2s(Config) ->
     Stanzas = [escalus_connection:get_stanza(NewAlice, msg),
                escalus_connection:get_stanza(NewAlice, msg)],
 
-    escalus_new_assert:mix_match([is_presence,
+    escalus_new_assert:mix_match([is_presence_with_type(<<"available">>),
                                   is_chat(<<"msg-1">>)],
                                  Stanzas),
 
@@ -804,6 +838,9 @@ kill_connection(#client{module = escalus_tcp, ssl = SSL,
 is_chat(Content) ->
     fun(Stanza) -> escalus_pred:is_chat_message(Content, Stanza) end.
 
+is_presence_with_type(Type) ->
+    fun(Stanza) -> escalus_pred:is_presence_with_type(Type, Stanza) end.
+
 get_bjid(UserSpec) ->
     User = proplists:get_value(username, UserSpec),
     Server = proplists:get_value(server, UserSpec),
@@ -811,7 +848,8 @@ get_bjid(UserSpec) ->
 
 given_fresh_spec(Config, User) ->
     NewConfig = escalus_fresh:create_users(Config, [{User, 1}]),
-    escalus_users:get_userspec(NewConfig, User).
+    UserSpec = escalus_users:get_userspec(NewConfig, User),
+    escalus_helper:attach_event_manager(NewConfig, UserSpec).
 
 given_fresh_user(Config, UserName) ->
     Spec = given_fresh_spec(Config, UserName),
@@ -824,3 +862,14 @@ given_fresh_user_with_spec(Spec) ->
     JID = get_bjid(Props),
     {User#client{jid  = JID}, Spec}.
 
+get_process_statename(FsmPid) ->
+    Status = rpc:call(node(FsmPid), sys, get_status, [FsmPid]),
+    X = element(4, Status),
+    Y = lists:last(X),
+    Z = proplists:get_value(data, Y),
+    proplists:get_value("StateName", Z).
+
+presence_status(Status) ->
+    Children = [#xmlel{name = <<"status">>,
+                       children = [#xmlcdata{content = Status}]}],
+    escalus_stanza:presence(<<"available">>, Children).
