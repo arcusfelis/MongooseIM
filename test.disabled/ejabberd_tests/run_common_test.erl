@@ -237,7 +237,7 @@ prepare(Test) ->
     travis_fold("cover compiled output", fun() ->
             io:format("cover: compiled ~p~n", [Compiled])
         end),
-    report_progress("Cover compilation took ~p seconds~n", [Seconds]),
+    report_progress("~nCover compilation took ~p seconds~n", [Seconds]),
     ok.
 
 analyze(Test, CoverOpts) ->
