@@ -234,7 +234,9 @@ prepare(Test) ->
                               cover_timeout())
                         end),
     Seconds = Time div 1000000,
-    io:format("cover: compiled ~p~n", [Compiled]),
+    travis_fold("cover compiled output", fun() ->
+            io:format("cover: compiled ~p~n", [Compiled])
+        end),
     report_progress("Cover compilation took ~p seconds~n", [Seconds]),
     ok.
 
@@ -406,3 +408,15 @@ host_param(Name, {_, Params}) ->
 report_progress(Format, Args) ->
     Message = io_lib:format(Format, Args),
     file:write_file("/tmp/progress", Message, [append]).
+
+travis_fold(Description, Fun) ->
+    case os:getenv("TRAVIS_JOB_ID") of
+        false ->
+            Fun();
+        _ ->
+            io:format("travis_fold:start:~ts~n", [Description]),
+            Result = Fun(),
+            io:format("travis_fold:end:~ts~n", [Description]),
+            Result
+    end.
+
