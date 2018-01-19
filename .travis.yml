@@ -51,18 +51,19 @@ branches:
 otp_release:
         - 19.3
 env:
+        # We execute small tests for each otp_release only once
         - PRESET=internal_mnesia DB=mnesia REL_CONFIG=with-all TLS_DIST=yes
-        - PRESET=mysql_redis DB=mysql REL_CONFIG="with-mysql with-redis"
-        - PRESET=odbc_pgsql_mnesia DB=pgsql REL_CONFIG=with-odbc
-        - PRESET=ldap_mnesia DB=mnesia REL_CONFIG=with-none
-        - PRESET=cassandra_mnesia DB=cassandra REL_CONFIG=with-cassandra CASSANDRA_VERSION=3.9
+        - PRESET=mysql_redis DB=mysql REL_CONFIG="with-mysql with-redis" SMALL_TESTS=false
+        - PRESET=odbc_pgsql_mnesia DB=pgsql REL_CONFIG=with-odbc SMALL_TESTS=false
+        - PRESET=ldap_mnesia DB=mnesia REL_CONFIG=with-none SMALL_TESTS=false
+        - PRESET=cassandra_mnesia DB=cassandra REL_CONFIG=with-cassandra CASSANDRA_VERSION=3.9 SMALL_TESTS=false
 
 matrix:
     include:
         - otp_release: 20.0
           env: PRESET=dialyzer_only
         - otp_release: 20.0
-          env: PRESET=pgsql_mnesia DB=pgsql REL_CONFIG=with-pgsql
+          env: PRESET=pgsql_mnesia DB=pgsql REL_CONFIG=with-pgsql SMALL_TESTS=false
         - otp_release: 18.3
           env: PRESET=riak_mnesia DB=riak REL_CONFIG=with-riak
 
