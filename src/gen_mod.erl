@@ -64,7 +64,8 @@
          loaded_modules_with_opts/1,
          get_module_proc/2,
          is_loaded/2,
-         get_deps/3]).
+         get_deps/3,
+         dump_options/0]).
 
 -include("ejabberd.hrl").
 
@@ -410,3 +411,16 @@ get_deps(Host, Module, Opts) ->
         _ ->
             []
     end.
+
+dump_options() ->
+    Records = ets:tab2list(ejabberd_modules),
+    Hosts = lists:usort([Host || #ejabberd_module{module_host = {_, Host}} <- Records]),
+    lists:map(fun(Host) ->
+              ModuleOpts = [{Module, lists:sort(proplists:compact(Opts))}
+                            || #ejabberd_module{module_host = {Module, Host1},
+                                                opts = Opts}
+                               <- Records,
+                               Host1 =:= Host],
+              {Host, lists:sort(ModuleOpts)}
+              end, Hosts).
+
