@@ -78,6 +78,17 @@
          pagination_last25_opt_count_all/1,
          pagination_offset5_opt_count/1,
          pagination_offset5_opt_count_all/1,
+         %% complete_flag_cases tests
+         before_complete_false_last5/1,
+         before_complete_false_before10/1,
+         before_complete_true_before1/1,
+         before_complete_true_before5/1,
+         before_complete_true_before6/1,
+         after_complete_false_first_page/1,
+         after_complete_false_after2/1,
+         after_complete_false_after9/1,
+         after_complete_true_after10/1,
+         after_complete_true_after11/1,
          archived/1,
          message_with_stanzaid_and_archived/1,
          strip_archived/1,
@@ -132,6 +143,7 @@
          stanza_archive_request/2,
          stanza_text_search_archive_request/3,
          wait_archive_respond/2,
+         wait_for_complete_archive_response/3,
          assert_respond_size/2,
          assert_respond_query_id/3,
          parse_result_iq/2,
@@ -284,8 +296,15 @@ basic_groups() ->
             {configurable_archiveid, [], configurable_archiveid_cases()},
             {rsm_all, [parallel],
              [{rsm02,      [parallel], rsm_cases()},
-              {rsm03,      [parallel], rsm_cases()},
-              {rsm04,      [parallel], rsm_cases()},
+              %% Functions mod_mam_utils:make_fin_element_v03/5 and make_fin_element/5
+              %% are almost the same, so don't need to test all versions of
+              %% MAM protocol with complete_flag_cases.
+              %% We also don't need a separate group for complete_flag_cases,
+              %% because it has the same init_per_group as other tests
+              %% from rsm04.
+              %% So we can run all the checks in parallel.
+              {rsm03,      [parallel], rsm_cases() ++ complete_flag_cases()},
+              {rsm04,      [parallel], rsm_cases() ++ complete_flag_cases()},
               {with_rsm02, [parallel], with_rsm_cases()},
               {with_rsm03, [parallel], with_rsm_cases()},
               {with_rsm04, [parallel], with_rsm_cases()}]}]},
@@ -431,6 +450,18 @@ rsm_cases() ->
        pagination_first25_opt_count_all,
        pagination_last25_opt_count_all,
        pagination_offset5_opt_count_all].
+
+complete_flag_cases() ->
+    [before_complete_false_last5,
+     before_complete_false_before10,
+     before_complete_true_before1,
+     before_complete_true_before5,
+     before_complete_true_before6,
+     after_complete_false_first_page,
+     after_complete_false_after2,
+     after_complete_false_after9,
+     after_complete_true_after10,
+     after_complete_true_after11].
 
 prefs_cases() ->
     [prefs_set_request,
@@ -2537,6 +2568,176 @@ pagination_last_after_id5_before_id11(Config) ->
         ok
         end,
     parallel_story(Config, [{alice, 1}], F).
+
+
+%% Test cases for "complete" attribute
+%% Complete attribute is used for pagination, telling when to stop paginating.
+%% see complete_flag_cases with the whole list of the cases.
+%% -----------------------------------------------
+
+%% Get last page with most recent messages
+%% rsm_id.id is undefined
+%% GIVEN 15 archived messages
+%% WHEN direction=before, page_size=5
+%% THEN complete=false
+before_complete_false_last5(Config) ->
+    P = ?config(props, Config),
+    F = fun(Alice) ->
+        %% Get the last page of size 5.
+        %% Get messages: 11,12,13,14,15
+        RSM = #rsm_in{max=5, direction=before},
+        rsm_send(Config, Alice,
+            stanza_page_archive_request(P, <<"last5">>, RSM)),
+               wait_for_complete_archive_response(P, Alice, <<"false">>)
+        end,
+    parallel_story(Config, [{alice, 1}], F).
+
+%% Gets some page in the midle of the result set
+%% GIVEN 15 archived messages
+%% WHEN direction=before, rsm_id=10, page_size=5
+%% THEN complete=false
+before_complete_false_before10(Config) ->
+    P = ?config(props, Config),
+    F = fun(Alice) ->
+        %% Get messages: 5,6,7,8,9
+        RSM = #rsm_in{max=5, direction=before, id=message_id(10, Config)},
+        rsm_send(Config, Alice,
+            stanza_page_archive_request(P, <<"before10">>, RSM)),
+        wait_for_complete_archive_response(P, Alice, <<"false">>)
+        end,
+    parallel_story(Config, [{alice, 1}], F).
+
+%% Reaches the end of result set
+%% No messages are returned.
+%% GIVEN 15 archived messages
+%% WHEN direction=before, rsm_id=1, page_size=5
+%% THEN complete=true
+before_complete_true_before1(Config) ->
+    P = ?config(props, Config),
+    F = fun(Alice) ->
+        %% Get no messages
+        RSM = #rsm_in{max=5, direction=before, id=message_id(1, Config)},
+        rsm_send(Config, Alice,
+            stanza_page_archive_request(P, <<"before1">>, RSM)),
+        wait_for_complete_archive_response(P, Alice, <<"true">>)
+        end,
+    parallel_story(Config, [{alice, 1}], F).
+
+%% Reaches the end of result set
+%% Less than maximum number of messages are returned.
+%% GIVEN 15 archived messages
+%% WHEN direction=before, rsm_id=5, page_size=5
+%% THEN complete=true
+before_complete_true_before5(Config) ->
+    P = ?config(props, Config),
+    F = fun(Alice) ->
+        %% Get messages: 1,2,3,4
+        RSM = #rsm_in{max=5, direction=before, id=message_id(5, Config)},
+        rsm_send(Config, Alice,
+            stanza_page_archive_request(P, <<"before5">>, RSM)),
+        wait_for_complete_archive_response(P, Alice, <<"true">>)
+        end,
+    parallel_story(Config, [{alice, 1}], F).
+
+%% Reaches the end of result set
+%% A special case when exactly maximum number of messages are returned.
+%% GIVEN 15 archived messages
+%% WHEN direction=before, rsm_id=6, page_size=5
+%% THEN complete=true
+before_complete_true_before6(Config) ->
+    P = ?config(props, Config),
+    F = fun(Alice) ->
+        %% Get messages: 1,2,3,4,5
+        RSM = #rsm_in{max=5, direction=before, id=message_id(6, Config)},
+        rsm_send(Config, Alice,
+            stanza_page_archive_request(P, <<"before6">>, RSM)),
+        wait_for_complete_archive_response(P, Alice, <<"true">>)
+        end,
+    parallel_story(Config, [{alice, 1}], F).
+
+%% First page is not complete, because max is smaller than archive size.
+%% rsm_id.id is undefined
+%% GIVEN 15 archived messages
+%% WHEN direction=after, rsm_id=6, page_size=5
+%% THEN complete=false
+after_complete_false_first_page(Config) ->
+    P = ?config(props, Config),
+    F = fun(Alice) ->
+        %% Get messages: 1,2,3,4,5
+        RSM = #rsm_in{max=5, direction='after'},
+        rsm_send(Config, Alice,
+            stanza_page_archive_request(P, <<"firstpage">>, RSM)),
+        wait_for_complete_archive_response(P, Alice, <<"false">>)
+        end,
+    parallel_story(Config, [{alice, 1}], F).
+
+%% There are still 8-15 messages to paginate after this request.
+%% GIVEN 15 archived messages
+%% WHEN direction=after, rsm_id=2, page_size=5
+%% THEN complete=false
+after_complete_false_after2(Config) ->
+    P = ?config(props, Config),
+    F = fun(Alice) ->
+        %% Get messages: 3,4,5,6,7
+        RSM = #rsm_in{max=5, direction='after', id=message_id(2, Config)},
+        rsm_send(Config, Alice,
+            stanza_page_archive_request(P, <<"after2">>, RSM)),
+        wait_for_complete_archive_response(P, Alice, <<"false">>)
+        end,
+    parallel_story(Config, [{alice, 1}], F).
+
+%% There is still one message to paginate after this request.
+%% GIVEN 15 archived messages
+%% WHEN direction=after, rsm_id=9, page_size=5
+%% THEN complete=false
+after_complete_false_after9(Config) ->
+    P = ?config(props, Config),
+    F = fun(Alice) ->
+        %% Get messages: 10,11,12,13,14
+        RSM = #rsm_in{max=5, direction='after', id=message_id(9, Config)},
+        rsm_send(Config, Alice,
+            stanza_page_archive_request(P, <<"after9">>, RSM)),
+        wait_for_complete_archive_response(P, Alice, <<"false">>)
+        end,
+    parallel_story(Config, [{alice, 1}], F).
+
+%% There are no messages to paginate after this request.
+%% Special case, when exactly page_size messages are returned.
+%% GIVEN 15 archived messages
+%% WHEN direction=after, rsm_id=10, page_size=5
+%% THEN complete=true
+after_complete_true_after10(Config) ->
+    P = ?config(props, Config),
+    F = fun(Alice) ->
+        %% Get the last page of size 5.
+        %% Get messages: 11,12,13,14,15
+        RSM = #rsm_in{max=5, direction='after', id=message_id(10, Config)},
+        rsm_send(Config, Alice,
+            stanza_page_archive_request(P, <<"after10">>, RSM)),
+        wait_for_complete_archive_response(P, Alice, <<"true">>)
+        end,
+    parallel_story(Config, [{alice, 1}], F).
+
+%% There are no messages to paginate after this request.
+%% Less than page_size are returned.
+%% GIVEN 15 archived messages
+%% WHEN direction=after, rsm_id=10, page_size=5
+%% THEN complete=true
+after_complete_true_after11(Config) ->
+    P = ?config(props, Config),
+    F = fun(Alice) ->
+        %% Get the last page of size 5.
+        %% Get messages: 12,13,14,15
+        RSM = #rsm_in{max=5, direction='after', id=message_id(11, Config)},
+        rsm_send(Config, Alice,
+            stanza_page_archive_request(P, <<"after11">>, RSM)),
+        wait_for_complete_archive_response(P, Alice, <<"true">>)
+        end,
+    parallel_story(Config, [{alice, 1}], F).
+
+
+%% Test cases for preferences IQs
+%% ------------------------------------------------------------------
 
 prefs_set_request(Config) ->
     P = ?config(props, Config),
