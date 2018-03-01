@@ -6,9 +6,6 @@
 -define(CT_REPORT, filename:join([".", "ct_report"])).
 -define(ROOT_DIR, "../../").
 
-%% We need #config{} record
--include("covertool.hrl").
-
 %% DEBUG: compile time settings
 -define(PRINT_ERRORS, false).
 -define(PRINT_STATS, false).
@@ -259,8 +256,8 @@ analyze(Test, CoverOpts) ->
     report_time("Export merged cover data", fun() ->
 			cover:export("/tmp/mongoose_combined.coverdata")
 		end),
-    report_time("Export merged cover data in cobertura.xml format", fun() ->
-            export_cobertura()
+    report_time("Export merged cover data in codecov.json format", fun() ->
+            export_codecov_json()
         end),
     case os:getenv("TRAVIS_JOB_ID") of
         false ->
@@ -461,13 +458,38 @@ import_code_paths(FromNode) when is_atom(FromNode) ->
     code:add_paths(Paths).
 
 
-%% Same as the command, but works faster, because we don't need to import
-%% cover again.
-%% tools/covertool -cover /tmp/mongoose_combined.coverdata -appname mongooseim -output cobertura.xml
-export_cobertura() ->
-    Config = #config{appname = 'MongooseIM',
-                     sources = [?ROOT_DIR ++ "/src/"],
-                     %% An empty list disables methods info (non-optimal code)
-                     beams = [],
-                     output = ?ROOT_DIR ++ "/cobertura.xml"},
-    covertool:generate_report(Config, cover:imported_modules()).
+export_codecov_json() ->
+    Modules = cover:imported_modules(),
+    {result, Result, _} = cover:analyse(Modules, calls, line),
+    Mod2Data = lists:foldl(fun add_cover_line_into_array/2, #{}, Result),
+    BaseNameToPath = basename_to_path_map(),
+    JSON = maps:fold(format_array_to_list(BaseNameToPath), [], Mod2Data),
+    Binary = jiffy:encode(#{<<"coverage">> => {JSON}}),
+    file:write_file(?ROOT_DIR ++ "/codecov.json", Binary).
+
+add_cover_line_into_array({{Module, Line}, CallTimes}, Acc) ->
+    CallsPerLineArray = maps:get(Module, Acc, array:new({default,null})),
+    Acc#{Module => array:set(Line, CallTimes, CallsPerLineArray)}.
+
+format_array_to_list(BaseNameToPath) ->
+    fun(Module, CallsPerLineArray, Acc) ->
+        %% There is no line with index 0, so put null
+        ListOfCallTimes = [null|array:to_list(CallsPerLineArray)],
+        BinPath = list_to_binary(find_module_path(Module, BaseNameToPath)),
+        [{BinPath, ListOfCallTimes}|Acc]
+        end.
+
+basename_to_path_map() ->
+    RepoPath = ?ROOT_DIR,
+    RepoPathLen = length(RepoPath),
+    F1 = fun(FileName, Acc) ->
+         ModuleFileName = filename:basename(FileName),
+         PathInRepo = lists:nthtail(RepoPathLen, FileName),
+         [{ModuleFileName, PathInRepo}|Acc]
+         end,
+    Regex = ".erl",
+    maps:from_list(filelib:fold_files(RepoPath ++ "/src", Regex, true, F1, [])).
+
+find_module_path(Module, BaseNameToPath) ->
+    ModName = atom_to_list(Module) ++ ".erl",
+    maps:get(ModName, BaseNameToPath, ModName).
