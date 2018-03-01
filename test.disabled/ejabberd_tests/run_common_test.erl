@@ -6,6 +6,9 @@
 -define(CT_REPORT, filename:join([".", "ct_report"])).
 -define(ROOT_DIR, "../../").
 
+%% We need #config{} record
+-include("covertool.hrl").
+
 %% DEBUG: compile time settings
 -define(PRINT_ERRORS, false).
 -define(PRINT_STATS, false).
@@ -256,6 +259,9 @@ analyze(Test, CoverOpts) ->
     report_time("Export merged cover data", fun() ->
 			cover:export("/tmp/mongoose_combined.coverdata")
 		end),
+    report_time("Export merged cover data in cobertura.xml format", fun() ->
+            export_cobertura()
+        end),
     case os:getenv("TRAVIS_JOB_ID") of
         false ->
             make_html(modules_to_analyze(CoverOpts));
@@ -453,3 +459,15 @@ travis_fold(Description, Fun) ->
 import_code_paths(FromNode) when is_atom(FromNode) ->
     Paths = rpc:call(FromNode, code, get_path, []),
     code:add_paths(Paths).
+
+
+%% Same as the command, but works faster, because we don't need to import
+%% cover again.
+%% tools/covertool -cover /tmp/mongoose_combined.coverdata -appname mongooseim -output cobertura.xml
+export_cobertura() ->
+    Config = #config{appname = 'MongooseIM',
+                     sources = [?ROOT_DIR ++ "/src/"],
+                     %% An empty list disables methods info (non-optimal code)
+                     beams = [],
+                     output = ?ROOT_DIR ++ "/cobertura.xml"},
+    covertool:generate_report(Config, cover:imported_modules()).
