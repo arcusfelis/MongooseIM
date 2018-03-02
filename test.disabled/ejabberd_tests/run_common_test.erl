@@ -473,8 +473,7 @@ add_cover_line_into_array({{Module, Line}, CallTimes}, Acc) ->
 
 format_array_to_list(BaseNameToPath) ->
     fun(Module, CallsPerLineArray, Acc) ->
-        %% There is no line with index 0, so put null
-        ListOfCallTimes = [null|array:to_list(CallsPerLineArray)],
+        ListOfCallTimes = array:to_list(CallsPerLineArray),
         BinPath = list_to_binary(find_module_path(Module, BaseNameToPath)),
         [{BinPath, ListOfCallTimes}|Acc]
         end.
