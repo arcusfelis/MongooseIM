@@ -71,6 +71,7 @@ test: $(PREPARE)
 
 prepare: mim_ct_rest compile vm.dist.args
 	erlc -Ideps/exml/include \
+		-Ideps/covertool/include \
 		 run_common_test.erl
 	mkdir -p ct_report
 
