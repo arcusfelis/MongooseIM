@@ -2987,7 +2987,7 @@ initial_activity() ->
                         %% Useful for debugging
                         %% Pretty heavy for real tests
                         %% Enable, when you see problems with parallel_story cases
-                      % log_parallel_stanza_drop(Pass, Stanza, From, To, StoryPidBin),
+                        log_parallel_stanza_drop(Pass, Stanza, From, To, StoryPidBin),
                         Pass;
                    (_) -> true %% pass xmlstreamend
                end,
