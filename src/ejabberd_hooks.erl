@@ -275,9 +275,23 @@ run_fold1([{_Seq, Module, Function} | Ls], Hook, Val, Args) ->
 hook_apply_function(_Module, Function, _Hook, Val, Args) when is_function(Function) ->
     safely:apply(Function, [Val | Args]);
 hook_apply_function(Module, Function, Hook, Val, Args) ->
+    Pre = pre_hook(),
     Result = safely:apply(Module, Function, [Val | Args]),
+    post_hook(Pre, Module, Function, Val, Args),
     record(Hook, Module, Function, Result).
 
+pre_hook() ->
+    os:timestamp().
+
+post_hook(Pre, Module, Function, Val, Args) ->
+    Microseconds = timer:now_diff(os:timestamp(), Pre),
+    case Microseconds > 1000000 of %% longer than one second
+        true ->
+            ?WARNING_MSG("issue=slow_hook time=~p module=~p function=~p args=~p",
+                         [Microseconds div 1000, Module, Function, [Val|Args]]);
+        _ ->
+            ok
+    end.
 
 record(_Hook, _Module, _Function, Acc) ->
     Acc.
