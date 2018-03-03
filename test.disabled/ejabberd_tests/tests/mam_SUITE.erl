@@ -294,17 +294,20 @@ basic_groups() ->
             {archived, [parallel], archived_cases()},
             {mam_purge, [parallel], mam_purge_cases()},
             {configurable_archiveid, [], configurable_archiveid_cases()},
-            {rsm_all, [parallel],
+            {rsm_all, [], %% not parallel, because we want to limit concurrency
              [{rsm02,      [parallel], rsm_cases()},
               %% Functions mod_mam_utils:make_fin_element_v03/5 and make_fin_element/5
               %% are almost the same, so don't need to test all versions of
               %% MAM protocol with complete_flag_cases.
-              %% We also don't need a separate group for complete_flag_cases,
-              %% because it has the same init_per_group as other tests
-              %% from rsm04.
-              %% So we can run all the checks in parallel.
-              {rsm03,      [parallel], rsm_cases() ++ complete_flag_cases()},
-              {rsm04,      [parallel], rsm_cases() ++ complete_flag_cases()},
+              %%
+              %% We need a separate group for complete_flag_cases,
+              %% because there should not be a lot of cases running
+              %% using parallel_story with the same user.
+              %% Otherwise there would be a lot of presences sent between devices.
+              {rsm03,      [parallel], rsm_cases()},
+              {rsm04,      [parallel], rsm_cases()},
+              {rsm03_comp, [parallel], complete_flag_cases()},
+              {rsm04_comp, [parallel], complete_flag_cases()},
               {with_rsm02, [parallel], with_rsm_cases()},
               {with_rsm03, [parallel], with_rsm_cases()},
               {with_rsm04, [parallel], with_rsm_cases()}]}]},
@@ -560,6 +563,10 @@ init_per_group(rsm03, Config) ->
     [{props, mam03_props()}|Config];
 init_per_group(rsm04, Config) ->
     [{props, mam04_props()}|Config];
+init_per_group(rsm03_comp, Config) ->
+    [{props, mam03_props()}|Config];
+init_per_group(rsm04_comp, Config) ->
+    [{props, mam04_props()}|Config];
 init_per_group(with_rsm02, Config) ->
     [{with_rsm, true}|Config];
 init_per_group(with_rsm03, Config) ->
@@ -629,6 +636,7 @@ end_per_group(G, Config) when G == rsm_all; G == mam_purge; G == nostore;
     G == mam02; G == rsm02; G == with_rsm02; G == muc02; G == muc_rsm02;
     G == mam03; G == rsm03; G == with_rsm03; G == muc03; G == muc_rsm03;
     G == mam04; G == rsm04; G == with_rsm04; G == muc04; G == muc_rsm04;
+    G == rsm03_comp; G == rsm04_comp;
     G == muc06; G == mam06;
     G == archived; G == mam_metrics ->
       Config;
@@ -2731,7 +2739,6 @@ after_complete_true_after11(Config) ->
         RSM = #rsm_in{max=5, direction='after', id=message_id(11, Config)},
         rsm_send(Config, Alice,
             stanza_page_archive_request(P, <<"after11">>, RSM)),
-        ct:fail("haha"),
         wait_for_complete_archive_response(P, Alice, <<"true">>)
         end,
     parallel_story(Config, [{alice, 1}], F).
@@ -2948,21 +2955,40 @@ modify_resource() ->
     StoryPidBin = list_to_binary(pid_to_list(self())),
     fun(Base) -> <<Base/binary, "-parallel-", StoryPidBin/binary>> end.
 
+should_pass_parallel_stanza(From, To, StoryPidBin) ->
+    should_pass_parallel_stanza_jid(From, StoryPidBin)
+        andalso should_pass_parallel_stanza_jid(To, StoryPidBin).
+
+should_pass_parallel_stanza_jid(Jid, StoryPidBin) ->
+    case {binary:match(Jid, <<"parallel">>), binary:match(Jid, StoryPidBin)} of
+        {{_, _}, nomatch} ->
+            false;
+        _ ->
+            true
+    end.
+
+log_parallel_stanza_drop(_Pass = true, Stanza, From, To, StoryPidBin) ->
+    ok;
+log_parallel_stanza_drop(_Pass = false, Stanza, From, To, StoryPidBin) ->
+    ct:log(default, 50,
+           "drop stanza from_jid=~ts to_jid=~ts my_story_pid=~ts~nstanza=~ts",
+           [From, To, StoryPidBin, exml:to_binary(Stanza)],
+           [esc_chars]),
+    ok.
+
 initial_activity() ->
     StoryPidBin = list_to_binary(pid_to_list(self())),
-    MaybePass = fun(Stanza, From) ->
-        case {binary:match(From, <<"parallel">>), binary:match(From, StoryPidBin)} of
-            {{_, _}, nomatch} ->
-                ct:log("drop stanza from ~ts~n ~p", [From, exml:to_binary(Stanza)]),
-                false; %% drop
-            _ ->
-                true %% pass
-        end end,
     fun(Client) ->
         Pred = fun
                    (Stanza=#xmlel{}) ->
                         From = exml_query:attr(Stanza, <<"from">>, <<>>),
-                        MaybePass(Stanza, From);
+                        To = exml_query:attr(Stanza, <<"to">>, <<>>),
+                        Pass = should_pass_parallel_stanza(From, To, StoryPidBin),
+                        %% Useful for debugging
+                        %% Pretty heavy for real tests
+                        %% Enable, when you see problems with parallel_story cases
+                      % log_parallel_stanza_drop(Pass, Stanza, From, To, StoryPidBin),
+                        Pass;
                    (_) -> true %% pass xmlstreamend
                end,
         %% Drop stanzas from unknown parallel resources
