@@ -2731,6 +2731,7 @@ after_complete_true_after11(Config) ->
         RSM = #rsm_in{max=5, direction='after', id=message_id(11, Config)},
         rsm_send(Config, Alice,
             stanza_page_archive_request(P, <<"after11">>, RSM)),
+        ct:fail("haha"),
         wait_for_complete_archive_response(P, Alice, <<"true">>)
         end,
     parallel_story(Config, [{alice, 1}], F).
@@ -2949,16 +2950,19 @@ modify_resource() ->
 
 initial_activity() ->
     StoryPidBin = list_to_binary(pid_to_list(self())),
-    MaybePass = fun(From) ->
+    MaybePass = fun(Stanza, From) ->
         case {binary:match(From, <<"parallel">>), binary:match(From, StoryPidBin)} of
-            {{_, _}, nomatch} -> false; %% drop
-            _                 -> true %% pass
+            {{_, _}, nomatch} ->
+                ct:log("drop stanza from ~ts~n ~p", [From, exml:to_binary(Stanza)]),
+                false; %% drop
+            _ ->
+                true %% pass
         end end,
     fun(Client) ->
         Pred = fun
                    (Stanza=#xmlel{}) ->
                         From = exml_query:attr(Stanza, <<"from">>, <<>>),
-                        MaybePass(From);
+                        MaybePass(Stanza, From);
                    (_) -> true %% pass xmlstreamend
                end,
         %% Drop stanzas from unknown parallel resources
