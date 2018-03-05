@@ -2994,8 +2994,14 @@ initial_activity() ->
         %% Drop stanzas from unknown parallel resources
         escalus_connection:set_filter_predicate(Client, Pred),
 
+        %% Send presence with priority = -1
+        %% It disables offline message and roster subscriptions push,
+        %% which should improve performance of the tests.
+        PresenceChildren = [#xmlel{name = <<"priority">>,
+                                   children = [#xmlcdata{content = <<"-1">>}]}],
+        PresenceStanza = escalus_stanza:presence(<<"available">>, PresenceChildren),
         %% send_initial_presence
-        escalus_client:send(Client, escalus_stanza:presence(<<"available">>))
+        escalus_client:send(Client, PresenceStanza)
     end.
 
 text_search_messages() ->
