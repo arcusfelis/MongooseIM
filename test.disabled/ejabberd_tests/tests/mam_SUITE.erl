@@ -2946,7 +2946,7 @@ parallel_story(Config, ResourceCounts, F) ->
 
 override_for_parallel(Config) ->
     Overrides = [
-        {initial_activity, initial_activity()},
+        {initial_activity, initial_activity(Config)},
         {modify_resource, modify_resource()}
         ],
     [{escalus_overrides, Overrides} | Config].
@@ -2967,16 +2967,18 @@ should_pass_parallel_stanza_jid(Jid, StoryPidBin) ->
             true
     end.
 
-log_parallel_stanza_drop(_Pass = true, Stanza, From, To, StoryPidBin) ->
+log_parallel_story_stanza_drop(_Pass = true, Stanza, From, To, StoryPidBin) ->
     ok;
-log_parallel_stanza_drop(_Pass = false, Stanza, From, To, StoryPidBin) ->
+log_parallel_story_stanza_drop(_Pass = false, Stanza, From, To, StoryPidBin) ->
     ct:log(default, 50,
            "drop stanza from_jid=~ts to_jid=~ts my_story_pid=~ts~nstanza=~ts",
            [From, To, StoryPidBin, exml:to_binary(Stanza)],
            [esc_chars]),
     ok.
 
-initial_activity() ->
+initial_activity(Config) ->
+    %% Can be enabled in test.config
+    LogParallelStanzaDrop = proplists:get_value(log_parallel_story_stanza_drop, Config, false),
     StoryPidBin = list_to_binary(pid_to_list(self())),
     fun(Client) ->
         Pred = fun
@@ -2987,7 +2989,7 @@ initial_activity() ->
                         %% Useful for debugging
                         %% Pretty heavy for real tests
                         %% Enable, when you see problems with parallel_story cases
-                        log_parallel_stanza_drop(Pass, Stanza, From, To, StoryPidBin),
+                        log_parallel_story_stanza_drop(Pass, Stanza, From, To, StoryPidBin),
                         Pass;
                    (_) -> true %% pass xmlstreamend
                end,
