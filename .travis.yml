@@ -10,6 +10,10 @@ addons:
         - slapd
         - ldap-utils
         - golang # used for google drive test results upload
+    hosts:
+        # travis tries to resolve muc.localhost and fails
+        # used in MUC + s2s tests combination
+        - muc.localhost
 before_install:
         - tools/configure $REL_CONFIG
 install:
@@ -30,7 +34,9 @@ after_failure:
         - tail -100 _build/mim2/rel/mongooseim/log/ejabberd.log
 
 after_success:
-        - codecov
+        # env variables help to distinguish CI builds
+        # It takes less time without gcov
+        - codecov --disable=gcov --env PRESET
         - ./rebar3 coveralls send
         - if [ -n "${DOCKERHUB_PASS}" ] && [ $PRESET = 'internal_mnesia' ] && [ $TRAVIS_OTP_RELEASE = "19.3" ];
             then tools/travis-build-and-push-docker.sh;
