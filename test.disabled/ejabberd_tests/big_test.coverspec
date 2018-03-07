@@ -1,0 +1,2 @@
+{incl_dirs_r, ["src", "tests"]}.
+{export, "/tmp/big_test_cover"}.

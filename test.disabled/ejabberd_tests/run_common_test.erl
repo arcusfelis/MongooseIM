@@ -32,6 +32,10 @@ opts() ->
 %% Args are {key :: atom(), val :: string()} pairs.
 %% "=" is an invalid character in option name or value.
 main(RawArgs) ->
+    {ok, CWD} = file:get_cwd(),
+    code:add_path(filename:join(CWD, "tests")),
+    code:add_path(filename:join(CWD, "ebin")),
+    file:delete("/tmp/big_test_cover"),
     Args = [raw_to_arg(Raw) || Raw <- RawArgs],
     Opts = args_to_opts(Args),
     try
@@ -51,13 +55,18 @@ main(RawArgs) ->
     end.
 
 run(#opts{test = quick, cover = Cover, spec = Spec}) ->
-    do_run_quick_test(tests_to_run(Spec), Cover);
+    Opts = tests_to_run(Spec),
+    Opts2 = patch_opts_with_cover(Opts, Cover),
+    do_run_quick_test(Opts2, Cover);
 run(#opts{test = full, spec = Spec, preset = Preset, cover = Cover}) ->
-    run_test(tests_to_run(Spec), case Preset of
-                                     all -> all;
-                                     undefined -> all;
-                                     _   -> [Preset]
-                                 end, Cover).
+    Opts = tests_to_run(Spec),
+    Opts2 = patch_opts_with_cover(Opts, Cover),
+    Presets = case Preset of
+                  all -> all;
+                  undefined -> all;
+                  _   -> [Preset]
+              end,
+    run_test(Opts2, Presets, Cover).
 
 %%
 %% Helpers
@@ -131,6 +140,7 @@ run_test(Test, PresetsToRun, CoverOpts) ->
             analyze_coverage(Test, CoverOpts),
             R;
         _ ->
+            %% XXX We twice call prepare_cover and analyze_coverage in this case
             error_logger:info_msg("Presets were not found in the config file ~ts",
                                   [ConfigFile]),
             R = do_run_quick_test(Test, CoverOpts),
@@ -138,7 +148,8 @@ run_test(Test, PresetsToRun, CoverOpts) ->
             R
     end.
 
-get_ct_config([{spec, Spec}]) ->
+get_ct_config(Opts) ->
+    {spec, Spec} = lists:keyfind(spec, 1, Opts),
     Props = read_file(Spec),
     ConfigFile = case proplists:lookup(config, Props) of
         {config, [Config]} -> Config;
@@ -219,6 +230,16 @@ prepare_cover(Test, true) ->
 prepare_cover(_, _) ->
     ok.
 
+%% Gets two arguments:
+%% - `Opts' for `ct:run_test/1'
+%% - `CoverOpts'
+%%
+%% Returns extended version of `Opts'
+patch_opts_with_cover(Opts, true) ->
+    [{cover, "big_test.coverspec"}|Opts];
+patch_opts_with_cover(Opts, _) ->
+    Opts.
+
 analyze_coverage(Test, true) ->
     analyze(Test, true);
 analyze_coverage(Test, ModuleList) when is_list(ModuleList) ->
@@ -253,6 +274,10 @@ analyze(Test, CoverOpts) ->
     report_time("Import cover data into run_common_test node", fun() ->
             [cover:import(File) || File <- Files]
         end),
+
+    report_time("Import big tests coverage", fun() ->
+            cover:import("/tmp/big_test_cover")
+		end),
     report_time("Export merged cover data", fun() ->
 			cover:export("/tmp/mongoose_combined.coverdata")
 		end),
@@ -335,6 +360,7 @@ get_cover_header() ->
 bool_or_module_list("true") ->
     true;
 bool_or_module_list(ModuleList) when is_list(ModuleList) ->
+    %% XXX this code is wrong
     [ list_to_atom(L) || L <- string:tokens("asd,qwe,zxc", ",") ];
 bool_or_module_list(_) ->
     false.
@@ -497,7 +523,14 @@ format_array_to_list(Module, CallsPerLineArray, Acc) ->
 get_source_path(Module) when is_atom(Module) ->
     try
         AbsPath = proplists:get_value(source, Module:module_info(compile)),
-        string_prefix(AbsPath, get_repo_dir())
+        LibDir = get_lib_dir(),
+        case lists:prefix(AbsPath, LibDir) of
+            true ->
+                %% we are inside _build
+                string_prefix(AbsPath, LibDir);
+            false ->
+                string_prefix(AbsPath, get_root_dir())
+        end
     catch Error:Reason ->
         Stacktrace = erlang:get_stacktrace(),
         error_logger:warning_msg("issue=get_source_path_failed module=~p "
@@ -506,10 +539,17 @@ get_source_path(Module) when is_atom(Module) ->
         atom_to_list(Module) ++ ".erl"
     end.
 
-get_repo_dir() ->
+get_lib_dir() ->
     %% We make an assumption, that mongooseim.erl is in src/ directory
+    %% But rebar would put the code into _build directory.
+    %% Than cover would recompile and break it.
     MongoosePath = proplists:get_value(source, mongooseim:module_info(compile)),
     string_suffix(MongoosePath, "src/mongooseim.erl").
+
+get_root_dir() ->
+    %% mam_helper does not move :)
+    HelperPath = proplists:get_value(source, mam_helper:module_info(compile)),
+    string_suffix(HelperPath, "test.disabled/ejabberd_tests/tests/mam_helper.erl").
 
 %% Removes string prefix
 %% string:prefix/2 that works for any version of erlang and does not return nomatch
