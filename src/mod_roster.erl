@@ -282,22 +282,19 @@ write_roster_version(LUser, LServer, InTransaction) ->
 %%     - roster versioning is used by server and client,
 %%       BUT the server isn't storing versions on db OR
 %%     - the roster version from client don't match current version.
-process_iq_get(From, To, #iq{sub_el = SubEl} = IQ) ->
+process_iq_get(From, To, IQ) ->
+    mongoose_error:try_to_handle_iq(From, To, IQ, fun do_process_iq_get/3).
+
+do_process_iq_get(From, To, #iq{sub_el = SubEl} = IQ) ->
     LServer = From#jid.lserver,
-    try
-        AttrVer = xml:get_tag_attr(<<"ver">>, SubEl),
-        VersioningEnabled = roster_versioning_enabled(LServer),
-        VersionOnDb = roster_version_on_db(LServer),
-        {ItemsToSend, VersionToSend} =
-        get_user_roster_based_on_version(AttrVer, VersioningEnabled,
-                                         VersionOnDb, From, To),
-        IQ#iq{type = result,
-              sub_el = create_sub_el(ItemsToSend, VersionToSend)}
-    catch
-        _:_ ->
-            IQ#iq{type = error,
-                  sub_el = [SubEl, mongoose_xmpp_errors:internal_server_error()]}
-    end.
+    AttrVer = xml:get_tag_attr(<<"ver">>, SubEl),
+    VersioningEnabled = roster_versioning_enabled(LServer),
+    VersionOnDb = roster_version_on_db(LServer),
+    {ItemsToSend, VersionToSend} =
+    get_user_roster_based_on_version(AttrVer, VersioningEnabled,
+                                     VersionOnDb, From, To),
+    IQ#iq{type = result,
+          sub_el = create_sub_el(ItemsToSend, VersionToSend)}.
 
 get_user_roster_based_on_version({value, RequestedVersion}, true, true,
                                  From, To) ->
@@ -456,7 +453,7 @@ set_roster_item(User, LUser, LServer, LJID, From, To, MakeItem2) ->
                 _ -> ok
             end;
         E ->
-            ?DEBUG("ROSTER: roster item set error: ~p~n", [E]), ok
+            ?ERROR_MSG("event=set_roster_item_failed reason=~1000p", [E]), ok
     end.
 
 process_item_attrs(Item, [{<<"jid">>, Val} | Attrs]) ->
