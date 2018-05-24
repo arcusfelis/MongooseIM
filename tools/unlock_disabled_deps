@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Update rebar.lock based on dynamically generated rebar.config
+#
+# Motivation:
+# Even if we remove any dependency from deps list of rebar.config,
+# rebar3 would still download the dependency based on rebar.lock.
+#
+# It breaks FEATURES mechanism.
+#
+# Do not commit rebar.lock once it gets unlocked by the script.
+# rebar3 does not support unlocking multiple dependencies
+UNLOCK=$(./tools/show_disabled_deps.escript)
+while read dep ; do
+    echo "Unlocking $dep"
+    echo ./rebar3 unlock $dep
+    echo $dep | xargs ./rebar3 unlock
+    echo ""
+done <<< "$UNLOCK"
+echo "DONE"

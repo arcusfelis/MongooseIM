@@ -1,3 +1,6 @@
+%% Print debug messages to stderr in the script
+%% io:format(standard_error, "Debug message", [])
+%% Otherwise, tools/show_disabled_deps.escript would be broken
 os:putenv("EXOMETER_PACKAGES", "(minimal)"),
 
 MaybeReadFromConfig =
@@ -8,9 +11,19 @@ fun ({ok, Content}) ->
         %% remove trailing " and conver to string
         binary_to_list(binary:part(Apps, 0, size(Apps) - 1));
     (_) ->
-        io:format("WARNING! The configure.out file was not created, using minimal configuration~n"),
+        io:format(standard_error, "WARNING! The configure.out file was not created, using minimal configuration~n", []),
         ""
 end,
+
+
+GetRelConfig = fun() ->
+        case os:getenv("REL_CONFIG") of
+            false ->
+                "with-all without-jingle-sip";
+            Other ->
+                 Other
+        end
+    end,
 
 ReadFromConfig =
 fun(Path) ->
@@ -19,7 +32,7 @@ fun(Path) ->
                 MaybeReadFromConfig(file:read_file(Path));
             _ ->
                 Script = filename:join(["tools", "configure"]),
-                os:cmd(Script ++ " with-all without-jingle-sip"),
+                os:cmd(Script ++ " " ++ GetRelConfig()),
                 MaybeReadFromConfig(file:read_file("configure.out"))
         end
 end,
@@ -75,13 +88,129 @@ MaybeFIPSSupport = fun(Config) ->
         false ->
             Config;
         _ ->
-            io:format("compiling with FIPS mode enabled~n"),
+            io:format(standard_error, "compiling with FIPS mode enabled~n", []),
             {erl_opts, ErlOpts} = lists:keyfind(erl_opts, 1, Config),
             NewErlOpts = [{d, fips_mode} | ErlOpts],
             lists:keyreplace(erl_opts, 1, Config, {erl_opts, NewErlOpts})
     end
 end,
 
+ParseFeatureToken = fun
+    ("with-" ++ Feature) ->
+        {with, list_to_atom(Feature)};
+    ("without-" ++ Feature) ->
+        {without, list_to_atom(Feature)}
+end,
+
+ParseFeaturesStringF = fun(FeaturesString) ->
+    Tokens = string:tokens(FeaturesString, " "),
+    [ParseFeatureToken(Token) || Token <- Tokens]
+end,
+
+ApplyFeatureCommands = fun
+    ({with, all}, {_CurrentFeatures, AllFeatures}) ->
+        {AllFeatures, AllFeatures};
+    ({without, all}, {_CurrentFeatures, AllFeatures}) ->
+        {[], AllFeatures};
+    ({with, FeatureName}, {CurrentFeatures, AllFeatures}) ->
+        CurrentFeatures1 = lists:usort([FeatureName|CurrentFeatures]),
+        {CurrentFeatures1, AllFeatures};
+    ({without, FeatureName}, {CurrentFeatures, AllFeatures}) ->
+        CurrentFeatures1 = lists:delete(FeatureName, CurrentFeatures),
+        {CurrentFeatures1, AllFeatures}
+end,
+
+GetEnabledFeatures = fun(Config) ->
+    FeaturesDeps = proplists:get_value(feature_deps, Config, []),
+    AllFeatures = [element(1, FD) || FD <- FeaturesDeps],
+    case os:getenv("FEATURES") of
+        false ->
+            {AllFeatures, []};
+        FeaturesString ->
+            Commands = ParseFeaturesStringF(FeaturesString),
+            %% Fold with state is {CurrentFeatures, AllFeatures}
+            {CurrentFeatures, _} =
+                lists:foldl(ApplyFeatureCommands, {AllFeatures, AllFeatures}, Commands),
+            {CurrentFeatures, Commands}
+    end
+end,
+
+DepsNamesF = fun(Config) ->
+    Deps = proplists:get_value(deps, Config, []),
+    Plugins = proplists:get_value(plugins, Config, []),
+    DepsNames = [element(1, Dep) || Dep <- Deps ++ Plugins],
+    lists:usort(DepsNames)
+end,
+
+FilteredDepsF = fun(Config, EnabledApps) ->
+    Deps = proplists:get_value(deps, Config, []),
+    [Dep || Dep <- Deps, lists:member(element(1, Dep), EnabledApps)]
+end,
+
+FilteredPluginsF = fun(Config, EnabledApps) ->
+    Plugins = proplists:get_value(plugins, Config, []),
+    [Plugin || Plugin <- Plugins, lists:member(element(1, Plugin), EnabledApps)]
+end,
+
+GetDisabledPlugins = fun(Config, EnabledApps) ->
+    Plugins = proplists:get_value(plugins, Config, []),
+    AllPlugins = [element(1, Plugin) || Plugin <- Plugins],
+    [PluginName || PluginName <- AllPlugins,
+     not lists:member(PluginName, EnabledApps)]
+end,
+
+GetDisabledDeps = fun(Config, EnabledApps) ->
+    Deps = proplists:get_value(deps, Config, []),
+    AllDeps = [element(1, Dep) || Dep <- Deps],
+    [DepName || DepName <- AllDeps,
+     not lists:member(DepName, EnabledApps)]
+end,
+
+%% Override SetupIncludedApps decision
+%% If an application is missing in deps list, there is no way it would go into a release.
+RemoveDisabledDepsFromRelease = fun(Config, DisabledDeps) ->
+    RelxCfg = proplists:get_value(relx, Config),
+    {release, Desc, Apps} = lists:keyfind(release, 1, RelxCfg),
+    AppsToInclude = [AppName || AppName <- Apps, not lists:member(AppName, DisabledDeps)],
+    NewReleaseCfg = {release, Desc, AppsToInclude},
+    NewRelxCfg = lists:keyreplace(release, 1, RelxCfg, NewReleaseCfg),
+    lists:keyreplace(relx, 1, Config, {relx, NewRelxCfg})
+end,
+
+%% Usage example:
+%% FEATURES="with-all without-odbc without-syslog" ./tools/show_rebar_config.escript
+%% FEATURES="with-all without-odbc without-syslog" ./rebar3 compile
+FilterOutDeps = fun(Config) ->
+    FeaturesDeps = proplists:get_value(feature_deps, Config, []),
+    NonBasicApps = lists:usort(lists:append([Deps || {_, Deps} <- FeaturesDeps])),
+    AllApps = DepsNamesF(Config),
+    BasicApps = AllApps -- NonBasicApps,
+    {EnabledFeatures, FeatureCommands} = GetEnabledFeatures(Config),
+    EnabledOptionalDeps = lists:usort(lists:append(
+        [Deps || {Feature, Deps} <- FeaturesDeps,
+         lists:member(Feature, EnabledFeatures)])),
+    EnabledApps = lists:usort(BasicApps ++ EnabledOptionalDeps),
+    FilteredDeps = FilteredDepsF(Config, EnabledApps),
+    FilteredPlugins = FilteredPluginsF(Config, EnabledApps),
+    %% A dependency would not marked as disabled, if it's not listed in deps
+    %% to begin with
+    DisabledPlugins = GetDisabledPlugins(Config, EnabledApps),
+    DisabledDeps = GetDisabledDeps(Config, EnabledApps),
+    Config1 = lists:keyreplace(deps, 1, Config, {deps, FilteredDeps}),
+    Config2 = lists:keyreplace(plugins, 1, Config1, {plugins, FilteredPlugins}),
+    Config3 = RemoveDisabledDepsFromRelease(Config2, DisabledDeps),
+    %% Add extra fields for debugging
+    [{enabled_features, EnabledFeatures},
+     {basic_apps, BasicApps},
+     {enabled_apps, EnabledApps},
+     {disabled_plugins, DisabledPlugins},
+     {disabled_deps, DisabledDeps},
+     {feature_commands, FeatureCommands}|Config3]
+end,
+
 Config0 = MaybeConfigureCoveralls(CONFIG),
 Config1 = SetupIncludedApps(Config0, EnvApps),
-MaybeFIPSSupport(Config1).
+Config2 = MaybeFIPSSupport(Config1),
+Config3 = FilterOutDeps(Config2),
+file:write_file("/tmp/debug_rebar_config", io_lib:format("~p.", [Config3])),
+Config3.
