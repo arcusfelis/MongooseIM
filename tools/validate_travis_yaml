@@ -1,0 +1,2 @@
+#!/usr/env/bin sh
+ruby -e "require 'yaml';puts YAML.load_file('./.travis.yml')"

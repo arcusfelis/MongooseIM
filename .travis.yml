@@ -19,6 +19,7 @@ addons:
 before_install:
         - tools/configure $REL_CONFIG
 install:
+        - test -z "$FEATURES" || ./tools/unlock_disabled_deps
         - travis_retry ./rebar3 get-deps
         - ./rebar3 compile
         - make dev
@@ -65,11 +66,16 @@ branches:
 otp_release:
         - 19.3
 env:
+        # All features
         - PRESET=internal_mnesia DB=mnesia REL_CONFIG=with-all TLS_DIST=yes
         - PRESET=mysql_redis DB=mysql REL_CONFIG="with-mysql with-redis"
+          FEATURES="with-all without-mysql without-odbc without-riak without-cassandra without-jingle-sip without-debugging without-syslog"
         - PRESET=odbc_mssql_mnesia DB=mssql REL_CONFIG=with-odbc
+          FEATURES="with-all without-mysql without-pgsql without-riak without-cassandra without-jingle-sip without-debugging without-syslog"
         - PRESET=ldap_mnesia DB=mnesia REL_CONFIG=with-none
+          FEATURES="with-all without-mysql without-odbc without-pgsql without-syslog"
         - PRESET=cassandra_mnesia DB=cassandra REL_CONFIG=with-cassandra CASSANDRA_VERSION=3.9
+          FEATURES="with-all without-mysql without-pgsql without-odbc without-riak without-jingle-sip without-debugging without-syslog"
           # In case you want to test with another ODBC driver, uncomment this
       # - PRESET=odbc_pgsql_mnesia DB=pgsql REL_CONFIG=with-odbc
 
@@ -79,6 +85,7 @@ matrix:
           env: PRESET=dialyzer_only
         - otp_release: 20.0
           env: PRESET=pgsql_mnesia DB=pgsql REL_CONFIG="with-pgsql with-jingle-sip"
+               FEATURES="with-all without-pgsql without-odbc without-riak without-cassandra without-debugging without-syslog"
         - otp_release: 18.3
           env: PRESET=riak_mnesia DB=riak REL_CONFIG=with-riak
         - otp_release: 19.3
