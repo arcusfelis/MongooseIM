@@ -26,7 +26,7 @@
   0},
  {<<"escalus">>,
   {git,"git://github.com/esl/escalus.git",
-       {ref,"2e57435b08d4098d87b94c505bc6056f290de49b"}},
+       {ref,"936237aaeef3aef581a80761e42a02537819e95d"}},
   0},
  {<<"esip">>,
   {git,"git://github.com/processone/esip.git",
