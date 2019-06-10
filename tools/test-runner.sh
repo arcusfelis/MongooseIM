@@ -4,6 +4,7 @@
 # - COVER_ENABLED
 # - PRESET
 # - DB
+# - JOBS
 # - DEV_NODES
 # - TEST_HOSTS
 # - VERBOSE
@@ -32,6 +33,7 @@ Options:
 --skip-setup-db       -- do not start any databases, the same as "--db --" option
 --tls-dist            -- enable encryption between nodes in big tests
 --verbose             -- print script output
+--print-logs          -- print MongooseIM logs to the shell
 --colors              -- force colors in help and examples commands
 --pause [SECONDS]     -- pause before big_tests execution
 
@@ -298,6 +300,9 @@ SELECTED_TESTS=()
 STOP_SCRIPT=false
 SKIP_DB_SETUP=false
 DB_FROM_PRESETS=true
+USE_DOCKER_FOR_TEST_RUNNER=false
+RESET_DOCKER_CONTAINERS=false
+RESET_DOCKER_VOLUMES=false
 
 # Parse command line arguments
 # Prefer arguments to env variables
@@ -356,6 +361,24 @@ case $key in
                 shift # past value
             else
                 echo "No more presets"
+                break
+            fi
+        done
+    ;;
+
+    # Similar how we parse --db option
+    --jobs)
+        shift # past argument
+        JOBS=""
+        while [[ $# -gt 0 ]]
+        do
+            key="$1"
+            if [[ "$key" != --* ]]; then
+                echo "Job argument parsed $key"
+                JOBS="$JOBS $key"
+                shift # past value
+            else
+                echo "No more jobs"
                 break
             fi
         done
@@ -425,6 +448,12 @@ case $key in
         shift # past argument
         BIG_TESTS=false
     ;;
+    
+    --skip-build)
+        shift # past argument
+        BUILD_TESTS=false
+        BUILD_MIM=false
+    ;;
 
     --skip-build-tests)
         shift # past argument
@@ -454,6 +483,11 @@ case $key in
 
     --verbose)
         export VERBOSE=1
+        shift # past argument
+    ;;
+
+    --print-logs)
+        export PRINT_MIM_LOGS=true
         shift # past argument
     ;;
 
@@ -510,6 +544,26 @@ case $key in
         shift # consume argument, continue execution
         # Appends "--skip-small-tests ... --skip-preset" arguments to the current positional parameters
         set -- --skip-small-tests --skip-setup-db --dev-nodes --test-hosts --skip-cover --skip-preset "$@"
+    ;;
+
+    --reset-docker)
+        RESET_DOCKER_CONTAINERS=true
+        RESET_DOCKER_VOLUMES=true
+        shift # past argument
+    ;;
+    --reset-docker-containers)
+        RESET_DOCKER_CONTAINERS=true
+        shift # past argument
+    ;;
+
+    --reset-docker-volumes)
+        RESET_DOCKER_VOLUMES=true
+        shift # past argument
+    ;;
+
+    --docker)
+        USE_DOCKER_FOR_TEST_RUNNER=true
+        shift # past argument
     ;;
 
     --)
@@ -591,6 +645,7 @@ TEST_HOSTS_DEFAULT="${TEST_HOSTS_ARRAY[@]}"
 # Use empty DEV_NODES (DEV_NODES="") to skip node compilation and restart
 export PRESET="${PRESET-$PRESETS_DEFAULT}"
 export DB="${DB-$DBS_DEFAULT}"
+export JOBS="${JOBS-}"
 export DEV_NODES="${DEV_NODES-$DEV_NODES_DEFAULT}"
 export TEST_HOSTS="${TEST_HOSTS-$TEST_HOSTS_DEFAULT}"
 export BUILD_TESTS="$BUILD_TESTS"
@@ -603,10 +658,12 @@ if [[ -f "auto_small_tests.spec" ]]; then
 else
     export REBAR_CT_EXTRA_ARGS=""
 fi
-export TESTSPEC="auto_big_tests.spec"
+export TESTSPEC="${TESTSPEC:-auto_big_tests.spec}"
 export START_NODES="$START_NODES"
 export STOP_NODES="$STOP_NODES"
 export PAUSE_BEFORE_BIG_TESTS="$PAUSE_BEFORE_BIG_TESTS"
+export RESET_DOCKER_CONTAINERS="$RESET_DOCKER_CONTAINERS"
+export RESET_DOCKER_VOLUMES="$RESET_DOCKER_VOLUMES"
 
 # Debug printing
 echo "Variables:"
@@ -624,7 +681,17 @@ echo "    TESTSPEC=$TESTSPEC"
 echo "    TLS_DIST=$TLS_DIST"
 echo "    START_NODES=$START_NODES"
 echo "    STOP_NODES=$STOP_NODES"
+echo "    JOBS=$JOBS"
+echo "    RESET_DOCKER_CONTAINERS=$RESET_DOCKER_CONTAINERS"
+echo "    RESET_DOCKER_VOLUMES=$RESET_DOCKER_VOLUMES"
 echo ""
+
+./tools/test_runner/selected-tests-to-test-spec.sh "${SELECTED_TESTS[@]}"
+
+if [ "$USE_DOCKER_FOR_TEST_RUNNER" = true ]; then
+    ./tools/test_runner/run_using_docker.sh
+    exit 0
+fi
 
 ./tools/build-releases.sh
 

@@ -8,19 +8,34 @@ fi
 
 set -e
 
+function get_container_ip
+{
+    local CONTAINER=$1
+    local DOCKER_NETWORK=$2
+    if [ "$DOCKER_NETWORK" = "default" ] || [ "$DOCKER_NETWORK" = "" ]; then
+        docker inspect -f {{.NetworkSettings.IPAddress}} "$CONTAINER"
+    else
+        docker inspect -f '{{ $network := index .NetworkSettings.Networks "'"$DOCKER_NETWORK"'" }}{{ $network.IPAddress}}' "$CONTAINER"
+    fi
+}
+
 CONTAINER="$1"
 PORT="$2"
-IP=$(docker inspect -f {{.NetworkSettings.IPAddress}} "$CONTAINER")
+DOCKER_NETWORK="${DOCKER_NETWORK-default}"
+
+IP=$(get_container_ip "$CONTAINER" "$DOCKER_NETWORK")
 echo "$CONTAINER IP is $IP"
 
-if [ `uname` = "Darwin" ]; then
+if [ -z "$DOCKER_NETWORK" ] || [ `uname` = "Darwin" ]; then
+  # Waiter should be in the same docker network, as the container
+  WAITER=wait-helper-$DOCKER_NETWORK
   # Direct access to IPs is not supported on Mac
   # https://docs.docker.com/docker-for-mac/networking/
   # But we can run wait-for-it from another container
-  docker run --rm -d --name wait-helper ubuntu sleep infinity || echo "We can continue if the wait-helper exists"
-  docker cp tools/wait-for-it.sh wait-helper:/wait-for-it.sh
+  docker run --rm -d --network=$DOCKER_NETWORK --name $WAITER ubuntu sleep infinity || echo "We can continue if the $WAITER exists"
+  docker cp tools/wait-for-it.sh $WAITER:/wait-for-it.sh
   echo "Wait for $IP:$PORT"
-  docker exec -it wait-helper /wait-for-it.sh -h "$IP" -p "$PORT"
+  docker exec -it $WAITER /wait-for-it.sh -h "$IP" -p "$PORT"
 else
   tools/wait-for-it.sh -h "$IP" -p "$PORT"
 fi

@@ -18,13 +18,14 @@ RIAK_VCARD_SCHEMA_PATH=${RIAK_VCARD_SCHEMA_PATH:-"tools/vcard_search_schema.xml"
 RIAK_MAM_SCHEMA_PATH=${RIAK_MAM_SCHEMA_PATH:-"tools/mam_search_schema.xml"}
 
 RIAK_CONTAINER_NAME=${RIAK_CONTAINER_NAME:-"mongooseim-riak"}
+CURL_COMMAND=${CURL_COMMAND:-curl}
 
 wait_for_http_status () {
     local expected_status=$1
     local get_path=$2
     echo "Waiting for HTTP status: ${expected_status} from path ${get_path}"
     for i in {1..10}; do
-	HTTP_STATUS=`curl -s -o /dev/null -w "%{http_code}" $get_path`
+	HTTP_STATUS=`$CURL_COMMAND -s -o /dev/null -w "%{http_code}" $get_path`
 	if [ "${HTTP_STATUS}" = "${expected_status}" ]; then
 	    echo "Expected status observed after $i attempts"
 	    break
@@ -35,28 +36,28 @@ wait_for_http_status () {
 }
 
 echo "Creating vcard schema"
-curl -v -XPUT $RIAK_HOST/search/schema/vcard \
+$CURL_COMMAND -v -XPUT $RIAK_HOST/search/schema/vcard \
     -H 'Content-Type:application/xml' \
-    --data-binary @${RIAK_VCARD_SCHEMA_PATH}
+    --data-binary "$(cat ${RIAK_VCARD_SCHEMA_PATH})"
 
 wait_for_http_status "200" $RIAK_HOST/search/schema/vcard
 
 echo "Creating vcard search index"
-curl -v -XPUT $RIAK_HOST/search/index/vcard \
+$CURL_COMMAND -v -XPUT $RIAK_HOST/search/index/vcard \
     -H 'Content-Type: application/json' \
     -d '{"schema":"vcard"}'
 
 wait_for_http_status "200"  $RIAK_HOST/search/index/vcard
 
 echo "Creating mam schema"
-curl -v -XPUT $RIAK_HOST/search/schema/mam \
+$CURL_COMMAND -v -XPUT $RIAK_HOST/search/schema/mam \
     -H 'Content-Type:application/xml' \
-    --data-binary @${RIAK_MAM_SCHEMA_PATH}
+    --data-binary "$(cat ${RIAK_MAM_SCHEMA_PATH})"
 
 wait_for_http_status "200"  $RIAK_HOST/search/schema/mam
 
 echo "Creating mam index"
-curl -v -XPUT $RIAK_HOST/search/index/mam \
+$CURL_COMMAND -v -XPUT $RIAK_HOST/search/index/mam \
     -H 'Content-Type: application/json' \
     -d '{"schema":"mam"}'
 

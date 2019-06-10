@@ -1,6 +1,3 @@
 #!/usr/bin/env bash
 
-docker run -d \
-       --name mongooseim-rmq \
-       -p 5672:5672 \
-       rabbitmq:3.7
+DB=rabbitmq ./tools/travis-setup-db.sh

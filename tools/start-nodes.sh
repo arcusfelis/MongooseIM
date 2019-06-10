@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+MAIN_PID=$$
+
 # This script has no arguments
 # You can override a list of nodes to start by using DEV_NODES env variable
 # DEV_NODES="mim1 mim2" ./tools/start-nodes.sh
@@ -9,21 +11,13 @@ set -e
 
 # We use BASE and DEV_NODES_ARRAY variables from here
 source tools/travis-common-vars.sh
+source tools/test_runner/helpers.sh
 
 async_helper() {
   local ret_val=0 output=""
   output="$("$@")" || ret_val="$?"
   echo; echo "$output"; echo
   return "$ret_val"
-}
-
-wait_for_pids() {
-  ## wait for all pids
-  wait "$@" || true
-  ## wait for pids one by one, so script can be stopped on error
-  for pid in "$@"; do
-    wait "$pid"
-  done
 }
 
 # Starts node in background
@@ -59,7 +53,9 @@ start_nodes() {
   local pids=()
   for node in ${DEV_NODES_ARRAY[@]}; do
     async_helper start_node $node &
-    pids+=("$!")
+    HELPER_PID=$!
+    ./tools/kill_processes_on_exit.sh $MAIN_PID $HELPER_PID &
+    pids+=("$HELPER_PID")
   done
   wait_for_pids "${pids[@]}"
 }
@@ -68,10 +64,23 @@ wait_for_nodes() {
   local pids=()
   for node in ${DEV_NODES_ARRAY[@]}; do
     async_helper  wait_for_node $node &
-    pids+=("$!")
+    HELPER_PID=$!
+    ./tools/kill_processes_on_exit.sh $MAIN_PID $HELPER_PID &
+    pids+=("$HELPER_PID")
   done
   wait_for_pids "${pids[@]}"
 }
+
+follow_logs() {
+  for node in ${DEV_NODES_ARRAY[@]}; do
+    buffered_async_tail erlang.log.1 ${BASE}/_build/$node/rel/mongooseim/log/erlang.log.1
+    buffered_async_tail crash.log ${BASE}/_build/$node/rel/mongooseim/log/crash.log
+  done
+}
+
+if [ "$PRINT_MIM_LOGS" = true ]; then
+  follow_logs
+fi
 
 if [ "$START_NODES" = true ]; then
   start_nodes

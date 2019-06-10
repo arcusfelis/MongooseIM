@@ -6,6 +6,25 @@
 # Docker for Mac should be used on Mac (not docker-machine!)
 # https://store.docker.com/editions/community/docker-ce-desktop-mac
 
+# Other environment variables:
+# PUBLISH_PORTS (default: true) - publish ports to a host
+# DOCKER_NAME_PREFIX (default: "") - add prefix to each container name
+# DOCKER_NETWORK (default: "") - if not empty, attach container to the network
+#                                and assing DB alias
+
+# Cleanup of volumes design
+# -------------------------
+#
+# You want to do:
+# docker inspect IMAGE_NAME -f '{{ .Config.Volumes }}'
+# for each image and add name for each volume in the configuration.
+#
+# For example:
+# 
+# docker inspect postgres -f '{{ .Config.Volumes }}'
+# map[/var/lib/postgresql/data:{}]
+# 
+# Means that we need one named volume for postgres.
 set -e
 TOOLS=`dirname $0`
 
@@ -26,8 +45,9 @@ if [ "$TRAVIS" = 'true' ]; then
     RM_FLAG=""
 fi
 
-# DATA_ON_VOLUME variable and data_on_volume function come from travis-common-vars.sh
-echo "DATA_ON_VOLUME is $DATA_ON_VOLUME"
+echo "DOCKER_NAME_PREFIX is $DOCKER_NAME_PREFIX"
+echo "PUBLISH_PORTS is $PUBLISH_PORTS"
+echo "DOCKER_NETWORK is $DOCKER_NETWORK"
 
 # Default cassandra version
 CASSANDRA_VERSION=${CASSANDRA_VERSION:-3.9}
@@ -60,31 +80,7 @@ function install_odbc_ini
 #
 # Be aware, that Driver and Setup values are for Ubuntu.
 # CentOS would use different ones.
-    cat > ~/.odbc.ini << EOL
-[mongoose-mssql]
-Driver      = /usr/lib/x86_64-linux-gnu/odbc/libtdsodbc.so
-Setup       = /usr/lib/x86_64-linux-gnu/odbc/libtdsS.so
-Server      = 127.0.0.1
-Port        = 1433
-Database    = ejabberd
-Username    = sa
-Password    = mongooseim_secret+ESL123
-Charset     = UTF-8
-TDS_Version = 7.2
-client_charset = UTF-8
-
-[ejabberd-pgsql]
-Driver               = PostgreSQL Unicode
-ServerName           = localhost
-Port                 = 5432
-Database             = ejabberd
-Username             = ejabberd
-Password             = mongooseim_secret
-sslmode              = verify-full
-Protocol             = 9.3.5
-Debug                = 1
-ByteaAsLongVarBinary = 1
-EOL
+cp $TOOLS/db_configs/odbc.ini ~/.odbc.ini
 }
 
 # Stores all the data needed by the container
@@ -108,27 +104,33 @@ DB_CONF_DIR=${BASE}/${TOOLS}/db_configs/$db
 
 if [ "$db" = 'mysql' ]; then
     echo "Configuring mysql"
+    MYSQL_NAME=$(container_name mongooseim-mysql)
+    MYSQL_DATA_VOLUME=${MYSQL_NAME}-data
     # TODO We should not use sudo
     sudo -n service mysql stop || echo "Failed to stop mysql"
-    docker rm -f mongooseim-mysql || echo "Skip removing previous container"
+    docker rm -f "$MYSQL_NAME" || echo "Skip removing previous container"
+    docker volume rm -f "$MYSQL_DATA_VOLUME" || true
+    docker volume create "$MYSQL_DATA_VOLUME"
     cp ${SSLDIR}/mongooseim/cert.pem ${SQL_TEMP_DIR}/fake_cert.pem
     openssl rsa -in ${SSLDIR}/mongooseim/key.pem -out ${SQL_TEMP_DIR}/fake_key.pem
     chmod a+r ${SQL_TEMP_DIR}/fake_key.pem
     # mysql_native_password is needed until mysql-otp implements caching-sha2-password
     # https://github.com/mysql-otp/mysql-otp/issues/83
     docker run -d \
+        $(docker_service $db) \
         -e SQL_TEMP_DIR=/tmp/sql \
         -e MYSQL_ROOT_PASSWORD=secret \
         -e MYSQL_DATABASE=ejabberd \
         -e MYSQL_USER=ejabberd \
         -e MYSQL_PASSWORD=mongooseim_secret \
-	$(mount_ro_volume ${DB_CONF_DIR}/mysql.cnf ${MYSQL_DIR}/mysql.cnf) \
+        $(mount_ro_volume ${DB_CONF_DIR}/mysql.cnf ${MYSQL_DIR}/mysql.cnf) \
         $(mount_ro_volume ${MIM_PRIV_DIR}/mysql.sql /docker-entrypoint-initdb.d/mysql.sql) \
-	$(mount_ro_volume ${BASE}/${TOOLS}/docker-setup-mysql.sh /docker-entrypoint-initdb.d/docker-setup-mysql.sh) \
-	$(mount_ro_volume ${SQL_TEMP_DIR} /tmp/sql) \
-        $(data_on_volume -v ${SQL_DATA_DIR}:/var/lib/mysql) \
+        $(mount_ro_volume ${BASE}/${TOOLS}/docker-setup-mysql.sh /docker-entrypoint-initdb.d/docker-setup-mysql.sh) \
+        $(mount_ro_volume ${SQL_TEMP_DIR} /tmp/sql) \
+        -v $MYSQL_DATA_VOLUME:/var/lib/mysql \
         --health-cmd='mysqladmin ping --silent' \
-        -p 3306:3306 --name=mongooseim-mysql \
+        $(publish_port 3306 3306) \
+        --name=$MYSQL_NAME \
         mysql --default-authentication-plugin=mysql_native_password
 
 elif [ "$db" = 'pgsql' ]; then
@@ -137,26 +139,42 @@ elif [ "$db" = 'pgsql' ]; then
     # make clean && make
     # Than rerun the script to create a new docker container.
     echo "Configuring postgres with SSL"
+    PG_NAME=$(container_name mongooseim-pgsql)
+    PG_DATA_VOLUME=${PG_NAME}-data
     sudo -n service postgresql stop || echo "Failed to stop psql"
-    docker rm -f mongooseim-pgsql || echo "Skip removing previous container"
+    docker rm -f "$PG_NAME" || echo "Skip removing previous container"
+    docker volume rm -f "$PG_DATA_VOLUME" || true
+    docker volume create "$PG_DATA_VOLUME"
     cp ${SSLDIR}/mongooseim/cert.pem ${SQL_TEMP_DIR}/fake_cert.pem
     cp ${SSLDIR}/mongooseim/key.pem ${SQL_TEMP_DIR}/fake_key.pem
     cp ${DB_CONF_DIR}/postgresql.conf ${SQL_TEMP_DIR}/.
     cp ${DB_CONF_DIR}/pg_hba.conf ${SQL_TEMP_DIR}/.
     cp ${MIM_PRIV_DIR}/pg.sql ${SQL_TEMP_DIR}/.
     docker run -d \
+           $(docker_service $db) \
            -e SQL_TEMP_DIR=/tmp/sql \
            $(mount_ro_volume ${SQL_TEMP_DIR} /tmp/sql) \
-           $(data_on_volume -v ${SQL_DATA_DIR}:/var/lib/postgresql/data) \
            $(mount_ro_volume ${BASE}/${TOOLS}/docker-setup-postgres.sh /docker-entrypoint-initdb.d/docker-setup-postgres.sh) \
-           -p 5432:5432 --name=mongooseim-pgsql postgres
+           $(publish_port 5432 5432) \
+           -v $PG_DATA_VOLUME:/var/lib/postgresql/data \
+           --name=$PG_NAME \
+           postgres
     mkdir -p ${PGSQL_ODBC_CERT_DIR}
     cp ${SSLDIR}/ca/cacert.pem ${PGSQL_ODBC_CERT_DIR}/root.crt
     install_odbc_ini
 
 elif [ "$db" = 'riak' ]; then
     echo "Configuring Riak with SSL"
-    docker rm -f mongooseim-riak || echo "Skip removing previous container"
+    RIAK_NAME=$(container_name mongooseim-riak)
+    # Riak volumes are defined in the Dockerfile
+    # Riak data volume can be several gigabytes, so we want to clean them up by name
+    # after each database setup.
+    RIAK_DATA_VOLUME=${RIAK_NAME}-data
+    RIAK_LOGS_VOLUME=${RIAK_NAME}-logs
+    docker rm -f $RIAK_NAME || echo "Skip removing previous container"
+    docker volume rm -f $RIAK_DATA_VOLUME $RIAK_LOGS_VOLUME || true
+    docker volume create "$RIAK_DATA_VOLUME"
+    docker volume create "$RIAK_LOGS_VOLUME"
     # Instead of docker run, use "docker create" + "docker start".
     # So we can prepare our container.
     # We use HEALTHCHECK here, check "docker ps" to get healthcheck status.
@@ -164,44 +182,57 @@ elif [ "$db" = 'riak' ]; then
     # - we want to change it
     # - container starting code runs sed on it and gets IO error,
     #   if it's a volume
-    time docker create -p 8087:8087 -p 8098:8098 \
+    time docker create \
+        $(docker_service $db) \
+        $(publish_port 8087 8087) \
+        $(publish_port 8098 8098) \
         -e DOCKER_RIAK_BACKEND=leveldb \
         -e DOCKER_RIAK_CLUSTER_SIZE=1 \
-        --name=mongooseim-riak \
-	$(mount_ro_volume "${DB_CONF_DIR}/advanced.config" "/etc/riak/advanced.config") \
-	$(mount_ro_volume "${SSLDIR}/mongooseim/cert.pem" "/etc/riak/cert.pem") \
-	$(mount_ro_volume "${SSLDIR}/mongooseim/key.pem" "/etc/riak/key.pem") \
-	$(mount_ro_volume "${SSLDIR}/ca/cacert.pem" "/etc/riak/ca/cacertfile.pem") \
-        $(data_on_volume -v ${SQL_DATA_DIR}:/var/lib/riak) \
+        --name=$RIAK_NAME \
+        $(mount_ro_volume "${DB_CONF_DIR}/advanced.config" "/etc/riak/advanced.config") \
+        $(mount_ro_volume "${SSLDIR}/mongooseim/cert.pem" "/etc/riak/cert.pem") \
+        $(mount_ro_volume "${SSLDIR}/mongooseim/key.pem" "/etc/riak/key.pem") \
+        $(mount_ro_volume "${SSLDIR}/ca/cacert.pem" "/etc/riak/ca/cacertfile.pem") \
+        -v $RIAK_DATA_VOLUME:/var/lib/riak \
+        -v $RIAK_LOGS_VOLUME:/var/log/riak \
         --health-cmd='riak-admin status' \
         "michalwski/docker-riak:1.0.6"
     # Use a temporary file to store config
     TEMP_RIAK_CONF=$(mktemp)
     # Export config from a container
-    docker cp "mongooseim-riak:/etc/riak/riak.conf" "$TEMP_RIAK_CONF"
+    docker cp "$RIAK_NAME:/etc/riak/riak.conf" "$TEMP_RIAK_CONF"
     # Enable search
     $SED -i "s/^search = \(.*\)/search = on/" "$TEMP_RIAK_CONF"
     # Enable ssl by appending settings from riak.conf.ssl
     cat "${DB_CONF_DIR}/riak.conf.ssl" >> "$TEMP_RIAK_CONF"
     # Import config back into container
-    docker cp "$TEMP_RIAK_CONF" "mongooseim-riak:/etc/riak/riak.conf"
+    docker cp "$TEMP_RIAK_CONF" "$RIAK_NAME:/etc/riak/riak.conf"
     # Erase temporary config file
     rm "$TEMP_RIAK_CONF"
-    docker start mongooseim-riak
+    docker start $RIAK_NAME
     echo "Waiting for docker healthcheck"
     echo ""
-    tools/wait_for_healthcheck.sh mongooseim-riak
+    tools/wait_for_healthcheck.sh $RIAK_NAME
     echo "Waiting for a listener to appear"
-    tools/wait_for_service.sh mongooseim-riak 8098
+    tools/wait_for_service.sh $RIAK_NAME 8098
     # Use riak-admin from inside the container
-    export RIAK_ADMIN="docker exec mongooseim-riak riak-admin"
+    export RIAK_ADMIN="docker exec $RIAK_NAME riak-admin"
+    export CURL_COMMAND="docker exec $RIAK_NAME curl"
     tools/setup_riak
     # Use this command to read Riak's logs if something goes wrong
-    # docker exec -it mongooseim-riak bash -c 'tail -f /var/log/riak/*'
+    # docker exec -it $RIAK_NAME bash -c 'tail -f /var/log/riak/*'
 
 elif [ "$db" = 'cassandra' ]; then
+    CASSANDRA_NAME=$(container_name mongooseim-cassandra)
+    CASSANDRA_PROXY_NAME=$(container_name mongooseim-cassandra-proxy)
+    CASSANDRA_DATA_VOLUME=${CASSANDRA_NAME}-data
     docker image pull cassandra:${CASSANDRA_VERSION}
-    docker rm -f mongooseim-cassandra mongooseim-cassandra-proxy || echo "Skip removing previous container"
+    docker rm -f \
+        $CASSANDRA_NAME \
+        $CASSANDRA_PROXY_NAME || echo "Skip removing previous container"
+
+    docker volume rm -f "$CASSANDRA_DATA_VOLUME" || true
+    docker volume create "$CASSANDRA_DATA_VOLUME"
 
     opts="$(docker inspect -f '{{range .Config.Entrypoint}}{{println}}{{.}}{{end}}' cassandra:${CASSANDRA_VERSION})"
     opts+="$(docker inspect -f '{{range .Config.Cmd}}{{println}}{{.}}{{end}}' cassandra:${CASSANDRA_VERSION})"
@@ -214,47 +245,49 @@ elif [ "$db" = 'cassandra' ]; then
 
     docker_entry="${DB_CONF_DIR}/docker_entry.sh"
 
+    MIM_SCHEMA=$(pwd)/priv/cassandra.cql
+    TEST_SCHEMA=$(pwd)/big_tests/tests/mongoose_cassandra_SUITE_data/schema.cql
+
     docker run -d                                \
+               $(docker_service $db)             \
                -e MAX_HEAP_SIZE=128M             \
                -e HEAP_NEWSIZE=64M               \
-	       $(mount_ro_volume "${SSLDIR}" "/ssl") \
-	       $(mount_ro_volume "${docker_entry}" "/entry.sh") \
-               $(data_on_volume -v ${SQL_DATA_DIR}:/var/lib/cassandra) \
-               --name=mongooseim-cassandra       \
+               $(mount_ro_volume "$MIM_SCHEMA" "/schemas/mim.cql") \
+               $(mount_ro_volume "$TEST_SCHEMA" "/schemas/test.cql") \
+               $(mount_ro_volume "${SSLDIR}" "/ssl") \
+               $(mount_ro_volume "${docker_entry}" "/entry.sh") \
+               --name=$CASSANDRA_NAME \
                --entrypoint "/entry.sh"          \
+               -v $CASSANDRA_DATA_VOLUME:/var/lib/cassandra \
                cassandra:${CASSANDRA_VERSION}    \
                "${init_opts[@]}"
-    tools/wait_for_service.sh mongooseim-cassandra 9042 || docker logs mongooseim-cassandra
+    tools/wait_for_service.sh $CASSANDRA_NAME 9042 || docker logs $CASSANDRA_NAME
 
     # Start TCP proxy
-    CASSANDRA_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' mongooseim-cassandra)
+    CASSANDRA_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $CASSANDRA_NAME)
     echo "Connecting TCP proxy to Cassandra on $CASSANDRA_IP..."
     cp ${DB_CONF_DIR}/proxy/zazkia-routes.json "$SQL_TEMP_DIR/"
     $SED -i "s/\"service-hostname\": \".*\"/\"service-hostname\": \"$CASSANDRA_IP\"/g" "$SQL_TEMP_DIR/zazkia-routes.json"
     docker run -d                               \
-               -p 9042:9042                     \
-               -p 9191:9191                     \
+               $(docker_service cassandra-proxy)         \
+               $(publish_port 9042 9042)                 \
+               $(publish_port 9191 9191)                 \
                $(mount_ro_volume "$SQL_TEMP_DIR" /data)  \
-               --name=mongooseim-cassandra-proxy \
+               $(mount_ro_volume "$SQL_TEMP_DIR" /data)  \
+               --name=$CASSANDRA_PROXY_NAME \
                emicklei/zazkia
-    tools/wait_for_service.sh mongooseim-cassandra-proxy 9042 || docker logs mongooseim-cassandra-proxy
+    tools/wait_for_service.sh $CASSANDRA_PROXY_NAME 9042 || docker logs $CASSANDRA_PROXY_NAME
 
-    MIM_SCHEMA=$(pwd)/priv/cassandra.cql
-    TEST_SCHEMA=$(pwd)/big_tests/tests/mongoose_cassandra_SUITE_data/schema.cql
-    for cql_file in $MIM_SCHEMA $TEST_SCHEMA; do
-        echo "Apply ${cql_file}"
-        docker run -it $RM_FLAG -e SSL_CERTFILE=/cacert.pem         \
-	               $(mount_ro_volume "${SSLDIR}/ca/cacert.pem" "/cacert.pem")  \
-                       $(mount_ro_volume "${cql_file}" "/cassandra.cql")           \
-                       --link mongooseim-cassandra:cassandra        \
-                       cassandra:${CASSANDRA_VERSION}               \
-                       sh -c 'exec cqlsh "$CASSANDRA_PORT_9042_TCP_ADDR" --ssl -f /cassandra.cql'
-    done
+    # Apply schemas
+    docker exec -it \
+        -e SSL_CERTFILE=/ssl/ca/cacert.pem \
+        "$CASSANDRA_NAME" \
+        sh -c 'exec cqlsh "127.0.0.1" --ssl -f /schemas/mim.cql -f /schemas/test.cql'
 
 elif [ "$db" = 'elasticsearch' ]; then
     ELASTICSEARCH_IMAGE=docker.elastic.co/elasticsearch/elasticsearch:$ELASTICSEARCH_VERSION
     ELASTICSEARCH_PORT=9200
-    ELASTICSEARCH_NAME=mongooseim-elasticsearch
+    ELASTICSEARCH_NAME=$(container_name mongooseim-elasticsearch)
 
     echo $ELASTICSEARCH_IMAGE
     docker image pull $ELASTICSEARCH_IMAGE
@@ -262,7 +295,8 @@ elif [ "$db" = 'elasticsearch' ]; then
 
     echo "Starting ElasticSearch $ELASTICSEARCH_VERSION from Docker container"
     docker run -d $RM_FLAG \
-           -p $ELASTICSEARCH_PORT:9200 \
+           $(docker_service $db) \
+           $(publish_port $ELASTICSEARCH_PORT 9200) \
            -e "http.host=0.0.0.0" \
            -e "transport.host=127.0.0.1" \
            -e "xpack.security.enabled=false" \
@@ -274,11 +308,16 @@ elif [ "$db" = 'elasticsearch' ]; then
     ELASTICSEARCH_URL=http://localhost:$ELASTICSEARCH_PORT
     ELASTICSEARCH_PM_MAPPING="$(pwd)/priv/elasticsearch/pm.json"
     ELASTICSEARCH_MUC_MAPPING="$(pwd)/priv/elasticsearch/muc.json"
+    ELASTICSEARCH_PM_MAPPING_DATA=$(cat "$ELASTICSEARCH_PM_MAPPING")
+    ELASTICSEARCH_MUC_MAPPING_DATA=$(cat "$ELASTICSEARCH_MUC_MAPPING")
     echo "Putting ElasticSearch mappings"
-    (curl -X PUT $ELASTICSEARCH_URL/messages -d "@$ELASTICSEARCH_PM_MAPPING" -w "status: %{http_code}" | grep "status: 200" > /dev/null) || \
+    (docker exec $ELASTICSEARCH_NAME \
+        curl -X PUT $ELASTICSEARCH_URL/messages -d "$ELASTICSEARCH_PM_MAPPING_DATA" -w "status: %{http_code}" | grep "status: 200" > /dev/null) || \
         echo "Failed to put PM mapping into ElasticSearch"
-    (curl -X PUT $ELASTICSEARCH_URL/muc_messages -d "@$ELASTICSEARCH_MUC_MAPPING" -w "status: %{http_code}" | grep "status: 200" > /dev/null) || \
+    (docker exec $ELASTICSEARCH_NAME \
+        curl -X PUT $ELASTICSEARCH_URL/muc_messages -d "$ELASTICSEARCH_MUC_MAPPING_DATA" -w "status: %{http_code}" | grep "status: 200" > /dev/null) || \
         echo "Failed to put MUC mapping into ElasticSearch"
+    #curl -XPUT 'http://localhost:9200/_all/_settings?preserve_existing=true' -d '{ "index.refresh_interval" : "1" }'
 
 elif [ "$db" = 'mssql' ]; then
     # LICENSE STUFF, IMPORTANT
@@ -302,8 +341,9 @@ elif [ "$db" = 'mssql' ]; then
     # > a third party the results of any benchmark test of the software.
 
     # SCRIPTING STUFF
-    docker rm -f mongoose-mssql || echo "Skip removing previous container"
-    docker volume rm -f mongoose-mssql-data || echo "Skip removing previous volume"
+    MSSQL_NAME=$(container_name mongooseim-mssql)
+    docker rm -f $MSSQL_NAME || echo "Skip removing previous container"
+    docker volume rm -f $MSSQL_NAME-data || echo "Skip removing previous volume"
     #
     # MSSQL wants secure passwords
     # i.e. just "mongooseim_secret" would not work.
@@ -322,35 +362,58 @@ elif [ "$db" = 'mssql' ]; then
     #
     # Otherwise we get an error in logs
     # Error 87(The parameter is incorrect.) occurred while opening file '/var/opt/mssql/data/master.mdf'
-    docker run -d -p 1433:1433                                  \
-               --name=mongoose-mssql                            \
+    docker run -d $(publish_port 1433 1433)                     \
+               $(docker_service $db)                            \
+               --name=$MSSQL_NAME                               \
                -e "ACCEPT_EULA=Y"                               \
                -e "SA_PASSWORD=mongooseim_secret+ESL123"        \
                $(mount_ro_volume "$(pwd)/priv/mssql2012.sql" "/mongoose.sql")  \
-               $(data_on_volume -v ${SQL_DATA_DIR}:/var/opt/mssql) \
-               $(data_on_volume -v mongoose-mssql-data:/var/opt/mssql/data) \
+               -v $MSSQL_NAME-data:/var/opt/mssql/data \
                --health-cmd='/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "mongooseim_secret+ESL123" -Q "SELECT 1"' \
                microsoft/mssql-server-linux
-    tools/wait_for_healthcheck.sh mongoose-mssql
-    tools/wait_for_service.sh mongoose-mssql 1433
+    tools/wait_for_healthcheck.sh $MSSQL_NAME
+    tools/wait_for_service.sh $MSSQL_NAME 1433
 
-    docker exec -it mongoose-mssql \
+    docker exec -it $MSSQL_NAME \
         /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "mongooseim_secret+ESL123" \
         -Q "CREATE DATABASE ejabberd"
-    docker exec -it mongoose-mssql \
+    docker exec -it $MSSQL_NAME \
         /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "mongooseim_secret+ESL123" \
         -Q "ALTER DATABASE ejabberd SET READ_COMMITTED_SNAPSHOT ON"
-    docker exec -it mongoose-mssql \
+    docker exec -it $MSSQL_NAME \
         /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "mongooseim_secret+ESL123" \
         -i mongoose.sql
 
     install_odbc_ini
 
 elif [ "$db" = 'redis' ]; then
-    tools/setup-redis.sh
+    REDIS_NAME=$(container_name mongooseim-redis)
+    REDIS_DATA_VOLUME=${REDIS_NAME}-data
+    docker rm -f "$REDIS_NAME" || echo "Skip removing the previous container"
+    docker volume rm -f "$REDIS_DATA_VOLUME" || true
+    docker volume create "$REDIS_DATA_VOLUME"
+    docker run -d --name "$REDIS_NAME" \
+        $(docker_service $db) \
+        $(publish_port 6379 6379) \
+        -v $REDIS_DATA_VOLUME:/data \
+        --health-cmd='redis-cli -h "127.0.0.1" ping' \
+        redis
 
 elif [ "$db" = 'ldap' ]; then
     tools/travis-setup-ldap.sh
+
+elif [ "$db" = 'rabbitmq' ]; then
+    RABBIT_NAME=$(container_name mongooseim-rabbitmq)
+    RABBIT_DATA_VOLUME=${RABBIT_NAME}-data
+    docker rm -f "$RABBIT_NAME" || echo "Skip removing the previous container"
+    docker volume rm -f "$RABBIT_DATA_VOLUME" || true
+    docker volume create "$RABBIT_DATA_VOLUME"
+    
+    docker run -d --name $RABBIT_NAME \
+        -v $RABBIT_DATA_VOLUME:/var/lib/rabbitmq \
+        $(docker_service $db) \
+        $(publish_port 5672 5672) \
+        rabbitmq:3.7
 
 else
     echo "Skip setting up database"

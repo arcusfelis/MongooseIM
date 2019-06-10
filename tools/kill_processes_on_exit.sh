@@ -31,5 +31,5 @@ if [ "$#" -ne 0 ]; then
     # Ehen PID_TO_MONITOR is dead...
     verbose_print "kill_processes_on_exit: $@"
     # Kill the rest of arguments
-    kill $@ 2&> /dev/null
+    kill -TERM $@ 2&> /dev/null
 fi

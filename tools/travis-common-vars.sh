@@ -20,21 +20,7 @@ DEV_NODES="${DEV_NODES-$DEFAULT_DEV_NODES}"
 # Create a bash array DEFAULT_DEV_NODES with node names
 IFS=' ' read -r -a DEV_NODES_ARRAY <<< "$DEV_NODES"
 
-# Linux volumes are faster than layer fs.
-# Mac volumes are actually slower than layer fs.
-case "$(uname -s)" in
-    Darwin*)    DEFAULT_DATA_ON_VOLUME=false;;
-    *)          DEFAULT_DATA_ON_VOLUME=true
-esac
-DATA_ON_VOLUME=${DATA_ON_VOLUME:-$DEFAULT_DATA_ON_VOLUME}
-
-# Returns its arguments if data on volume is enabled
-function data_on_volume
-{
-    if [ "$DATA_ON_VOLUME" = 'true' ]; then
-        echo "$@"
-    fi
-}
+PUBLISH_PORTS=${PUBLISH_PORTS:-true}
 
 # Example: mktempdir "PREFIX"
 #
@@ -51,4 +37,30 @@ function mktempdir
 function mount_ro_volume
 {
     echo "-v $1:$2:ro"
+}
+
+function publish_port
+{
+    if [ "$PUBLISH_PORTS" = 'true' ]; then
+        echo "-p $1:$2"
+    fi
+}
+
+function container_name
+{
+    echo "$1$DOCKER_NAME_PREFIX"
+}
+
+function docker_service
+{
+    if [ ! -z "$DOCKER_NETWORK" ]; then
+        echo " --network-alias=$1 --network=$DOCKER_NETWORK "
+    fi
+}
+
+function docker_network
+{
+    if [ ! -z "$DOCKER_NETWORK" ]; then
+        echo " --network=$DOCKER_NETWORK "
+    fi
 }

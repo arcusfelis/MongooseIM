@@ -9,6 +9,7 @@ set -e
 
 # We use BASE and DEV_NODES_ARRAY variables from here
 source tools/travis-common-vars.sh
+source tools/test_runner/helpers.sh
 
 # Stops node
 # First argument is node directory name
@@ -24,15 +25,6 @@ async_helper() {
   output="$("$@")" || ret_val="$?"
   echo; echo "$output"; echo
   return "$ret_val"
-}
-
-wait_for_pids() {
-  ## wait for all pids
-  wait "$@" || true
-  ## wait for pids one by one, so script can be stopped on error
-  for pid in "$@"; do
-    wait "$pid"
-  done
 }
 
 # DEV_NODES_ARRAY is defined in travis-common-vars.sh
