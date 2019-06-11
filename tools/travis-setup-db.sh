@@ -300,6 +300,7 @@ elif [ "$db" = 'elasticsearch' ]; then
            -e "http.host=0.0.0.0" \
            -e "transport.host=127.0.0.1" \
            -e "xpack.security.enabled=false" \
+           -e "ES_JAVA_OPTS=-Xmx256m -Xms256m" \
            --name $ELASTICSEARCH_NAME \
            $ELASTICSEARCH_IMAGE
     echo "Waiting for ElasticSearch to start listening on port"
@@ -362,11 +363,14 @@ elif [ "$db" = 'mssql' ]; then
     #
     # Otherwise we get an error in logs
     # Error 87(The parameter is incorrect.) occurred while opening file '/var/opt/mssql/data/master.mdf'
+    #
+    # MSSQL requires at least 2GB to run. But don't let it to grab more.
     docker run -d $(publish_port 1433 1433)                     \
                $(docker_service $db)                            \
                --name=$MSSQL_NAME                               \
                -e "ACCEPT_EULA=Y"                               \
                -e "SA_PASSWORD=mongooseim_secret+ESL123"        \
+               -e "MSSQL_MEMORY_LIMIT_MB=2048"                  \
                $(mount_ro_volume "$(pwd)/priv/mssql2012.sql" "/mongoose.sql")  \
                -v $MSSQL_NAME-data:/var/opt/mssql/data \
                --health-cmd='/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "mongooseim_secret+ESL123" -Q "SELECT 1"' \
