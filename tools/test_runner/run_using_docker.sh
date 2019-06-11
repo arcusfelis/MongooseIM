@@ -62,6 +62,7 @@ function setup_job_db
 # Uses subshell to not contaminate the main shell with env vars
 function run_test_job
 {(
+    set -eu
     JOB=$1
     import_job_env_vars $JOB
 
@@ -93,5 +94,5 @@ for JOB in $FINAL_JOBS; do
     run_test_job "$JOB" &
     pids+=("$!")
 done
-tools/kill_processes_on_exit.sh "$ROOT_SCRIPT_PID" "${pids[@]}"
+tools/kill_processes_on_exit.sh "$ROOT_SCRIPT_PID" "${pids[@]}" &
 wait_for_pids "${pids[@]}"

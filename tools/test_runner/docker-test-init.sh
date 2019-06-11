@@ -62,6 +62,8 @@ function forward_same_port
     forward_port $1 $1 $2
 }
 
+pkill simpleproxy || true
+
 # Same order of entries as in tools/travis-setup-db.sh
 forward_same_port 3306 mysql
 forward_same_port 5432 pgsql

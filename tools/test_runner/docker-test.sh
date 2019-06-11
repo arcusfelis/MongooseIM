@@ -35,6 +35,7 @@ docker run -d  \
     -v $(pwd):/opt/mongooseim_src \
     -v $BUILD_VOLUME:/opt/mongooseim_build:ro \
     -v ~/.cache/rebar3:/root/.cache/rebar3 \
+    --add-host muc.localhost:127.0.0.1 \
     --name=$TEST_CONTAINER_NAME \
     erlang:$ERLANG_VERSION \
     tail -F /var/log/progress || echo "Skip starting Test container"
