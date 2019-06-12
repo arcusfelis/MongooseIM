@@ -108,7 +108,7 @@ start(Type, Host, Tag, PoolOpts, ConnOpts) ->
 
     case mongoose_wpool_mgr:start(Type, Host, Tag, WpoolOptsIn, ConnOpts) of
         {ok, Pid} ->
-            Strategy = proplists:get_value(strategy, Opts, best_worker),
+            Strategy = proplists:get_value(strategy, Opts, available_worker),
             CallTimeout = proplists:get_value(call_timeout, Opts, 5000),
             ets:insert(?MODULE, #mongoose_wpool{name = {Type, Host, Tag},
                                                 strategy = Strategy,
