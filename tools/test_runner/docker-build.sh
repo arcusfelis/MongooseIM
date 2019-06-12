@@ -51,7 +51,7 @@ docker run -d  \
 # and docker would return an error.
 if [ "$RESET_DOCKER_VOLUMES" = true ]; then
     # Remove all files on the volume $BUILD_VOLUME
-    docker exec -it $BUILD_CONTAINER_NAME bash -c "rm -rf /opt/mongooseim/{*,.*}"
+    docker exec $BUILD_CONTAINER_NAME bash -c "rm -rf /opt/mongooseim/{*,.*} || true"
 fi
 
 # Builds code
