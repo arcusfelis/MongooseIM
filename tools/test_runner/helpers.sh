@@ -36,7 +36,6 @@ function buffered_async_helper
 {
     local THREAD_NAME=$1
     shift 1
-    ./tools/kill_processes_on_exit.sh $ROOT_SCRIPT_PID $$ &
 
     local ret_val=0 output=""
     local LOG_FILE=_build/.test_runner/logs/$THREAD_NAME
@@ -55,9 +54,21 @@ function seconds
     date +%s
 }
 
+PIDS_DESCRIPTIONS=()
+
+function describe_pid
+{
+    PIDS_DESCRIPTIONS[$1]=$2
+}
+
+function pid_info
+{
+    echo ${PIDS_DESCRIPTIONS[$1]:-}
+}
+
 function wait_for_pids
 {
-    local pids=( "$@" ) # pids to wait for
+    local pidsArray=( "$@" ) # pids to wait for
     local max_time="3600" # If execution takes longer than $max_time seconds, will stop execution.
 
     local standby_interval=60 ## In seconds
@@ -71,8 +82,13 @@ function wait_for_pids
     local pidCount # number of given pids
     local next_standby_alarm=$standby_interval
 
-    IFS=';' read -a pidsArray <<< "$pids"
     pidCount=${#pidsArray[@]}
+    pidDuration=()
+    pidResults=()
+
+    originalPidsArray=("${pidsArray[@]}")
+
+    echo "WAITING_STARTED for $pidCount tasks."
 
     while [ ${#pidsArray[@]} -gt 0 ]; do
         newPidsArray=()
@@ -84,7 +100,9 @@ function wait_for_pids
                 wait $pid || result=$? && true
 
                 exec_time=$(($(seconds) - $seconds_begin))
-                echo "WAITING_FINISHED Pid $pid with exitcode $result after $exec_time seconds."
+                pidDuration[$pid]=$exec_time
+                pidResults[$pid]=$result
+                echo "WAITING_FINISHED Pid $pid $(pid_info $pid) with exitcode $result after $exec_time seconds."
                 if [ $result -ne 0 ]; then
                     errorcount=$((errorcount+1))
                 fi
@@ -115,6 +133,14 @@ function wait_for_pids
 
     exec_time=$(($(seconds) - $seconds_begin))
     echo "WAITING_DONE ended using $pidCount subprocesses with $errorcount errors after $exec_time seconds."
+
+    # Print summary
+    for pid in "${originalPidsArray[@]}"; do
+        exec_time=${pidDuration[$pid]:-UNKNOWN}
+        result=${pidResults[$pid]:-UNKNOWN}
+        echo "TASK $pid $(pid_info $pid) took $exec_time seconds. Exit code $result."
+    done
+
     return $errorcount
 }
 

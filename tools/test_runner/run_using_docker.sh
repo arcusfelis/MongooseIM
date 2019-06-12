@@ -82,6 +82,7 @@ for ERLANG_VERSION in $ERLANG_VERSIONS; do
     buffered_async_helper "build_$ERLANG_VERSION" build_for_erlang_version "$ERLANG_VERSION" &
     pids+=("$!")
 done
+./tools/kill_processes_on_exit.sh $ROOT_SCRIPT_PID "${pids[@]}" &
 wait_for_pids "${pids[@]}"
 
 for JOB in $FINAL_JOBS; do
@@ -92,7 +93,9 @@ pids=()
 for JOB in $FINAL_JOBS; do
     echo "START_JOB: $JOB"
     run_test_job "$JOB" &
-    pids+=("$!")
+    pid="$!"
+    describe_pid "$pid" " {run_test_job job_$JOB} "
+    pids+=($pid)
 done
 tools/kill_processes_on_exit.sh "$ROOT_SCRIPT_PID" "${pids[@]}" &
 wait_for_pids "${pids[@]}"
