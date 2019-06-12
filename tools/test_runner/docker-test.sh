@@ -25,7 +25,7 @@ fi
 
 VARS_FILE=_build/.test_runner/$TEST_CONTAINER_NAME-vars
 mkdir -p $(dirname "$VARS_FILE")
-export > "$VARS_FILE"
+tools/test_runner/export_test_variables.sh > "$VARS_FILE"
 
 echo "Starting $TEST_CONTAINER_NAME"
 docker run -d  \
