@@ -29,6 +29,7 @@ function make_job_env_file
     export JOB=$1
     local JOB_VARS_FILE=_build/.test_runner/job-${JOB}-vars
     echo "JOB_VARS_FILE=$JOB_VARS_FILE"
+    mkdir -p "_build/.test_runner/"
     tools/test_runner/read_jobs.sh read_variables "$JOB" > "$JOB_VARS_FILE"
 }
 
