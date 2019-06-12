@@ -688,6 +688,8 @@ echo ""
 
 ./tools/test_runner/selected-tests-to-test-spec.sh "${SELECTED_TESTS[@]}"
 
+make certs
+
 if [ "$USE_DOCKER_FOR_TEST_RUNNER" = true ]; then
     ./tools/test_runner/run_using_docker.sh
     exit 0
