@@ -90,12 +90,11 @@ prep_stop(State) ->
     ?WARNING_MSG("event=mongooseim_stopping", []),
     mongoose_deprecations:stop(),
     ejabberd_listener:stop_listeners(),
+    broadcast_c2s_shutdown(),
+    wait_for_session_drain(),
     stop_modules(),
     stop_services(),
     mongoose_subhosts:stop(),
-    broadcast_c2s_shutdown(),
-    timer:sleep(5000),
-    lists:foreach(fun ejabberd_users:stop/1, ?MYHOSTS),
     mongoose_wpool:stop(),
     mongoose_metrics:remove_all_metrics(),
     State.
@@ -265,3 +264,23 @@ warning_if_pre_21_2_otp() ->
             ok
     end.
 
+wait_for_session_drain() ->
+    wait_for_session_drain(?MYHOSTS, [], 10).
+
+wait_for_session_drain(_, _, 0) ->
+    {error, times_limit};
+wait_for_session_drain([Host|Hosts], ActiveHosts, Times) ->
+    {ok, Data} = mongoose_metrics:get_metric_value(Host, sessionCount),
+    Value = proplists:get_value(value, Data),
+    case Value of
+        0 ->
+            wait_for_session_drain(Hosts, ActiveHosts, Times);
+        _ ->
+            ?INFO_MSG("event=wait_for_session_drain host=~ts sessions=~p", [Host, Value]),
+            wait_for_session_drain(Hosts, [Host|ActiveHosts], Times)
+    end;
+wait_for_session_drain([], [], _Times) ->
+    ok;
+wait_for_session_drain([], ActiveHosts, Times) ->
+    timer:sleep(500),
+    wait_for_session_drain(lists:reverse(ActiveHosts), [], Times - 1).
