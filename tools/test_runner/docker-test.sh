@@ -28,6 +28,7 @@ mkdir -p $(dirname "$VARS_FILE")
 tools/test_runner/export_test_variables.sh > "$VARS_FILE"
 
 echo "Starting $TEST_CONTAINER_NAME"
+# --mount does not support exec flag
 docker run -d  \
     -v $(pwd)/$VARS_FILE:/env_vars:ro \
     -v $(pwd)/tools/db_configs/odbc.ini:/root/.odbc.ini:ro \
@@ -35,6 +36,7 @@ docker run -d  \
     -v $(pwd):/opt/mongooseim_src \
     -v $BUILD_VOLUME:/opt/mongooseim_build:ro \
     -v ~/.cache/rebar3:/root/.cache/rebar3 \
+    --tmpfs /opt/mongooseim:exec \
     --add-host muc.localhost:127.0.0.1 \
     --name=$TEST_CONTAINER_NAME \
     erlang:$ERLANG_VERSION \
