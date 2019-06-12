@@ -90,7 +90,7 @@ function wait_for_pids
 
     echo "WAITING_STARTED for $pidCount tasks."
 
-    while [ ${#pidsArray[@]} -gt 0 ]; do
+    while true; do
         newPidsArray=()
         for pid in "${pidsArray[@]}"; do
             if kill -0 $pid > /dev/null 2>&1; then
@@ -109,6 +109,10 @@ function wait_for_pids
             fi
         done
 
+        if [ ${#newPidsArray[@]} -eq 0 ]; then
+            break
+        fi
+
         # Log a standby message
         exec_time=$(($(seconds) - $seconds_begin))
         if [ $exec_time -ge $next_standby_alarm ]; then
@@ -122,12 +126,7 @@ function wait_for_pids
             errrorcount=$((errorcount+1))
         fi
 
-        # Copy array, ignore "unbound variable" error for empty arrays with "set -u"
-        if [ ${#newPidsArray[@]} -gt 0 ]; then
-            pidsArray=("${newPidsArray[@]}")
-        else
-            pidsArray=()
-        fi
+        pidsArray=("${newPidsArray[@]}")
         sleep 1
     done
 
