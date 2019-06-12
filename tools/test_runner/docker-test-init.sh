@@ -30,7 +30,8 @@ function install_deps
 {
     echo "reload yes\nprecedence ::ffff:0:0/96 100\nprecedence ::/0 10" > /etc/gai.conf
     apt-get update
-    apt-get install -y unixodbc-dev tdsodbc simpleproxy rsync
+    apt-get install -y unixodbc-dev tdsodbc simpleproxy rsync locales
+    locale-gen en_US.UTF-8
     touch /root/has_deps_installed
 }
 
