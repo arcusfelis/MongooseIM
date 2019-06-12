@@ -61,9 +61,13 @@ function describe_pid
     PIDS_DESCRIPTIONS[$1]=$2
 }
 
+# Usage: pid_info PID1 PID2...
 function pid_info
 {
-    echo ${PIDS_DESCRIPTIONS[$1]:-}
+    for pid in "$@"
+    do
+        echo -n ${PIDS_DESCRIPTIONS[$pid]:-}" "
+    done
 }
 
 function wait_for_pids_log
@@ -122,7 +126,7 @@ function wait_for_pids
         exec_time=$(($(seconds) - $seconds_begin))
         if [ $exec_time -ge $next_standby_alarm ]; then
             next_standby_alarm=$(($next_standby_alarm + $standby_interval))
-            wait_for_pids_log "WAITING_PROGRESS Current tasks still running with pids ${newPidsArray[@]} after $exec_time seconds."
+            wait_for_pids_log "WAITING_PROGRESS Current tasks still running with pids ${newPidsArray[@]} $(pid_info ${newPidsArray[@]}) after $exec_time seconds."
         fi
 
         if [ $exec_time -gt $max_time ] && [ $max_time -ne 0 ]; then
