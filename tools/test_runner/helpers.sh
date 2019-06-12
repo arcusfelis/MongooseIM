@@ -66,6 +66,11 @@ function pid_info
     echo ${PIDS_DESCRIPTIONS[$1]:-}
 }
 
+function wait_for_pids_log
+{
+    echo -e "\n$1"
+}
+
 function wait_for_pids
 {
     local pidsArray=( "$@" ) # pids to wait for
@@ -88,7 +93,7 @@ function wait_for_pids
 
     originalPidsArray=("${pidsArray[@]}")
 
-    echo "WAITING_STARTED for $pidCount tasks."
+    wait_for_pids_log "WAITING_STARTED for $pidCount tasks."
 
     while true; do
         newPidsArray=()
@@ -102,7 +107,7 @@ function wait_for_pids
                 exec_time=$(($(seconds) - $seconds_begin))
                 pidDuration[$pid]=$exec_time
                 pidResults[$pid]=$result
-                echo "WAITING_FINISHED Pid $pid $(pid_info $pid) with exitcode $result after $exec_time seconds."
+                wait_for_pids_log "WAITING_FINISHED Pid $pid $(pid_info $pid) with exitcode $result after $exec_time seconds."
                 if [ $result -ne 0 ]; then
                     errorcount=$((errorcount+1))
                 fi
@@ -117,11 +122,11 @@ function wait_for_pids
         exec_time=$(($(seconds) - $seconds_begin))
         if [ $exec_time -ge $next_standby_alarm ]; then
             next_standby_alarm=$(($next_standby_alarm + $standby_interval))
-            echo "WAITING_PROGRESS Current tasks still running with pids ${newPidsArray[@]} after $exec_time seconds."
+            wait_for_pids_log "WAITING_PROGRESS Current tasks still running with pids ${newPidsArray[@]} after $exec_time seconds."
         fi
 
         if [ $exec_time -gt $max_time ] && [ $max_time -ne 0 ]; then
-            echo "WAITING_FAILED Max execution time exceeded for pids ${newPidsArray[@]}. Stopping task execution."
+            wait_for_pids_log "WAITING_FAILED Max execution time exceeded for pids ${newPidsArray[@]}. Stopping task execution."
             kill -SIGTERM ${newPidsArray[@]}
             errrorcount=$((errorcount+1))
         fi
@@ -131,13 +136,13 @@ function wait_for_pids
     done
 
     exec_time=$(($(seconds) - $seconds_begin))
-    echo "WAITING_DONE ended using $pidCount subprocesses with $errorcount errors after $exec_time seconds."
+    wait_for_pids_log "WAITING_DONE ended using $pidCount subprocesses with $errorcount errors after $exec_time seconds."
 
     # Print summary
     for pid in "${originalPidsArray[@]}"; do
         exec_time=${pidDuration[$pid]:-UNKNOWN}
         result=${pidResults[$pid]:-UNKNOWN}
-        echo "TASK $pid $(pid_info $pid) took $exec_time seconds. Exit code $result."
+        wait_for_pids_log "TASK $pid $(pid_info $pid) took $exec_time seconds. Exit code $result."
     done
 
     return $errorcount
