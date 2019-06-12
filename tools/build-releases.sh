@@ -26,15 +26,31 @@ function sync_node
     rsync -a _build/default/lib/mongooseim/ _build/$NODE/lib/mongooseim/
 }
 
+COMPILED_NODE=""
+COMPILED_DEFAULT=false
+
 function try_sync_node
 {
     local NODE=$1
     if test -d _build/$NODE/lib/mongooseim/ && \
        test -f _build/$NODE/rel/mongooseim/bin/mongooseimctl; then
+        if [[ "$COMPILED_DEFAULT" = false ]]; then
+            # Compile default directory before syncing the first time
+            COMPILED_DEFAULT=true
+            ./rebar3 compile
+        fi
         echo "Sync node $NODE"
         sync_node $NODE
     else
-        echo "Build node for the first time $NODE"
+        if [  -z "$COMPILED_NODE" ]; then
+            echo "Build node for the first time $NODE"
+            COMPILED_NODE="$NODE"
+        else
+            echo "Bootstrap $NODE from $COMPILED_NODE"
+            # Use mim1 as prototype for other nodes
+            # Dot here ensures that it would work even if destination exists
+            cp -Rp _build/$COMPILED_NODE/. _build/$NODE/
+        fi
         make $NODE
     fi
 }
@@ -43,7 +59,6 @@ function try_sync_node
 if [ -z "$DEV_NODES" ] || [ "$BUILD_MIM" = false ]; then
     echo "Skip make devrel"
 elif [ "$TRY_SYNC" = true ]; then
-    ./rebar3 compile
     for NODE in $DEV_NODES; do
         try_sync_node $NODE
     done
