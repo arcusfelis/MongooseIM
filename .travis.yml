@@ -24,7 +24,7 @@ env:
 matrix:
   include:
       - otp_release: 19.3
-        script: ./tools/test-runner.sh --skip-cover --reset-docker-containers --docker --verbose --jobs 3 4
+        script: ./tools/test-runner.sh --skip-cover --docker --verbose --jobs 3 4
 
 notifications:
     webhooks:
