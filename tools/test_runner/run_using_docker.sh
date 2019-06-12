@@ -74,6 +74,13 @@ function run_test_job
     buffered_async_helper "job_$JOB" ./tools/test_runner/docker-test.sh
 )}
 
+function setup_db
+{
+    for JOB in $FINAL_JOBS; do
+       setup_job_db "$JOB"
+    done
+}
+
 for JOB in $FINAL_JOBS; do
     make_job_env_file "$JOB"
 done
@@ -83,12 +90,14 @@ for ERLANG_VERSION in $ERLANG_VERSIONS; do
     buffered_async_helper "build_$ERLANG_VERSION" build_for_erlang_version "$ERLANG_VERSION" &
     pids+=("$!")
 done
+
+# Do setup_db in parallel with compilation
+# Don't start DB-s in parallel though yet
+buffered_async_helper "setup_db" setup_db &
+pids+=("$!")
+
 ./tools/kill_processes_on_exit.sh $ROOT_SCRIPT_PID "${pids[@]}" &
 wait_for_pids "${pids[@]}"
-
-for JOB in $FINAL_JOBS; do
-   setup_job_db "$JOB"
-done
 
 pids=()
 for JOB in $FINAL_JOBS; do
