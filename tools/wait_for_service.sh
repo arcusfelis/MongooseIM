@@ -35,7 +35,7 @@ if [ -z "$DOCKER_NETWORK" ] || [ `uname` = "Darwin" ]; then
   docker run --rm -d --network=$DOCKER_NETWORK --name $WAITER ubuntu sleep infinity || echo "We can continue if the $WAITER exists"
   docker cp tools/wait-for-it.sh $WAITER:/wait-for-it.sh
   echo "Wait for $IP:$PORT"
-  docker exec -it $WAITER /wait-for-it.sh -h "$IP" -p "$PORT"
+  docker exec $WAITER /wait-for-it.sh -h "$IP" -p "$PORT"
 else
   tools/wait-for-it.sh -h "$IP" -p "$PORT"
 fi

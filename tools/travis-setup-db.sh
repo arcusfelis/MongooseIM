@@ -279,7 +279,7 @@ elif [ "$db" = 'cassandra' ]; then
     tools/wait_for_service.sh $CASSANDRA_PROXY_NAME 9042 || docker logs $CASSANDRA_PROXY_NAME
 
     # Apply schemas
-    docker exec -it \
+    docker exec \
         -e SSL_CERTFILE=/ssl/ca/cacert.pem \
         "$CASSANDRA_NAME" \
         sh -c 'exec cqlsh "127.0.0.1" --ssl -f /schemas/mim.cql -f /schemas/test.cql'
@@ -378,13 +378,13 @@ elif [ "$db" = 'mssql' ]; then
     tools/wait_for_healthcheck.sh $MSSQL_NAME
     tools/wait_for_service.sh $MSSQL_NAME 1433
 
-    docker exec -it $MSSQL_NAME \
+    docker exec $MSSQL_NAME \
         /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "mongooseim_secret+ESL123" \
         -Q "CREATE DATABASE ejabberd"
-    docker exec -it $MSSQL_NAME \
+    docker exec $MSSQL_NAME \
         /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "mongooseim_secret+ESL123" \
         -Q "ALTER DATABASE ejabberd SET READ_COMMITTED_SNAPSHOT ON"
-    docker exec -it $MSSQL_NAME \
+    docker exec $MSSQL_NAME \
         /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "mongooseim_secret+ESL123" \
         -i mongoose.sql
 
