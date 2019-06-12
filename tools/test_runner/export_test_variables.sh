@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# It's like "export" bash built-in, but only prints variables we care about
+
+TEST_RUNNER_VARS=(
+    PRESET
+    VERBOSE
+    PRINT_MIM_LOGS
+    SMALL_TESTS
+    COVER_ENABLED
+    PRESET_ENABLED
+    DB
+    JOBS
+    DEV_NODES
+    TEST_HOSTS
+    BUILD_TESTS
+    BUILD_MIM
+    TLS_DIST
+    REBAR_CT_EXTRA_ARGS
+    TESTSPEC
+    START_NODES
+    STOP_NODES
+    PAUSE_BEFORE_BIG_TESTS
+    RESET_DOCKER_CONTAINERS
+    RESET_DOCKER_VOLUMES
+    TRY_SYNC
+    SKIP_DB_SETUP
+    ERLANG_VERSION
+    BUILD_VOLUME
+    BUILD_CONTAINER_NAME
+    JOB
+    TEST_CONTAINER_NAME
+    DOCKER_NAME_PREFIX
+    PUBLISH_PORTS
+    DOCKER_NETWORK
+)
+
+for VAR in ${TEST_RUNNER_VARS[@]}; do
+    export | grep "^declare -x $VAR=" || true
+done

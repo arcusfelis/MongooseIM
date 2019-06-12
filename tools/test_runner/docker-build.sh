@@ -35,7 +35,7 @@ mkdir -p ~/.cache/rebar3/
 
 VARS_FILE=_build/.test_runner/$BUILD_CONTAINER_NAME-vars
 mkdir -p $(dirname "$VARS_FILE")
-export > "$VARS_FILE"
+tools/test_runner/export_test_variables.sh > "$VARS_FILE"
 
 docker volume create --name $BUILD_VOLUME || echo "Volume creation failed"
 docker run -d  \
