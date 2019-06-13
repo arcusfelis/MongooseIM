@@ -9,6 +9,7 @@ function time_buffered
 
 # It is very important to properly kill the children,
 # otherwise "docker exec" would never return.
+# Sets LAST_TAIL_PID variable
 function buffered_async_tail
 {
     local THREAD_NAME=$1
@@ -30,6 +31,8 @@ function buffered_async_tail
     # Use negative pid to kill the process and its children
     # (i.e. we want to kill tail)
     ./tools/kill_processes_on_exit.sh "$ROOT_SCRIPT_PID" "$TAIL_PID" &
+
+    LAST_TAIL_PID=$TAIL_PID
 }
 
 function buffered_async_helper
@@ -45,6 +48,9 @@ function buffered_async_helper
 
     # 2>&1 - redirect erros to stdout
     "$@" > "$LOG_FILE" 2>&1 || ret_val="$?"
+
+    # Kill tail, so time_buffered can detact broken pipe
+    kill -15 "$LAST_TAIL_PID"
 
     echo "FINISHED: $THREAD_NAME returns $ret_val"
     return "$ret_val"
