@@ -41,21 +41,36 @@ rsync -a \
     --exclude _build \
     --exclude big_tests/_build \
     --exclude big_tests/ct_report \
+    --exclude src/eldap_filter_yecc.erl \
+    --exclude '*.beam' \
     /opt/mongooseim_src/ \
     /opt/mongooseim/
 
 cd /opt/mongooseim/
+source tools/travis-common-vars.sh
+source tools/test_runner/helpers.sh
 
 BUILD_MIM="${BUILD_MIM:-true}"
 BUILD_TESTS="${BUILD_TESTS:-true}"
 
+tools/test_runner/time_buffered # Build time_buffered utility
+
+pids=()
+
 if [ "$BUILD_MIM" = true ]; then
     echo "Build releases"
-    tools/test_runner/time_buffered # Build time_buffered utility
-    ./tools/build-releases.sh
+    buffered_async_helper "build_nodes" ./tools/build-releases.sh &
+    pid="$!"
+    describe_pid "$pid" "build_nodes"
+    pids+=("$pid")
 fi
 
 if [ "$BUILD_TESTS" = true ]; then
     echo "Build tests"
-    ./tools/travis-build-tests.sh
+    buffered_async_helper "build_tests" ./tools/travis-build-tests.sh &
+    pid="$!"
+    describe_pid "$pid" "build_tests"
+    pids+=("$pid")
 fi
+
+wait_for_pids "${pids[@]}"
