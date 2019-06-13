@@ -25,7 +25,7 @@ stop_node() {
 stop_nodes() {
   local pids=()
   for node in ${DEV_NODES_ARRAY[@]}; do
-    buffered_async_helper "stop_node_$node" stop_node $node &
+    async_helper "stop_node_$node" stop_node $node &
     HELPER_PID="$!"
     describe_pid "$HELPER_PID" " {stop_node_$node} "
     pids+=("$HELPER_PID")

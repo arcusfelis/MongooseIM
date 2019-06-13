@@ -56,6 +56,18 @@ function buffered_async_helper
     return "$ret_val"
 }
 
+function async_helper
+{
+    local THREAD_NAME=$1
+    shift 1
+
+    # 2>&1 - redirect erros to stdout
+    "$@" 2>&1 | "$SED" -e 's/^/'["$THREAD_NAME"']    /' || ret_val="$?"
+
+    echo "FINISHED: $THREAD_NAME returns $ret_val"
+    return "$ret_val"
+}
+
 function seconds
 {
     date +%s

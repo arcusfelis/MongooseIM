@@ -45,7 +45,7 @@ wait_for_node() {
 start_nodes() {
   local pids=()
   for node in ${DEV_NODES_ARRAY[@]}; do
-    buffered_async_helper "start_node_$node" start_node $node &
+    async_helper "start_node_$node" start_node $node &
     HELPER_PID=$!
     describe_pid "$HELPER_PID" " {start_node_$node} "
     pids+=("$HELPER_PID")
@@ -57,7 +57,7 @@ start_nodes() {
 wait_for_nodes() {
   local pids=()
   for node in ${DEV_NODES_ARRAY[@]}; do
-    buffered_async_helper "wait_for_node_$node" wait_for_node $node &
+    async_helper "wait_for_node_$node" wait_for_node $node &
     HELPER_PID=$!
     describe_pid "$HELPER_PID" " {wait_for_node_$node} "
     pids+=("$HELPER_PID")
