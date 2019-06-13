@@ -15,6 +15,7 @@ set -eu
 DEV_NODES="${DEV_NODES-mim1}"
 BUILD_MIM="${BUILD_MIM-true}"
 TRY_SYNC="${TRY_SYNC-false}"
+TRY_FAST="${TRY_FAST-false}"
 
 # This function assumes that:
 # - no release configuration has changed
@@ -23,10 +24,10 @@ TRY_SYNC="${TRY_SYNC-false}"
 function sync_node
 {
     local NODE=$1
-    rsync -a _build/default/lib/mongooseim/ _build/$NODE/lib/mongooseim/
+    rsync -a --exclude lib/mongooseim/.rebar3/erlcinfo \
+        _build/default/lib/mongooseim/ _build/$NODE/lib/mongooseim/
 }
 
-COMPILED_NODE=""
 COMPILED_DEFAULT=false
 
 function try_sync_node
@@ -42,15 +43,6 @@ function try_sync_node
         echo "Sync node $NODE"
         sync_node $NODE
     else
-        if [  -z "$COMPILED_NODE" ]; then
-            echo "Build node for the first time $NODE"
-            COMPILED_NODE="$NODE"
-        else
-            echo "Bootstrap $NODE from $COMPILED_NODE"
-            # Use mim1 as prototype for other nodes
-            # Dot here ensures that it would work even if destination exists
-            cp -Rp _build/$COMPILED_NODE/. _build/$NODE/
-        fi
         make $NODE
     fi
 }
@@ -60,7 +52,14 @@ if [ -z "$DEV_NODES" ] || [ "$BUILD_MIM" = false ]; then
     echo "Skip make devrel"
 elif [ "$TRY_SYNC" = true ]; then
     for NODE in $DEV_NODES; do
-        try_sync_node $NODE
+        time try_sync_node $NODE
+    done
+elif [ "$TRY_FAST" = true ]; then
+    for NODE in $DEV_NODES; do
+        mkdir -p _build/.test_runner/
+        cp rel/$NODE.vars.config _build/.test_runner/dev.vars.config
+        time make dev
+        rsync -a _build/dev/ _build/$NODE/
     done
 else
     echo "Build $DEV_NODES"

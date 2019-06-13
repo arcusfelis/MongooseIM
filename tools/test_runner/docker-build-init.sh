@@ -22,7 +22,7 @@ set +o allexport
 # Ah, envs
 export HOME=/root
 
-export TRY_SYNC=true
+export TRY_FAST=true
 
 function install_deps
 {
