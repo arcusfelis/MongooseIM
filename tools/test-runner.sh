@@ -295,6 +295,7 @@ BUILD_MIM=true
 START_NODES=true
 STOP_NODES=true
 TLS_DIST=no
+RETRY_BIG_TESTS=false
 
 SELECTED_TESTS=()
 STOP_SCRIPT=false
@@ -481,6 +482,11 @@ case $key in
         TLS_DIST=yes
     ;;
 
+    --retry-big-tests)
+        shift # past argument
+        RETRY_BIG_TESTS=true
+    ;;
+
     --verbose)
         export VERBOSE=1
         shift # past argument
@@ -664,6 +670,7 @@ export STOP_NODES="$STOP_NODES"
 export PAUSE_BEFORE_BIG_TESTS="$PAUSE_BEFORE_BIG_TESTS"
 export RESET_DOCKER_CONTAINERS="$RESET_DOCKER_CONTAINERS"
 export RESET_DOCKER_VOLUMES="$RESET_DOCKER_VOLUMES"
+export RETRY_BIG_TESTS="$RETRY_BIG_TESTS"
 
 # Debug printing
 echo "Variables:"
@@ -681,6 +688,7 @@ echo "    TESTSPEC=$TESTSPEC"
 echo "    TLS_DIST=$TLS_DIST"
 echo "    START_NODES=$START_NODES"
 echo "    STOP_NODES=$STOP_NODES"
+echo "    RETRY_BIG_TESTS=$RETRY_BIG_TESTS"
 echo "    JOBS=$JOBS"
 echo "    RESET_DOCKER_CONTAINERS=$RESET_DOCKER_CONTAINERS"
 echo "    RESET_DOCKER_VOLUMES=$RESET_DOCKER_VOLUMES"

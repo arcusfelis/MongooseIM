@@ -11,6 +11,7 @@ DEFAULT_PRESET=internal_mnesia
 PRESET="${PRESET-$DEFAULT_PRESET}"
 SMALL_TESTS="${SMALL_TESTS:-true}"
 COVER_ENABLED="${COVER_ENABLED:-true}"
+RETRY_BIG_TESTS="${RETRY_BIG_TESTS:-false}"
 
 while getopts ":p::s::e::c:" opt; do
   case $opt in
@@ -151,6 +152,23 @@ run_tests() {
   run_test_preset
   BIG_STATUS=$?
 
+  # If /tmp/ct_summary is not empty file
+  if [ "$RETRY_BIG_TESTS" = true ] && [ -s /tmp/ct_summary ]; then
+      echo "Stopping MongooseIM nodes before retry"
+      ./tools/stop-nodes.sh
+
+      echo "Starting MongooseIM nodes for retry"
+      time ${TOOLS}/start-nodes.sh || { echo "Failed to start MongooseIM nodes"; return 1; }
+      maybe_pause_before_test
+
+      echo "Generate retry auto_big_tests.spec"
+      ./tools/test_runner/selected-tests-to-test-spec.sh $(cat /tmp/ct_summary)
+      export TESTSPEC=auto_big_tests.spec
+
+      run_test_preset
+      BIG_STATUS=$?
+  fi
+
   SUMMARIES_DIRS=${BASE}/big_tests/ct_report/ct_run*
   SUMMARIES_DIR=$(choose_newest_directory ${SUMMARIES_DIRS})
   echo "SUMMARIES_DIR=$SUMMARIES_DIR"
@@ -179,7 +197,8 @@ run_tests() {
     print_running_nodes
   fi
 
-  if [ -f /tmp/ct_summary ]; then
+  # If /tmp/ct_summary is not empty file
+  if [ -s /tmp/ct_summary ]; then
       echo "Failed big cases:"
       cat /tmp/ct_summary
       echo ""
