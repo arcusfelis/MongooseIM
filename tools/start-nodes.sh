@@ -47,6 +47,7 @@ start_nodes() {
   for node in ${DEV_NODES_ARRAY[@]}; do
     buffered_async_helper "start_node_$node" start_node $node &
     HELPER_PID=$!
+    describe_pid "$HELPER_PID" " {start_node_$node} "
     pids+=("$HELPER_PID")
   done
  ./tools/kill_processes_on_exit.sh $MAIN_PID "${pids[@]}" &
@@ -58,6 +59,7 @@ wait_for_nodes() {
   for node in ${DEV_NODES_ARRAY[@]}; do
     buffered_async_helper "wait_for_node_$node" wait_for_node $node &
     HELPER_PID=$!
+    describe_pid "$HELPER_PID" " {wait_for_node_$node} "
     pids+=("$HELPER_PID")
   done
  ./tools/kill_processes_on_exit.sh $MAIN_PID "${pids[@]}" &

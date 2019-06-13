@@ -49,7 +49,7 @@ etc/mongooseim.cfg:
 
 devrel: $(DEVNODES)
 
-$(DEVNODES): certs configure.out rel/vars.config
+$(DEVNODES) dev: certs configure.out rel/vars.config
 	@echo "building $@"
 	(. ./configure.out && \
 	DEVNODE=true $(RUN) $(REBAR) as $@ release)

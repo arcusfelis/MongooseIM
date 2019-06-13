@@ -88,13 +88,17 @@ done
 pids=()
 for ERLANG_VERSION in $ERLANG_VERSIONS; do
     buffered_async_helper "build_$ERLANG_VERSION" build_for_erlang_version "$ERLANG_VERSION" &
-    pids+=("$!")
+    pid="$!"
+    describe_pid "$pid" " {build_$ERLANG_VERSION} "
+    pids+=("$pid")
 done
 
 # Do setup_db in parallel with compilation
 # Don't start DB-s in parallel though yet
 buffered_async_helper "setup_db" setup_db &
-pids+=("$!")
+pid="$!"
+describe_pid "$pid" " {setup_db} "
+pids+=("$pid")
 
 ./tools/kill_processes_on_exit.sh $ROOT_SCRIPT_PID "${pids[@]}" &
 wait_for_pids "${pids[@]}"
