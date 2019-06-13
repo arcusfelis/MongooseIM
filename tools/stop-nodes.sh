@@ -17,14 +17,7 @@ source tools/test_runner/helpers.sh
 # Fails if release for the node is not compiled
 stop_node() {
   echo -n "${1} stop: "
-  ${BASE}/_build/${1}/rel/mongooseim/bin/mongooseimctl stop_forced && echo ok
-}
-
-async_helper() {
-  local ret_val=0 output=""
-  output="$("$@")" || ret_val="$?"
-  echo; echo "$output"; echo
-  return "$ret_val"
+  ${BASE}/_build/${1}/rel/mongooseim/bin/mongooseimctl stop_forced || echo ok
 }
 
 # DEV_NODES_ARRAY is defined in travis-common-vars.sh
@@ -32,7 +25,7 @@ async_helper() {
 stop_nodes() {
   local pids=()
   for node in ${DEV_NODES_ARRAY[@]}; do
-    async_helper stop_node $node &
+    buffered_async_helper "stop_node_$node" stop_node $node &
     pids+=("$!")
   done
   wait_for_pids "${pids[@]}"

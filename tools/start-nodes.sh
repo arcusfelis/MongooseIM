@@ -13,13 +13,6 @@ set -e
 source tools/travis-common-vars.sh
 source tools/test_runner/helpers.sh
 
-async_helper() {
-  local ret_val=0 output=""
-  output="$("$@")" || ret_val="$?"
-  echo; echo "$output"; echo
-  return "$ret_val"
-}
-
 # Starts node in background
 # First argument is node directory name
 # Does not fail if the node is already running (but prints a message)
@@ -52,7 +45,7 @@ wait_for_node() {
 start_nodes() {
   local pids=()
   for node in ${DEV_NODES_ARRAY[@]}; do
-    async_helper start_node $node &
+    buffered_async_helper "start_node_$node" start_node $node &
     HELPER_PID=$!
     pids+=("$HELPER_PID")
   done
@@ -63,7 +56,7 @@ start_nodes() {
 wait_for_nodes() {
   local pids=()
   for node in ${DEV_NODES_ARRAY[@]}; do
-    async_helper  wait_for_node $node &
+    buffered_async_helper "wait_for_node_$node" wait_for_node $node &
     HELPER_PID=$!
     pids+=("$HELPER_PID")
   done
