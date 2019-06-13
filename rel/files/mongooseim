@@ -94,7 +94,7 @@ case "$1" in
         "$ERTS_PATH"/run_erl -daemon "$PIPE_DIR" "$RUNNER_LOG_DIR" "exec \"$RUNNER_BASE_DIR/bin/$SCRIPT\" console $@" 2>&1
         ;;
 
-    stop)
+    stop|stop_forced)
         # Wait for the node to completely stop...
         case `uname -s` in
             Linux|Darwin|FreeBSD|DragonFly|NetBSD|OpenBSD)
@@ -113,9 +113,20 @@ case "$1" in
                 ;;
         esac
         nodetool stop
+        DURATION=0
         while `kill -0 $PID 2>/dev/null`;
         do
             sleep 1
+            echo "Waiting for $PID for $DURATION seconds"
+            DURATION=$(($DURATION + 1))
+            if [ "$1" = "stop_forced" ] && [ "$DURATION" = 30 ]; then
+                echo "Force kill $PID using SIGTERM"
+                kill -15 "$PID"
+            fi
+            if [ "$1" = "stop_forced" ] && [ "$DURATION" = 60 ]; then
+                echo "Force kill $PID using SIGKILL"
+                kill -9 "$PID"
+            fi
         done
         ;;
     restart)
@@ -226,7 +237,7 @@ case "$1" in
         fi
         ;;
     *)
-        echo "Usage: $SCRIPT {start|stop|restart|reboot|ping|live|console|console_clean|foreground|attach|debug|version}"
+        echo "Usage: $SCRIPT {start|stop|stop_forced|restart|reboot|ping|live|console|console_clean|foreground|attach|debug|version}"
         exit 1
         ;;
 esac
