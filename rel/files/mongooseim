@@ -94,8 +94,12 @@ wait_for_pid_exit() {
             kill -15 "$PID"
         fi
         if [ "$1" = "stop_forced" ] && [ "$DURATION" = 60 ]; then
+            echo "Process $PID runs for too long"
+            ps aux | grep "$PID"
+
             echo "Force kill $PID using SIGKILL"
             kill -9 "$PID"
+            exit 0
         fi
     done
 }
