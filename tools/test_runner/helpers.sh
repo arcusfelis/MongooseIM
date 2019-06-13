@@ -43,7 +43,8 @@ function buffered_async_helper
 
     buffered_async_tail "$THREAD_NAME" "$LOG_FILE"
 
-    "$@" > "$LOG_FILE" || ret_val="$?"
+    # 2>&1 - redirect erros to stdout
+    "$@" > "$LOG_FILE" 2>&1 || ret_val="$?"
 
     echo "FINISHED: $THREAD_NAME returns $ret_val"
     return "$ret_val"
