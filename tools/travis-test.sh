@@ -161,6 +161,10 @@ run_tests() {
       time ${TOOLS}/start-nodes.sh || { echo "Failed to start MongooseIM nodes"; return 1; }
       maybe_pause_before_test
 
+      echo "Failed cases after first run:"
+      cat /tmp/ct_summary
+      echo ""
+
       echo "Generate retry auto_big_tests.spec"
       ./tools/test_runner/selected-tests-to-test-spec.sh $(cat /tmp/ct_summary)
       export TESTSPEC=auto_big_tests.spec
