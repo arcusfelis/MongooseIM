@@ -3,9 +3,12 @@
 PIDFILE=/tmp/print-dots.pid
 SLEEPTIME=10s
 
+# Dot . by default
+PERIODIC_STRING="${PERIODIC_STRING:-.}"
+
 loop () {
     while true; do
-        printf "."
+        printf $PERIODIC_STRING
         sleep $SLEEPTIME
     done
 }

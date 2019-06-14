@@ -74,6 +74,8 @@ forward_same_port 5672 rabbitmq
 
 forward_port 3389 389 ldap
 
+export PERIODIC_STRING="\n"
+
 ret_val=0
 ./tools/travis-test.sh || ret_val="$?"
 
