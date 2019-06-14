@@ -185,7 +185,7 @@ get_worker_from_sup(Sup, available_worker) ->
 get_worker_from_sup(Sup, {hash_worker, HashKey}) ->
     wpool_pool:hash_worker(Sup, HashKey);
 get_worker_from_sup(Sup, Strategy) ->
-      wpool_process:Strategy(Sup).
+    wpool_pool:Strategy(Sup).
 
 call(Type, Request) ->
     call(Type, global, Request).
