@@ -17,6 +17,10 @@ BUILD_CONTAINER_NAME=${BUILD_CONTAINER_NAME:-mongooseim-test-builder}
 RESET_DOCKER_CONTAINERS=${RESET_DOCKER_CONTAINERS:-false}
 RESET_DOCKER_VOLUMES=${RESET_DOCKER_VOLUMES:-false}
 
+IMAGE=mim-test-erlang:$ERLANG_VERSION
+
+./tools/test_runner/ensure_docker_image.sh ensure "$ERLANG_VERSION" "$IMAGE"
+
 if [ "$RESET_DOCKER_CONTAINERS" = true ]; then
     docker rm -f "$BUILD_CONTAINER_NAME" || true
 fi
@@ -44,7 +48,7 @@ docker run -d  \
     -v $(pwd):/opt/mongooseim_src \
     -v ~/.cache/rebar3:/root/.cache/rebar3 \
     --name=$BUILD_CONTAINER_NAME \
-    erlang:$ERLANG_VERSION \
+    $IMAGE \
     tail -F /var/log/progress || echo "Skip starting Test Build container"
 
 # We can't just "docker volume rm", because there can be some containers still using the volume

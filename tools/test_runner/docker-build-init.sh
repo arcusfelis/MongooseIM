@@ -22,16 +22,6 @@ set +o allexport
 # Ah, envs
 export HOME=/root
 
-function install_deps
-{
-    echo "reload yes\nprecedence ::ffff:0:0/96 100\nprecedence ::/0 10" > /etc/gai.conf
-    apt-get update
-    apt-get install -y unixodbc-dev simpleproxy rsync
-    touch /root/has_deps_installed
-}
-
-test -f /root/has_deps_installed || install_deps
-
 # rsync -a src_directory/ dst_directory/
 
 echo "Rsync code"

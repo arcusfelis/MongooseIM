@@ -19,6 +19,10 @@ TEST_CONTAINER_NAME=${TEST_CONTAINER_NAME:-mongooseim-test}
 DOCKER_NETWORK=${DOCKER_NETWORK:-mongoose-network}
 RESET_DOCKER_CONTAINERS=${RESET_DOCKER_CONTAINERS:-false}
 
+IMAGE=mim-test-erlang:$ERLANG_VERSION
+
+./tools/test_runner/ensure_docker_image.sh ensure "$ERLANG_VERSION" "$IMAGE"
+
 if [ "$RESET_DOCKER_CONTAINERS" = true ]; then
     docker rm -f "$TEST_CONTAINER_NAME" || true
 fi
@@ -39,7 +43,7 @@ docker run -d  \
     --tmpfs /opt/mongooseim:exec \
     --add-host muc.localhost:127.0.0.1 \
     --name=$TEST_CONTAINER_NAME \
-    erlang:$ERLANG_VERSION \
+    $IMAGE \
     tail -F /var/log/progress || echo "Skip starting Test container"
 
 docker exec -i $TEST_CONTAINER_NAME /opt/mongooseim_src/tools/test_runner/docker-test-init.sh
