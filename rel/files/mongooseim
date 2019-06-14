@@ -83,7 +83,7 @@ relx_gen_id() {
 
 is_zombie() {
     local PID=$1
-    ps aux | awk '"[Zz]" ~ $8 { printf("%s, PID = %d\n", $8, $2); }' | grep "PID = "
+    ps aux | awk '"[Zz]" ~ $8 { printf("%s, PID = %d\n", $8, $2); }' | grep "PID = $PID"
 }
 
 wait_for_pid_exit() {
@@ -106,7 +106,7 @@ wait_for_pid_exit() {
             kill -9 "$PID"
             exit 0
         fi
-        if `is_zombie $PID`; then
+        if is_zombie $PID ; then
             echo "$PID is zombie (defunct), stop waiting"
             exit 0
         fi
