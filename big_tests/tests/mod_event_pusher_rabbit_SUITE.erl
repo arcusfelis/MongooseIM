@@ -715,7 +715,8 @@ is_rabbitmq_available() ->
         {ok, Conn} ->
             amqp_connection:close(Conn),
             true;
-        {error, econnrefused} ->
+        {error, Reason} ->
+            ct:pal("is_rabbitmq_available not available ~p", [Reason]),
             false
     catch
         _Err ->
