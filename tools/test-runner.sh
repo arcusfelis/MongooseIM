@@ -305,6 +305,9 @@ USE_DOCKER_FOR_TEST_RUNNER=false
 RESET_DOCKER_CONTAINERS=false
 RESET_DOCKER_VOLUMES=false
 
+TRY_FAST=false
+TRY_SYNC=false
+
 # Parse command line arguments
 # Prefer arguments to env variables
 while [[ $# -gt 0 ]]
@@ -572,6 +575,16 @@ case $key in
         shift # past argument
     ;;
 
+    --fast-build)
+        TRY_FAST=true
+        shift # past argument
+    ;;
+
+    --sync-build)
+        TRY_SYNC=true
+        shift # past argument
+    ;;
+
     --)
         shift # skip placeholder
     ;;
@@ -671,6 +684,8 @@ export PAUSE_BEFORE_BIG_TESTS="$PAUSE_BEFORE_BIG_TESTS"
 export RESET_DOCKER_CONTAINERS="$RESET_DOCKER_CONTAINERS"
 export RESET_DOCKER_VOLUMES="$RESET_DOCKER_VOLUMES"
 export RETRY_BIG_TESTS="$RETRY_BIG_TESTS"
+export TRY_FAST="$TRY_FAST"
+export TRY_SYNC="$TRY_SYNC"
 
 # Debug printing
 echo "Variables:"
@@ -692,6 +707,8 @@ echo "    RETRY_BIG_TESTS=$RETRY_BIG_TESTS"
 echo "    JOBS=$JOBS"
 echo "    RESET_DOCKER_CONTAINERS=$RESET_DOCKER_CONTAINERS"
 echo "    RESET_DOCKER_VOLUMES=$RESET_DOCKER_VOLUMES"
+echo "    TRY_SYNC=$TRY_SYNC"
+echo "    TRY_FAST=$TRY_FAST"
 echo ""
 
 ./tools/test_runner/selected-tests-to-test-spec.sh "${SELECTED_TESTS[@]}"

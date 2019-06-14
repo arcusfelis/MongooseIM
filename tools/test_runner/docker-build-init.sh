@@ -22,8 +22,6 @@ set +o allexport
 # Ah, envs
 export HOME=/root
 
-export TRY_FAST=true
-
 function install_deps
 {
     echo "reload yes\nprecedence ::ffff:0:0/96 100\nprecedence ::/0 10" > /etc/gai.conf
