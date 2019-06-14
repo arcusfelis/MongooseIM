@@ -83,7 +83,7 @@ relx_gen_id() {
 
 is_zombie() {
     local PID=$1
-    ps aux | awk '"[Zz]" ~ $8 { printf("%s, PID = %d\n", $8, $2); }' | grep "PID = $PID"
+    ps aux | awk '"[Zzs]" ~ $8 { printf("%s, PID = %d\n", $8, $2); }' | grep "$PID"
 }
 
 wait_for_pid_exit() {
