@@ -34,6 +34,7 @@ rsync -a \
     --exclude '*.o' \
     --exclude '*.d' \
     --exclude '*.beam' \
+    --exclude 'priv/lib/*.so' \
     /opt/mongooseim_src/ \
     /opt/mongooseim/
 
