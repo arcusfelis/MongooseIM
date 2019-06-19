@@ -13,7 +13,7 @@
 repo_dir(Config) ->
     get_env_var("REPO_DIR").
 
-%% @doc Get `test.disabled/ejabberd_tests/' directory
+%% @doc Get `big_tests/' directory
 test_dir(Config) ->
     get_env_var("TEST_DIR").
 
