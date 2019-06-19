@@ -27,6 +27,8 @@ matrix:
         script: ./tools/test-runner.sh --skip-cover --docker --fast-build --verbose --retry-big-tests --jobs 3 4 --skip-auto-recompile
       - otp_release: 19.3
         script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 3 4 --skip-auto-recompile
+      - otp_release: 19.3
+        script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 3 4
 
 notifications:
     webhooks:
