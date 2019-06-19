@@ -50,6 +50,8 @@ opts() ->
 %% Args are {key :: atom(), val :: string()} pairs.
 %% "=" is an invalid character in option name or value.
 main(RawArgs) ->
+    maybe_copy_files_compiled_by_rebar(),
+
     Args = [raw_to_arg(Raw) || Raw <- RawArgs],
     Opts = apply_preset_enabled(args_to_opts(Args)),
     try
@@ -143,7 +145,7 @@ tests_to_run(TestSpec) ->
     TestSpecFile = atom_to_list(TestSpec),
     [
      {spec, TestSpecFile}
-    ].
+    ] ++ ct_opts().
 
 save_count(Test, Configs) ->
     Repeat = case proplists:get_value(repeat, Test) of
@@ -189,7 +191,8 @@ run_test(Test, PresetsToRun, CoverOpts) ->
             R
     end.
 
-get_ct_config([{spec, Spec}]) ->
+get_ct_config(Opts) ->
+    Spec = proplists:get_value(spec, Opts),
     Props = read_file(Spec),
     ConfigFile = case proplists:lookup(config, Props) of
         {config, [Config]} -> Config;
@@ -592,3 +595,25 @@ anaylyze_groups_runs() ->
             error_logger:error_msg("Error reading all_groups.summary: ~p~n", [Error]),
             undefined
     end.
+
+ct_opts() ->
+    case os:getenv("SKIP_AUTO_COMPILE") of
+        "true" ->
+            [{auto_compile, false}];
+        _ ->
+            ok
+    end.
+
+maybe_copy_files_compiled_by_rebar() ->
+    case os:getenv("SKIP_AUTO_COMPILE") of
+        "true" ->
+            copy_files_compiled_by_rebar();
+        _ ->
+            ok
+    end.
+
+copy_files_compiled_by_rebar() ->
+    Path = "_build/default/lib/ejabberd_tests/ebin/",
+    {ok, Files} = file:list_dir(Path),
+    [{ok, _} = file:copy(Path ++ F, "tests/" ++ F) || F <- Files, filename:extension(F) =:= ".beam"],
+    ok.

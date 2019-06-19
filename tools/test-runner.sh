@@ -309,6 +309,7 @@ RESET_DOCKER_VOLUMES=false
 
 TRY_FAST=false
 TRY_SYNC=false
+SKIP_AUTO_COMPILE=false
 
 # Parse command line arguments
 # Prefer arguments to env variables
@@ -592,6 +593,13 @@ case $key in
         shift # past argument
     ;;
 
+--skip-auto-recompile)
+        # Skips ct autorecompile feature in big tests
+        # Useful, if you know, that test code is up to date (i.e. compiled at build step)
+        SKIP_AUTO_COMPILE=true
+        shift # past argument
+    ;;
+
     --)
         shift # skip placeholder
     ;;
@@ -694,6 +702,7 @@ export RESET_DOCKER_VOLUMES="$RESET_DOCKER_VOLUMES"
 export RETRY_BIG_TESTS="$RETRY_BIG_TESTS"
 export TRY_FAST="$TRY_FAST"
 export TRY_SYNC="$TRY_SYNC"
+export SKIP_AUTO_COMPILE="$SKIP_AUTO_COMPILE"
 
 # Debug printing
 echo "Variables:"
@@ -717,6 +726,7 @@ echo "    RESET_DOCKER_CONTAINERS=$RESET_DOCKER_CONTAINERS"
 echo "    RESET_DOCKER_VOLUMES=$RESET_DOCKER_VOLUMES"
 echo "    TRY_SYNC=$TRY_SYNC"
 echo "    TRY_FAST=$TRY_FAST"
+echo "    SKIP_AUTO_COMPILE=$SKIP_AUTO_COMPILE"
 echo ""
 
 ./tools/test_runner/selected-tests-to-test-spec.sh "${SELECTED_TESTS[@]}"

@@ -14,3 +14,11 @@ if [ "$BUILD_TESTS" != "false" ]; then
     cd ${BASE}/big_tests && make prepare
 fi
 
+mkdir -p _build/default/lib/ejabberd_tests/ebin/
+for i in tests/*_data; do
+    echo "$i"
+    base=$(basename "$i")
+    dest="_build/default/lib/ejabberd_tests/ebin/$base"
+    rm -f "$dest"
+    ln -s "../../../../../$i" "$dest"
+done
