@@ -24,12 +24,15 @@ export HOME=/root
 
 # rsync -a src_directory/ dst_directory/
 
+# c_src can contain some compiled files we don't want
 echo "Rsync code"
 rsync -a \
     --exclude _build \
     --exclude big_tests/_build \
     --exclude big_tests/ct_report \
     --exclude src/eldap_filter_yecc.erl \
+    --exclude '*.o' \
+    --exclude '*.d' \
     --exclude '*.beam' \
     /opt/mongooseim_src/ \
     /opt/mongooseim/
