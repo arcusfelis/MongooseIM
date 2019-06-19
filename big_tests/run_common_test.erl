@@ -281,9 +281,6 @@ call(Node, M, F, A) ->
             Result
     end.
 
-get_apps() ->
-    [mongooseim].
-
 prepare_cover(Test, true) ->
     io:format("Preparing cover~n"),
     prepare(Test);
@@ -306,12 +303,14 @@ maybe_compile_cover([]) ->
     ok;
 maybe_compile_cover(Nodes) ->
     io:format("cover: compiling modules for nodes ~p~n", [Nodes]),
-    Apps = get_apps(),
     import_code_paths(hd(Nodes)),
+
+    cover:start([node()|Nodes]),
+    Dir = rpc:call(hd(Nodes), code, lib_dir, [mongooseim, ebin]),
+
     %% Time is in microseconds
     {Time, Compiled} = timer:tc(fun() ->
-                    multicall(Nodes, mongoose_cover_helper, start, [Apps],
-                              cover_timeout())
+                            cover:compile_beam_directory(Dir)
                         end),
     travis_fold("cover compiled output", fun() ->
             io:format("cover: compiled ~p~n", [Compiled])
@@ -322,20 +321,13 @@ maybe_compile_cover(Nodes) ->
 analyze(Test, CoverOpts) ->
     io:format("Coverage analyzing~n"),
     Nodes = get_mongoose_nodes(Test),
-    report_time("Export cover data from MongooseIM nodes", fun() ->
-            multicall(Nodes, mongoose_cover_helper, analyze, [], cover_timeout())
-        end),
-    case os:getenv("KEEP_COVER_RUNNING") of
-        "1" ->
-            io:format("Skip stopping cover~n"),
-            ok;
-        _ ->
-            report_time("Stopping cover on MongooseIM nodes", fun() ->
-                            multicall(Nodes, mongoose_cover_helper, stop, [], cover_timeout())
-                    end)
-    end,
-    cover:start(),
+    analyze(Test, CoverOpts, Nodes).
+
+analyze(_Test, _CoverOpts, []) ->
+    ok;
+analyze(Test, CoverOpts, Nodes) ->
     deduplicate_cover_server_console_prints(),
+    %% Import small tests cover
     Files = filelib:wildcard(repo_dir() ++ "/_build/**/cover/*.coverdata"),
     io:format("Files: ~p", [Files]),
     report_time("Import cover data into run_common_test node", fun() ->
@@ -349,6 +341,15 @@ analyze(Test, CoverOpts) ->
             make_html(modules_to_analyze(CoverOpts));
         _ ->
             ok
+    end,
+    case os:getenv("KEEP_COVER_RUNNING") of
+        "1" ->
+            io:format("Skip stopping cover~n"),
+            ok;
+        _ ->
+            report_time("Stopping cover on MongooseIM nodes", fun() ->
+                        cover:stop([node()|Nodes])
+                    end)
     end.
 
 make_html(Modules) ->

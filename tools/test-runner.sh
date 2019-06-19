@@ -24,6 +24,7 @@ Options:
 --one-node            -- the same as "--dev-nodes mim1 --test-hosts mim --"
 --skip-preset         -- skip preset application, ignores --preset. Also known as quick mode
 --skip-cover          -- disable coverage reports
+--skip-cover-stop     -- keep cover running
 --skip-small-tests    -- disable small tests
 --skip-big-tests      -- disable big tests
 --skip-build-tests    -- disable big test compilation
@@ -286,6 +287,7 @@ TEST_HOSTS_ARRAY=(
 
 SMALL_TESTS_DEFAULT=true
 COVER_ENABLED_DEFAULT=true
+KEEP_COVER_RUNNING_DEFAULT=true
 PRESET_ENABLED_DEFAULT=true
 
 PAUSE_BEFORE_BIG_TESTS=0
@@ -435,6 +437,11 @@ case $key in
     --skip-cover)
         shift # past argument
         COVER_ENABLED=false
+    ;;
+
+    --skip-cover-stop)
+        shift # past argument
+        KEEP_COVER_RUNNING=false
     ;;
 
     --skip-preset)
@@ -643,6 +650,7 @@ fi
 # Use env variable or default
 export SMALL_TESTS="${SMALL_TESTS:-$SMALL_TESTS_DEFAULT}"
 export COVER_ENABLED="${COVER_ENABLED:-$COVER_ENABLED_DEFAULT}"
+export KEEP_COVER_RUNNING="${KEEP_COVER_RUNNING:-$KEEP_COVER_RUNNING_DEFAULT}"
 export PRESET_ENABLED="${PRESET_ENABLED:-$PRESET_ENABLED_DEFAULT}"
 
 # Join array to string
