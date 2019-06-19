@@ -12,6 +12,7 @@ PRESET="${PRESET-$DEFAULT_PRESET}"
 SMALL_TESTS="${SMALL_TESTS:-true}"
 COVER_ENABLED="${COVER_ENABLED:-true}"
 RETRY_BIG_TESTS="${RETRY_BIG_TESTS:-false}"
+SKIP_AUTO_COMPILE="${SKIP_AUTO_COMPILE:-false}"
 
 while getopts ":p::s::e::c:" opt; do
   case $opt in
@@ -101,11 +102,15 @@ run_test_preset() {
   cd ${BASE}/big_tests
   local MAKE_RESULT=0
   TESTSPEC=${TESTSPEC:-default.spec}
+  MAKE_ARGS=""
+  if [ "$SKIP_AUTO_COMPILE" = "true" ]; then
+      MAKE_ARGS+=" -W prepare "
+  fi
   if [ "$COVER_ENABLED" = "true" ]; then
-    make cover_test_preset TESTSPEC=$TESTSPEC PRESET=$PRESET
+    make cover_test_preset $MAKE_ARGS TESTSPEC=$TESTSPEC PRESET=$PRESET
     MAKE_RESULT=$?
   else
-    make test_preset TESTSPEC=$TESTSPEC PRESET=$PRESET
+    make test_preset $MAKE_ARGS TESTSPEC=$TESTSPEC PRESET=$PRESET
     MAKE_RESULT=$?
   fi
   cd -
