@@ -601,7 +601,7 @@ ct_opts() ->
         "true" ->
             [{auto_compile, false}];
         _ ->
-            ok
+            []
     end.
 
 maybe_copy_files_compiled_by_rebar() ->
