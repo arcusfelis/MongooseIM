@@ -16,11 +16,11 @@ function time_buffered
 }
 
 # Try to compile
-if test ! -d _build/.test_runner/delay; then
-    mkdir -p _build/.test_runner
-    git clone "https://github.com/arcusfelis/delay.git" _build/.test_runner/delay
-    make -C _build/.test_runner/delay || echo "Failed to compile C version of delay"
-fi
+#if test ! -d _build/.test_runner/delay; then
+#    mkdir -p _build/.test_runner
+#    git clone "https://github.com/arcusfelis/delay.git" _build/.test_runner/delay
+#    make -C _build/.test_runner/delay || echo "Failed to compile C version of delay"
+#fi
 
 SECONDS=$1
 
