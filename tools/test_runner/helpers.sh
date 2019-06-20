@@ -95,9 +95,16 @@ function wait_for_pids_log
     echo -e "\n$1"
 }
 
+function only_integers_and_whitespaces
+{
+    sed 's/[^0-9 ]*//g'
+}
+
 function wait_for_pids
 {
-    local pidsArray=( "$@" ) # pids to wait for
+    # Filter all the funny characters to ensure that pidsArray is an array of integers
+    local pidsString=$(echo "$@" | only_integers_and_whitespaces)
+    local pidsArray=( $pidsString ) # pids to wait for
     local max_time="3600" # If execution takes longer than $max_time seconds, will stop execution.
 
     local standby_interval=60 ## In seconds
