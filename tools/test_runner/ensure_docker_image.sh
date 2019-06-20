@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -eu
+
 function do_bootstap
 {
     echo "reload yes\nprecedence ::ffff:0:0/96 100\nprecedence ::/0 10" > /etc/gai.conf
