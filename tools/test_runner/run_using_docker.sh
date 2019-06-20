@@ -89,7 +89,7 @@ pids=()
 for ERLANG_VERSION in $ERLANG_VERSIONS; do
     buffered_async_helper "build_$ERLANG_VERSION" build_for_erlang_version "$ERLANG_VERSION" &
     pid="$!"
-    describe_pid "$pid" " {build_$ERLANG_VERSION} "
+    describe_pid "$pid" " [build_$ERLANG_VERSION] "
     pids+=("$pid")
 done
 
@@ -97,7 +97,7 @@ done
 # Don't start DB-s in parallel though yet
 buffered_async_helper "setup_db" setup_db &
 pid="$!"
-describe_pid "$pid" " {setup_db} "
+describe_pid "$pid" " [setup_db] "
 pids+=("$pid")
 
 ./tools/kill_processes_on_exit.sh $ROOT_SCRIPT_PID "${pids[@]}" &
@@ -108,7 +108,7 @@ for JOB in $FINAL_JOBS; do
     echo "START_JOB: $JOB"
     run_test_job "$JOB" &
     pid="$!"
-    describe_pid "$pid" " {run_test_job job_$JOB} "
+    describe_pid "$pid" " [run_test_job job_$JOB] "
     pids+=($pid)
 done
 tools/kill_processes_on_exit.sh "$ROOT_SCRIPT_PID" "${pids[@]}" &
