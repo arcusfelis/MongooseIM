@@ -313,7 +313,10 @@ maybe_compile_cover(Nodes) ->
 
     %% Time is in microseconds
     {Time, Compiled} = timer:tc(fun() ->
-                            cover:compile_beam_directory(Dir)
+                            Results = cover:compile_beam_directory(Dir),
+                            Ok = [X || X = {ok, _} <- Results],
+                            NotOk = Results -- Ok,
+                            #{ok => length(Ok), failed => NotOk}
                         end),
     travis_fold("cover compiled output", fun() ->
             io:format("cover: compiled ~p~n", [Compiled])
