@@ -22,9 +22,13 @@ if test ! -d _build/.test_runner/delay; then
     make -C _build/.test_runner/delay || echo "Failed to compile C version of delay"
 fi
 
+SECONDS=$1
+
 if test -f _build/.test_runner/delay/delay; then
-    _build/.test_runner/delay/delay "$1"
+    # 3k per second limit due to travis not working good with fast output
+    RATE=$(($SECONDS * 3))
+    _build/.test_runner/delay/delay -b${RATE}k "$SECONDS"
 else
     echo "Fallback for bash version of time_buffered"
-    time_buffered "$1"
+    time_buffered "$SECONDS"
 fi
