@@ -161,9 +161,7 @@ function wait_for_pids
         if [ $exec_time -ge $next_standby_alarm ]; then
             next_standby_alarm=$(($next_standby_alarm + $standby_interval))
             wait_for_pids_log "WAITING_PROGRESS Current tasks ${#newPidsArray[@]} still running with pids ${newPidsArray[@]} $(pid_info ${newPidsArray[@]}) after $exec_time seconds."
-            for pid in "${newPidsArray[@]}"; do
-                ps $PS_F -g "$pid" -p "$pid" || true
-            done
+            ps $PS_F
         fi
 
         if [ $exec_time -gt $max_time ] && [ $max_time -ne 0 ]; then
