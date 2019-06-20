@@ -26,8 +26,7 @@ SECONDS=$1
 
 if test -f _build/.test_runner/delay/delay; then
     # 3k per second limit due to travis not working good with fast output
-    RATE=$(($SECONDS * 3))
-    _build/.test_runner/delay/delay -b${RATE}k "$SECONDS"
+    _build/.test_runner/delay/delay "$SECONDS"
 else
     echo "Fallback for bash version of time_buffered"
     time_buffered "$SECONDS"
