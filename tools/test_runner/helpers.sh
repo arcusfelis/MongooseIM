@@ -100,6 +100,13 @@ function only_integers_and_whitespaces
     sed 's/[^0-9 ]*//g'
 }
 
+PS_F=""
+# Check for f flag support: shows ASCII tree view
+# Supported on linux, not mac
+if ps f 2>out > /dev/null; then
+    PS_F="f"
+fi
+
 function wait_for_pids
 {
     # Filter all the funny characters to ensure that pidsArray is an array of integers
@@ -155,7 +162,7 @@ function wait_for_pids
             next_standby_alarm=$(($next_standby_alarm + $standby_interval))
             wait_for_pids_log "WAITING_PROGRESS Current tasks ${#newPidsArray[@]} still running with pids ${newPidsArray[@]} $(pid_info ${newPidsArray[@]}) after $exec_time seconds."
             for pid in "${newPidsArray[@]}"; do
-                ps -f -g "$pid" -p "$pid" || true
+                ps $PS_F -g "$pid" -p "$pid" || true
             done
         fi
 

@@ -17,7 +17,7 @@ function retry_on_timeout
     if hash timeout ; then
         if timeout "$TIMEOUT" "$@" ; then
             echo "retry_on_timeout: success"
-        elif "$RETRIES" = "0" ; then
+        elif [ "$RETRIES" = "0" ] ; then
             echo "retry_on_timeout: failed"
             exit 1
         else
