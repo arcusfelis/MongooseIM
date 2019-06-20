@@ -102,15 +102,15 @@ run_test_preset() {
   cd ${BASE}/big_tests
   local MAKE_RESULT=0
   TESTSPEC=${TESTSPEC:-default.spec}
-  MAKE_ARGS=""
+  PREPARE="prepare"
   if [ "$SKIP_AUTO_COMPILE" = "true" ]; then
-      MAKE_ARGS+=" -W prepare "
+      PREPARE=""
   fi
   if [ "$COVER_ENABLED" = "true" ]; then
-    make cover_test_preset $MAKE_ARGS TESTSPEC=$TESTSPEC PRESET=$PRESET
+    make cover_test_preset $MAKE_ARGS TESTSPEC=$TESTSPEC PRESET=$PRESET PREPARE=$PREPARE
     MAKE_RESULT=$?
   else
-    make test_preset $MAKE_ARGS TESTSPEC=$TESTSPEC PRESET=$PRESET
+    make test_preset $MAKE_ARGS TESTSPEC=$TESTSPEC PRESET=$PRESET PREPARE=$PREPARE
     MAKE_RESULT=$?
   fi
   cd -
