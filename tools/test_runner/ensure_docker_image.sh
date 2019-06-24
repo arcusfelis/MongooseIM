@@ -6,6 +6,8 @@ echo "tools/test_runner/ensure_docker_image.sh" "$@"
 
 function do_bootstap
 {
+    # Fix for "invoke-rc.d: could not determine current runlevel"
+    export RUNLEVEL=1
     echo "reload yes\nprecedence ::ffff:0:0/96 100\nprecedence ::/0 10" > /etc/gai.conf
     time apt-get update
     time apt-get install -y unixodbc-dev tdsodbc simpleproxy rsync locales
