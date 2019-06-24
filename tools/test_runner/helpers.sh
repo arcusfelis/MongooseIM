@@ -22,7 +22,7 @@ function buffered_async_tail
     tail -F "$LOG_FILE" \
         > >(
         # Kill current subshell when ROOT_SCRIPT_PID dies
-        ./tools/kill_processes_on_exit.sh "$ROOT_SCRIPT_PID" "$$" &
+        KILL_WAIT=6 ./tools/kill_processes_on_exit.sh "$ROOT_SCRIPT_PID" "$$" &
         time_buffered 5 | "$SED" -e 's/^/'["$THREAD_NAME"']    /'
         ) &
 
@@ -30,7 +30,7 @@ function buffered_async_tail
     local TAIL_PID=$!
     # Use negative pid to kill the process and its children
     # (i.e. we want to kill tail)
-    ./tools/kill_processes_on_exit.sh "$ROOT_SCRIPT_PID" "$TAIL_PID" &
+    KILL_WAIT=6 ./tools/kill_processes_on_exit.sh "$ROOT_SCRIPT_PID" "$TAIL_PID" &
 
     LAST_TAIL_PID=$TAIL_PID
 }
