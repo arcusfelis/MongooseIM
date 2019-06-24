@@ -2,11 +2,13 @@
 
 set -eu
 
+echo "tools/test_runner/ensure_docker_image.sh" "$@"
+
 function do_bootstap
 {
     echo "reload yes\nprecedence ::ffff:0:0/96 100\nprecedence ::/0 10" > /etc/gai.conf
-    apt-get update
-    apt-get install -y unixodbc-dev tdsodbc simpleproxy rsync locales
+    time apt-get update
+    time apt-get install -y unixodbc-dev tdsodbc simpleproxy rsync locales
     locale-gen en_US.UTF-8
 }
 
