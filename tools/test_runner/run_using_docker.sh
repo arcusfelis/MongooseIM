@@ -4,6 +4,8 @@ set -eu
 source tools/travis-common-vars.sh
 source tools/test_runner/helpers.sh
 
+SKIP_DB_SETUP="${SKIP_DB_SETUP:-false}"
+
 ERLANG_VERSIONS="$(tools/test_runner/read_jobs.sh list_erlang_versions)"
 echo "ERLANG_VERSIONS=$ERLANG_VERSIONS"
 
@@ -93,12 +95,14 @@ for ERLANG_VERSION in $ERLANG_VERSIONS; do
     pids+=("$pid")
 done
 
-# Do setup_db in parallel with compilation
-# Don't start DB-s in parallel though yet
-buffered_async_helper "setup_db" setup_db &
-pid="$!"
-describe_pid "$pid" " [setup_db] "
-pids+=("$pid")
+if [ "$SKIP_DB_SETUP" = false ]; then
+    # Do setup_db in parallel with compilation
+    # Don't start DB-s in parallel though yet
+    buffered_async_helper "setup_db" setup_db &
+    pid="$!"
+    describe_pid "$pid" " [setup_db] "
+    pids+=("$pid")
+fi
 
 ./tools/kill_processes_on_exit.sh $ROOT_SCRIPT_PID "${pids[@]}" &
 wait_for_pids "${pids[@]}"

@@ -703,6 +703,7 @@ export RETRY_BIG_TESTS="$RETRY_BIG_TESTS"
 export TRY_FAST="$TRY_FAST"
 export TRY_SYNC="$TRY_SYNC"
 export SKIP_AUTO_COMPILE="$SKIP_AUTO_COMPILE"
+export SKIP_DB_SETUP="$SKIP_DB_SETUP"
 
 # Debug printing
 echo "Variables:"
