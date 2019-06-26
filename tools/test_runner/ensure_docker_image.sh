@@ -46,7 +46,7 @@ case "$1" in
         cp ./tools/test_runner/ensure_docker_image.sh _build/.test_runner/docker_build/
         cd _build/.test_runner/docker_build
 
-        retry_on_timeout 120s 5 docker build -t "$IMAGE" -f - . <<EOF
+        retry_on_timeout 120s 3 docker build -t "$IMAGE" -f - . <<EOF
 FROM "erlang:$ERLANG_VERSION"
 ADD ensure_docker_image.sh ensure_docker_image.sh
 RUN ./ensure_docker_image.sh bootstap

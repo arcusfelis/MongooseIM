@@ -76,6 +76,8 @@ forward_port 3389 389 ldap
 
 export PERIODIC_STRING="\n"
 
+vmstat -n 1 | while read line; do echo "$(date +'%T %s') $line"; done > /tmp/vmstat.log &
+
 ret_val=0
 ./tools/travis-test.sh || ret_val="$?"
 

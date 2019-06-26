@@ -19,7 +19,29 @@ RESET_DOCKER_VOLUMES=${RESET_DOCKER_VOLUMES:-false}
 
 IMAGE=mim-test-erlang:$ERLANG_VERSION
 
-./tools/test_runner/ensure_docker_image.sh ensure "$ERLANG_VERSION" "$IMAGE"
+function retry_on_timeout
+{
+    local TIMEOUT=$1
+    local RETRIES=$2
+    shift 2
+
+    if hash timeout ; then
+        if timeout "$TIMEOUT" "$@" ; then
+            echo "retry_on_timeout: success"
+        elif [ "$RETRIES" = "0" ] ; then
+            echo "retry_on_timeout: failed"
+            exit 1
+        else
+            echo "retry_on_timeout: retry"
+            retry_on_timeout "$TIMEOUT" "$(($RETRIES - 1))" "$@"
+        fi
+    else
+        echo "timeout command not found, try without it"
+        "$@"
+    fi
+}
+
+retry_on_timeout 380s 2 ./tools/test_runner/ensure_docker_image.sh ensure "$ERLANG_VERSION" "$IMAGE"
 
 if [ "$RESET_DOCKER_CONTAINERS" = true ]; then
     docker rm -f "$BUILD_CONTAINER_NAME" || true
