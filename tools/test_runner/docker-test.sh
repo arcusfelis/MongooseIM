@@ -46,6 +46,6 @@ docker run -d  \
     $IMAGE \
     tail -F /var/log/progress || echo "Skip starting Test container"
 
-docker exec -i $TEST_CONTAINER_NAME /opt/mongooseim_src/tools/test_runner/docker-test-init.sh
+docker exec -i $TEST_CONTAINER_NAME /opt/mongooseim_src/tools/test_runner/proxy_stdout.sh /opt/mongooseim_src/tools/test_runner/docker-test-init.sh
 
 echo "FINISHED $TEST_CONTAINER_NAME"

@@ -59,4 +59,4 @@ if [ "$RESET_DOCKER_VOLUMES" = true ]; then
 fi
 
 # Builds code
-docker exec -i $BUILD_CONTAINER_NAME /opt/mongooseim_src/tools/test_runner/docker-build-init.sh
+docker exec -i $BUILD_CONTAINER_NAME /opt/mongooseim_src/tools/test_runner/proxy_stdout.sh /opt/mongooseim_src/tools/test_runner/docker-build-init.sh
