@@ -55,10 +55,20 @@ main(RawArgs) ->
     Args = [raw_to_arg(Raw) || Raw <- RawArgs],
     Opts = apply_preset_enabled(args_to_opts(Args)),
     try
+        CTRunDirsBeforeRun = ct_run_dirs(),
         Results = run(Opts),
         %% Waiting for messages to be flushed
         timer:sleep(50),
-        ExitStatusByGroups = anaylyze_groups_runs(),
+        CTRunDirsAfterRun = ct_run_dirs(),
+        NewCTRunDirs = CTRunDirsAfterRun -- CTRunDirsBeforeRun,
+        ExitStatusByGroups =
+            case NewCTRunDirs of
+                [] ->
+                    io:format("WARNING: ct_run directory has not been created~nResults ~p~n",  [Results]),
+                    undefined;
+                [_] ->
+                    anaylyze_groups_runs(hd(NewCTRunDirs))
+            end,
         ExitStatusByTestCases = process_results(Results),
         case ExitStatusByGroups of
             undefined ->
@@ -586,11 +596,10 @@ deduplicate_cover_server_console_prints() ->
     CoverPid = whereis(cover_server),
     dedup_proxy_group_leader:start_proxy_group_leader_for(CoverPid).
 
-anaylyze_groups_runs() ->
-    CTRunDirs = filelib:wildcard("ct_report/ct_run*"),
-    SortFun = fun(F1, F2) -> filelib:last_modified(F1) > filelib:last_modified(F2) end,
-    SortedCTRunDirs = lists:sort(SortFun, CTRunDirs),
-    LatestCTRun = hd(SortedCTRunDirs),
+ct_run_dirs() ->
+    filelib:wildcard("ct_report/ct_run*").
+
+anaylyze_groups_runs(LatestCTRun) ->
     case file:consult(LatestCTRun ++ "/all_groups.summary") of
         {ok, Terms} ->
             proplists:get_value(total_failed, Terms, undefined);
