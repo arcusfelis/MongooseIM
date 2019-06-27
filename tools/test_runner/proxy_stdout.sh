@@ -12,9 +12,12 @@ TAIL_PID=$!
 "$@" >"$TMP_DIR/stdout" 2>"$TMP_DIR/stderr"
 EXIT_CODE=$?
 
+sleep 3
+
 rm -f "$TMP_DIR/stdout" "$TMP_DIR/stderr"
 rmdir "$TMP_DIR"
 
 kill "$TAIL_PID"
+echo "proxy_stdout exits with code $EXIT_CODE"
 
 exit $EXIT_CODE
