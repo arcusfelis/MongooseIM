@@ -287,7 +287,7 @@ TEST_HOSTS_ARRAY=(
 
 SMALL_TESTS_DEFAULT=true
 COVER_ENABLED_DEFAULT=true
-KEEP_COVER_RUNNING_DEFAULT=true
+KEEP_COVER_RUNNING_DEFAULT=0
 PRESET_ENABLED_DEFAULT=true
 
 PAUSE_BEFORE_BIG_TESTS=0
@@ -442,7 +442,7 @@ case $key in
 
     --skip-cover-stop)
         shift # past argument
-        KEEP_COVER_RUNNING=false
+        KEEP_COVER_RUNNING=1
     ;;
 
     --skip-preset)
