@@ -7,6 +7,18 @@ function time_buffered
     tools/test_runner/time_buffered $1
 }
 
+# unbuffer command
+# https://unix.stackexchange.com/questions/25372/turn-off-buffering-in-pipe
+function no_buffer
+{
+    if hash stdbuf; then
+        stdbuf -i0 -o0 -e0 "$@"
+    else
+        echo "no_buffer: stdbuf not found"
+        "$@"
+    fi
+}
+
 # It is very important to properly kill the children,
 # otherwise "docker exec" would never return.
 # Sets LAST_TAIL_PID variable
@@ -14,6 +26,7 @@ function buffered_async_tail
 {
     local THREAD_NAME=$1
     local LOG_FILE=$2
+    local BUFFER_TIME="${BUFFER_TIME:-5}"
 
     mkdir -p $(dirname "$LOG_FILE")
     touch "$LOG_FILE"
@@ -23,7 +36,7 @@ function buffered_async_tail
         > >(
         # Kill current subshell when ROOT_SCRIPT_PID dies
         KILL_WAIT=6 ./tools/kill_processes_on_exit.sh "$ROOT_SCRIPT_PID" "$$" &
-        time_buffered 5 | "$SED" -e 's/^/'["$THREAD_NAME"']    /'
+        time_buffered 5 | no_buffer "$SED" -e 's/^/'["$THREAD_NAME"']    /'
         ) &
 
     # Subshell is started before tail
