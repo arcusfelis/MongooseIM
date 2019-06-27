@@ -387,7 +387,7 @@ rooms_in_rosters(Config) ->
             escalus:send(Alice, escalus_stanza:roster_get()),
             mongoose_helper:wait_until(
                 fun() ->
-                    distributed_helper:rpc(
+                    mongoose_helper:successful_rpc(
                         distributed_helper:mim(),
                         mod_roster,
                         get_user_rosters_length,

@@ -234,7 +234,7 @@ teardown_modules() ->
     ok.
 
 rpc(M, F, A) ->
-    distributed_helper:rpc(distributed_helper:mim(), M, F, A).
+    mongoose_helper:successful_rpc(M, F, A).
 
 custom_module_code() ->
     "-module(mod_event_pusher_http_custom).
