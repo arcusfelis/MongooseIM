@@ -5,6 +5,8 @@
 
 source tools/travis-common-vars.sh
 
+set -e
+
 # rebar doesn't like Unicode in commit messages #1674
 # So, we unset commit message env variable
 # TODO: Remove it when we switch to rebar3 for big tests.
