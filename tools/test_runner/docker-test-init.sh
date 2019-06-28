@@ -78,6 +78,12 @@ export PERIODIC_STRING="\n"
 
 vmstat -n 1 | while read line; do echo "$(date +'%T %s') $line"; done > /tmp/vmstat.log &
 
+# From tools/test_runner/selected-tests-to-test-spec.sh
+if [[ -f auto_small_tests.spec ]]; then
+    mkdir -p _build/test/lib/mongooseim
+    cp auto_small_tests.spec _build/test/lib/mongooseim/auto_small_tests.spec
+fi
+
 ret_val=0
 ./tools/travis-test.sh || ret_val="$?"
 

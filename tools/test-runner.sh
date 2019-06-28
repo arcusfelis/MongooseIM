@@ -689,7 +689,7 @@ export TLS_DIST="$TLS_DIST"
 # Pass extra arguments from tools/test_runner/selected-tests-to-test-spec.sh
 # to rebar3 in Makefile
 if [[ -f "auto_small_tests.spec" ]]; then
-    export REBAR_CT_EXTRA_ARGS=" --spec \"$(pwd)/auto_small_tests.spec\" "
+    export REBAR_CT_EXTRA_ARGS=" --spec \"auto_small_tests.spec\" "
 else
     export REBAR_CT_EXTRA_ARGS=""
 fi
