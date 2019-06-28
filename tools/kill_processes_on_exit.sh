@@ -30,9 +30,9 @@ if [ "$#" -ne 0 ]; then
     # kill: kill PID failed: no such process
     # Monitor PID_TO_MONITOR
     (while kill -0 $PID_TO_MONITOR 2&> /dev/null; do sleep 1; done)
-    # Ehen PID_TO_MONITOR is dead...
-    verbose_print "kill_processes_on_exit: $@"
+    # When PID_TO_MONITOR is dead...
     sleep "$KILL_WAIT"
+    verbose_print "kill_processes_on_exit: $@"
     # Kill the rest of arguments
     kill -TERM $@ 2&> /dev/null
 fi
