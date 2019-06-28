@@ -19,8 +19,8 @@ set -o allexport
 source /env_vars
 set +o allexport
 
-# Ah, envs
-export HOME=/root
+echo "Load env variables:"
+cat /env_vars
 
 # rsync -a src_directory/ dst_directory/
 

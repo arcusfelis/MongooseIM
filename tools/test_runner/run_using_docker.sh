@@ -40,6 +40,10 @@ function import_job_env_vars
     export JOB=$1
     local JOB_VARS_FILE=_build/.test_runner/job-${JOB}-vars
 
+    echo "Load job $1 env variables:"
+    cat $JOB_VARS_FILE
+    echo ""
+
     # -o allexport enables all following variable definitions to be exported.
     # +o allexport disables this feature.
     set -o allexport
