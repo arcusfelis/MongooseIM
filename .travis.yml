@@ -4,7 +4,6 @@ sudo: required
 
 services:
         - docker
-#       - redis-server
 
 branches:
         only:
@@ -15,30 +14,13 @@ branches:
 
 otp_release:
         - 20.3
-env:
-  global:
-    - RUN_SMALL_TESTS=false
-  matrix:
-
 
 matrix:
   include:
-      - otp_release: 19.3
-        script: ./tools/test-runner.sh --skip-cover --docker --fast-build --verbose --retry-big-tests --jobs 3 4 --skip-auto-recompile
-      - otp_release: 19.3
-        script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 3 4
-      - otp_release: 19.3
-        script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 3 4 --skip-auto-recompile
-      - otp_release: 19.3
-        script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 3 4 --skip-auto-recompile
-      - otp_release: 19.3
-        script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 3 4 --skip-auto-recompile
-      - otp_release: 19.3
-        script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 3 4 --skip-auto-recompile
-      - otp_release: 19.3
-        script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 3 4 --skip-auto-recompile
-      - otp_release: 19.3
-        script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 3 4 --skip-auto-recompile
+      - script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 3 4 --skip-auto-recompile
+      - script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 2 5 --skip-auto-recompile
+      - script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 7 8 --skip-auto-recompile
+      - script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 9 19 --skip-auto-recompile
 
 notifications:
     webhooks:
@@ -50,12 +32,3 @@ notifications:
 cache:
         directories:
                 - $HOME/.cache/rebar3
-
-#deploy:
-#  provider: releases
-#  api-key: $GITHUB_TOKEN
-#  skip_cleanup: true
-#  file: mongooseim-$TRAVIS_BRANCH.OTP-$TRAVIS_OTP_RELEASE.$(lsb_release -is | tr "A-Z" "a-z").$(lsb_release -rs).$(uname -m).tar.bz2
-#  on:
-#    tags: true
-#    condition: "$PRESET.$TRAVIS_OTP_RELEASE = internal_mnesia.18.3"
