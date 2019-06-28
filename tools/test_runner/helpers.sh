@@ -58,12 +58,14 @@ function buffered_async_helper
     rm -f "$LOG_FILE"
 
     buffered_async_tail "$THREAD_NAME" "$LOG_FILE"
+    # LAST_TAIL_PID is set in buffered_async_tail
+    local TAIL_PID=$LAST_TAIL_PID
 
     # 2>&1 - redirect erros to stdout
     "$@" > "$LOG_FILE" 2>&1 || ret_val="$?"
 
     # Kill tail, so time_buffered can detact broken pipe
-    kill -15 "$LAST_TAIL_PID"
+    kill -15 "$TAIL_PID"
 
     echo "FINISHED: $THREAD_NAME returns $ret_val"
     return "$ret_val"
