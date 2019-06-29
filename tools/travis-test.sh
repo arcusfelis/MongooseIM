@@ -72,7 +72,13 @@ choose_newest_directory() {
 run_small_tests() {
   tools/print-dots.sh start
   tools/print-dots.sh monitor $$
+  rm -f _build/test/logs/retry.spec
   make ct
+  if [ -f "_build/test/logs/retry.spec" ]; then
+      echo "Print _build/test/logs/retry.spec:"
+      cat _build/test/logs/retry.spec
+      echo ""
+  fi
   tools/print-dots.sh stop
   SMALL_SUMMARIES_DIRS=${BASE}/_build/test/logs/ct_run*
   SMALL_SUMMARIES_DIR=$(choose_newest_directory ${SMALL_SUMMARIES_DIRS})
