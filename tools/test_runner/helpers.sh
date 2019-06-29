@@ -139,7 +139,8 @@ function wait_for_pids
 
     originalPidsArray=("${pidsArray[@]}")
 
-    wait_for_pids_log "WAITING_STARTED for $pidCount tasks."
+    local pidsstr="${pidsArray[@]}"
+    wait_for_pids_log "WAITING_STARTED for $pidCount tasks: $pidsstr."
 
     while true; do
         newPidsArray=()
@@ -168,11 +169,14 @@ function wait_for_pids
         exec_time=$(($(seconds) - $seconds_begin))
         if [ $exec_time -ge $next_standby_alarm ]; then
             next_standby_alarm=$(($next_standby_alarm + $standby_interval))
-            wait_for_pids_log "WAITING_PROGRESS Current tasks ${#newPidsArray[@]} still running with pids ${newPidsArray[@]} $(pid_info ${newPidsArray[@]}) after $exec_time seconds."
+
+            local pidsstr="${newPidsArray[@]}"
+            wait_for_pids_log "WAITING_PROGRESS Current tasks ${#newPidsArray[@]} still running with pids $pidsstr $(pid_info $pidsstr) after $exec_time seconds."
         fi
 
         if [ $exec_time -gt $max_time ] && [ $max_time -ne 0 ]; then
-            wait_for_pids_log "WAITING_FAILED Max execution time exceeded for pids ${newPidsArray[@]}. Stopping task execution."
+            local pidsstr="${newPidsArray[@]}"
+            wait_for_pids_log "WAITING_FAILED Max execution time exceeded for pids $pidsstr. Stopping task execution."
             kill -SIGTERM ${newPidsArray[@]}
             errrorcount=$((errorcount+1))
         fi
