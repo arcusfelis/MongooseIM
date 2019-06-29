@@ -55,8 +55,10 @@ script_usage_is_printed(_Config) ->
     Port = script_helper:start("tools/migration/sender-jid-from-mam-message.escript", []),
     receive
         {Port, {data, Data}} ->
-            ct:pal("script_usage_is_printed ~p", [Data])
-    after 5000 ->
+            ct:pal("script_usage_is_printed ~p", [Data]);
+        {Port, {exit_status, ExitStatus}} ->
+            ct:fail({port_exit, Port, {exit_status, ExitStatus}})
+    after 15000 ->
             ct:fail(timeout)
     end.
 

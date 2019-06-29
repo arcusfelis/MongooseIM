@@ -2,6 +2,8 @@
 
 -export([start/2, write/2, read/1]).
 
+-define(TIMEOUT, 15000).
+
 %% ----------------------------------------------------------
 %% API
 %% ----------------------------------------------------------
@@ -40,7 +42,7 @@ read(Port, Buffer) ->
             erlang:error(#{ reason => script_has_terminated,
                             exit_status => ExitStatus,
                             data_received => Buffer })
-    after 4000 ->
+    after ?TIMEOUT ->
         erlang:error(#{ reason => timeout,
                         data_received => Buffer })
     end.
@@ -60,7 +62,7 @@ read(Port, Buffer, ExpectedLen) ->
                             data_received => Buffer,
                             received_len => byte_size(Buffer),
                             expected_len => ExpectedLen })
-    after 2000 ->
+    after ?TIMEOUT ->
               erlang:error(#{ reason => timeout,
                               data_received => Buffer,
                               received_len => byte_size(Buffer),
