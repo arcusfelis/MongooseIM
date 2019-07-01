@@ -64,6 +64,7 @@ mkdir -p $(dirname "$VARS_FILE")
 tools/test_runner/export_test_variables.sh > "$VARS_FILE"
 
 docker volume create --name $BUILD_VOLUME || echo "Volume creation failed"
+docker start $BUILD_CONTAINER_NAME || \
 docker run -d  \
     -v $(pwd)/$VARS_FILE:/env_vars:ro \
     -v $BUILD_VOLUME:/opt/mongooseim \

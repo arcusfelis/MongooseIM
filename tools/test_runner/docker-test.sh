@@ -33,6 +33,7 @@ tools/test_runner/export_test_variables.sh > "$VARS_FILE"
 
 echo "Starting $TEST_CONTAINER_NAME"
 # --mount does not support exec flag
+docker start $TEST_CONTAINER_NAME || \
 docker run -d  \
     -v $(pwd)/$VARS_FILE:/env_vars:ro \
     -v $(pwd)/tools/db_configs/odbc.ini:/root/.odbc.ini:ro \
