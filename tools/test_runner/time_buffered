@@ -41,6 +41,13 @@ function time_buffered
     rm -f "$sleep_pidfile"
 }
 
-SECONDS=$1
 
+if [[ ! $1 =~ ^[0-9]+$ ]]; then
+    echo "Bad arguments"
+    echo "Usage:"
+    echo "time_buffered SECONDS"
+    exit 1
+fi
+
+SECONDS=$1
 time_buffered "$SECONDS"

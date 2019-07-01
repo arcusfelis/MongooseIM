@@ -26,7 +26,7 @@ cat /env_vars
 
 # c_src can contain some compiled files we don't want
 echo "Rsync code"
-rsync -a \
+time rsync -a \
     --exclude _build \
     --exclude big_tests/_build \
     --exclude big_tests/ct_report \
@@ -38,14 +38,14 @@ rsync -a \
     /opt/mongooseim_src/ \
     /opt/mongooseim/
 
+echo "Rsync code done"
+
 cd /opt/mongooseim/
 source tools/travis-common-vars.sh
 source tools/test_runner/helpers.sh
 
 BUILD_MIM="${BUILD_MIM:-true}"
 BUILD_TESTS="${BUILD_TESTS:-true}"
-
-tools/test_runner/time_buffered # Build time_buffered utility
 
 pids=()
 
