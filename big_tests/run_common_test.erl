@@ -318,7 +318,7 @@ maybe_compile_cover(Nodes) ->
     io:format("cover: compiling modules for nodes ~p~n", [Nodes]),
     import_code_paths(hd(Nodes)),
 
-    cover:start([node()|Nodes]),
+    cover:start(Nodes),
     Dir = rpc:call(hd(Nodes), code, lib_dir, [mongooseim, ebin]),
 
     %% Time is in microseconds
