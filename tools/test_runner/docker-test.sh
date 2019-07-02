@@ -18,6 +18,7 @@ BUILD_VOLUME=${BUILD_VOLUME:-mongooseim-test-build-volume}
 TEST_CONTAINER_NAME=${TEST_CONTAINER_NAME:-mongooseim-test}
 DOCKER_NETWORK=${DOCKER_NETWORK:-mongoose-network}
 RESET_DOCKER_CONTAINERS=${RESET_DOCKER_CONTAINERS:-false}
+RESTART_DOCKER_CONTAINERS=${RESTART_DOCKER_CONTAINERS:-false}
 
 IMAGE=mim-test-erlang:$ERLANG_VERSION
 
@@ -31,9 +32,14 @@ VARS_FILE=_build/.test_runner/$TEST_CONTAINER_NAME-vars
 mkdir -p $(dirname "$VARS_FILE")
 tools/test_runner/export_test_variables.sh > "$VARS_FILE"
 
+COMMAND=start
+if [ $"RESTART_DOCKER_CONTAINERS" = true ]; then
+    COMMAND=restart
+fi
+
 echo "Starting $TEST_CONTAINER_NAME"
 # --mount does not support exec flag
-docker start $TEST_CONTAINER_NAME || \
+docker $COMMAND $TEST_CONTAINER_NAME || \
 docker run -d  \
     -v $(pwd)/$VARS_FILE:/env_vars:ro \
     -v $(pwd)/tools/db_configs/odbc.ini:/root/.odbc.ini:ro \
