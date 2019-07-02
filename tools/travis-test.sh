@@ -168,6 +168,9 @@ run_tests() {
       echo "Stopping MongooseIM nodes before retry"
       ./tools/stop-nodes.sh
 
+      # Resetting Mnesia
+      rm -rf _build/*/rel/mongooseim/Mnesia*
+
       echo "Starting MongooseIM nodes for retry"
       time ${TOOLS}/start-nodes.sh || { echo "Failed to start MongooseIM nodes"; return 1; }
       maybe_pause_before_test
