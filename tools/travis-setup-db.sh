@@ -278,11 +278,34 @@ elif [ "$db" = 'cassandra' ]; then
                emicklei/zazkia
     tools/wait_for_service.sh $CASSANDRA_PROXY_NAME 9042 || docker logs $CASSANDRA_PROXY_NAME
 
-    # Apply schemas
-    docker exec \
+    CQLSH_DEBUG=""
+    if [ "${VERBOSE:-0}" = "1" ]; then
+        CQLSH_DEBUG=" --debug "
+    fi
+
+    function cqlsh
+    {
+        docker exec \
         -e SSL_CERTFILE=/ssl/ca/cacert.pem \
         "$CASSANDRA_NAME" \
-        sh -c 'exec cqlsh "127.0.0.1" --ssl -f /schemas/mim.cql -f /schemas/test.cql'
+        cqlsh "127.0.0.1" --ssl $CQLSH_DEBUG "$@"
+    }
+
+    while ! cqlsh -e 'describe cluster' ; do
+        echo "Waiting for cassandra"
+        sleep 1
+    done
+
+    # Apply schemas
+    echo "Apply Cassandra schema"
+    # For some reason, "cqlsh -f" does not create schema and no error is reported.
+    cqlsh -e "source '/schemas/mim.cql'"
+    cqlsh -e "source '/schemas/test.cql'"
+    echo "Verify Cassandra schema"
+    # Would fail with reason and exit code 2:
+    # <stdin>:1:InvalidRequest: Error from server: code=2200 [Invalid query] message="unconfigured table mam_config"
+    cqlsh -e "select * from mongooseim.mam_config;"
+    echo "Cassandra setup done"
 
 elif [ "$db" = 'elasticsearch' ]; then
     ELASTICSEARCH_IMAGE=docker.elastic.co/elasticsearch/elasticsearch:$ELASTICSEARCH_VERSION
