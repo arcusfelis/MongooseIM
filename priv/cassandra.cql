@@ -1,5 +1,10 @@
 CREATE KEYSPACE mongooseim
-         WITH REPLICATION = {'class' : 'SimpleStrategy', 'replication_factor': 3};
+         WITH REPLICATION = {'class' : 'SimpleStrategy', 'replication_factor': 1}
+         AND durable_writes = false;
+
+//CREATE KEYSPACE mongooseim
+//         WITH REPLICATION = {'class' : 'SimpleStrategy', 'replication_factor': 3};
+
 USE mongooseim;
 
 CREATE TABLE mam_message(

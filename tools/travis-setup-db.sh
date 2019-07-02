@@ -250,8 +250,8 @@ elif [ "$db" = 'cassandra' ]; then
 
     docker run -d                                \
                $(docker_service $db)             \
-               -e MAX_HEAP_SIZE=128M             \
-               -e HEAP_NEWSIZE=64M               \
+               -e MAX_HEAP_SIZE=512M             \
+               -e HEAP_NEWSIZE=128M              \
                $(mount_ro_volume "$MIM_SCHEMA" "/schemas/mim.cql") \
                $(mount_ro_volume "$TEST_SCHEMA" "/schemas/test.cql") \
                $(mount_ro_volume "${SSLDIR}" "/ssl") \
