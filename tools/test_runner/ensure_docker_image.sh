@@ -41,16 +41,37 @@ case "$1" in
         # Create and bootstrap image
         ERLANG_VERSION=$2
         IMAGE=$3
+        REPO_DIR="$(pwd)"
 
-        mkdir -p _build/.test_runner/docker_build
-        cp ./tools/test_runner/ensure_docker_image.sh _build/.test_runner/docker_build/
-        cd _build/.test_runner/docker_build
+        # Pulling can take longer time than retry_on_timeout limit, so do it as a separate step
+        time docker pull "erlang:$ERLANG_VERSION"
 
-        retry_on_timeout 120s 3 docker build -t "$IMAGE" -f - . <<EOF
+        # Build in a separate directory because:
+        # docker -f - is broken on macosx (sometimes), it returns:
+        # Error response from daemon: the Dockerfile (.dockerfile.445b96411d14ac9327de) cannot be empty
+
+        BUILD_DIR=$(mktemp -d)
+        cp ./tools/test_runner/ensure_docker_image.sh "$BUILD_DIR/"
+        cd "$BUILD_DIR"
+
+        tee "Dockerfile" <<EOF
 FROM "erlang:$ERLANG_VERSION"
 ADD ensure_docker_image.sh ensure_docker_image.sh
 RUN ./ensure_docker_image.sh bootstap
 EOF
+
+        exit_code=0
+
+        retry_on_timeout 120s 3 docker build -t "$IMAGE" . || exit_code=$?
+
+        rm "Dockerfile" "ensure_docker_image.sh"
+
+        cd "$REPO_DIR"
+
+        rmdir "$BUILD_DIR"
+
+        exit "$exit_code"
+
         ;;
 
     bootstap)
