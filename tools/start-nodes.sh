@@ -74,7 +74,7 @@ follow_logs() {
     buffered_async_tail crash.log ${BASE}/_build/$node/rel/mongooseim/log/crash.log
     pids+=("$!")
   done
- ./tools/kill_processes_on_exit.sh $MAIN_PID "${pids[@]}" &
+ ./tools/kill_processes_on_exit.sh $ROOT_SCRIPT_PID "${pids[@]}" &
 }
 
 if [ "$PRINT_MIM_LOGS" = true ]; then
