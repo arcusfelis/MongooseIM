@@ -19,16 +19,19 @@ function reader
 {
     local delay=$1
     local sleep_pidfile=$2
+    local buffer=""
     while read ts line; do
         now=$(date +%s)
         if (( now - ts < delay)); then
+            printf "%s" "$buffer"
+            buffer=""
             sleep $(( now - ts )) &
             local sleep_pid="$!"
             echo "$sleep_pid" > "$sleep_pidfile"
             # If wait (and sleep) fails, most likely it has been killed by kill above
             wait "$sleep_pid" || delay=0
         fi
-        printf "%s\n" "$line"
+        buffer=$(printf "%s\n%s\n" "$buffer" "$line")
     done
 }
 
