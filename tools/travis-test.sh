@@ -172,7 +172,7 @@ run_tests() {
       rm -rf _build/*/rel/mongooseim/Mnesia*
 
       echo "Starting MongooseIM nodes for retry"
-      time ${TOOLS}/start-nodes.sh || { echo "Failed to start MongooseIM nodes"; return 1; }
+      time PRINT_MIM_LOGS=true ${TOOLS}/start-nodes.sh || { echo "Failed to start MongooseIM nodes"; return 1; }
       maybe_pause_before_test
 
       echo "Failed cases after first run:"
