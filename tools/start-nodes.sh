@@ -69,9 +69,9 @@ wait_for_nodes() {
 follow_logs() {
   local pids=()
   for node in ${DEV_NODES_ARRAY[@]}; do
-    buffered_async_tail erlang.log.1 ${BASE}/_build/$node/rel/mongooseim/log/erlang.log.1
+    buffered_async_tail $node:erlang.log.1 ${BASE}/_build/$node/rel/mongooseim/log/erlang.log.1
     pids+=("$!")
-    buffered_async_tail crash.log ${BASE}/_build/$node/rel/mongooseim/log/crash.log
+    buffered_async_tail $node:crash.log ${BASE}/_build/$node/rel/mongooseim/log/crash.log
     pids+=("$!")
   done
  ./tools/kill_processes_on_exit.sh $ROOT_SCRIPT_PID "${pids[@]}" &
