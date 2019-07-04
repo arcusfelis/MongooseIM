@@ -62,7 +62,7 @@ forward_same_port 8087 riak
 forward_same_port 8098 riak
 
 forward_same_port 9042 cassandra-proxy
-forward_same_port 9191 cassandra-proxy
+forward_same_port 9191 cassandra-proxy # proxy control port
 
 forward_same_port 9200 elasticsearch
 
