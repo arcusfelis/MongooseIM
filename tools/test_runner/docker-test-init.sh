@@ -44,7 +44,7 @@ function forward_port
     LOCAL_PORT=$1
     REMOTE_PORT=$2
     REMOTE_HOST=$3
-    nohup simpleproxy -L "$LOCAL_PORT" -R "$REMOTE_HOST:$REMOTE_PORT" >runlong.out 2>runlong.err &
+    nohup socat tcp-listen:$LOCAL_PORT,reuseaddr,fork tcp:$REMOTE_HOST:$REMOTE_PORT >runlong.out 2>runlong.err &
 }
 
 function forward_same_port
@@ -52,7 +52,7 @@ function forward_same_port
     forward_port $1 $1 $2
 }
 
-pkill simpleproxy || true
+pkill nc || true
 
 # Same order of entries as in tools/travis-setup-db.sh
 forward_same_port 3306 mysql
