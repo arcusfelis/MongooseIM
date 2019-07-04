@@ -275,7 +275,7 @@ elif [ "$db" = 'cassandra' ]; then
                $(mount_ro_volume "$SQL_TEMP_DIR" /data)  \
                $(mount_ro_volume "$SQL_TEMP_DIR" /data)  \
                --name=$CASSANDRA_PROXY_NAME \
-               emicklei/zazkia
+               emicklei/zazkia:0.6
     tools/wait_for_service.sh $CASSANDRA_PROXY_NAME 9042 || docker logs $CASSANDRA_PROXY_NAME
 
     CQLSH_DEBUG=""
