@@ -45,7 +45,14 @@ sed -i -e "s/- seeds: \"127.0.0.1\"/- seeds: \"$SEEDS\"/" $CASSANDRA_CONFIG/cass
 # Disable gossip, no need in one node cluster
 echo "JVM_OPTS=\"\$JVM_OPTS -Dcassandra.skip_wait_for_gossip_to_settle=0\"" >> $CASSANDRA_CONFIG/cassandra-env.sh
 
+# To avoid error in mongooseim logs:
+# 12:14:38.885 [warning] query_type=write, tag=#Ref<0.3696956653.4174905347.117043>, status=error, category=invalid, details=Batch too large, code=
+# "0x2200", action=retrying, retry_left=3 request_opts=#{batch_mode => unlogged,batch_size => 20,consistency => one,retry => 3,timeout => 60000}
 
+# Or in cassandra logs:
+# ERROR 12:14:38 Batch for [mongooseim.test_table] is of size 200.313KiB, exceeding specified threshold of 50.000KiB by 150.313KiB. (see batch_size_fail_threshold_in_kb)
+# Default for batch_size_fail_threshold_in_kb is 50
+sed -i -e "s/^batch_size_fail_threshold_in_kb.*/batch_size_fail_threshold_in_kb: 1000/" $CASSANDRA_CONFIG/cassandra.yaml
 
 echo "Executing $@"
 exec "$@"
