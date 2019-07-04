@@ -33,7 +33,7 @@ mkdir -p $(dirname "$VARS_FILE")
 tools/test_runner/export_test_variables.sh > "$VARS_FILE"
 
 COMMAND=start
-if [ $"RESTART_DOCKER_CONTAINERS" = true ]; then
+if [ "$RESTART_DOCKER_CONTAINERS" = true ]; then
     COMMAND=restart
 fi
 
