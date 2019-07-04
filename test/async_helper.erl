@@ -61,11 +61,13 @@ wait_until(Fun, ExpectedValue, Opts) ->
                  history => []},
     do_wait_until(Fun, ExpectedValue, maps:merge(Defaults, Opts)).
 
-do_wait_until(_Fun, _ExpectedValue, #{
+do_wait_until(_Fun, ExpectedValue, #{
                                       time_left := TimeLeft,
                                       history := History
                                      }) when TimeLeft =< 0 ->
-    error({badmatch, lists:reverse(History)});
+    error({badmatch, #{expected => ExpectedValue,
+                       % Convert to tuple, so erland would not try to print it as a string
+                       history => list_to_tuple(lists:reverse(History))}});
 
 do_wait_until(Fun, ExpectedValue, Opts) ->
     try Fun() of
