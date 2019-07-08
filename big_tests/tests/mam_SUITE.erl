@@ -659,7 +659,9 @@ end_per_group(Group, Config) ->
     B = basic_group(Group),
     Config1 = end_state(C, B, Config),
     Config2 = end_modules(C, B, Config1),
-    escalus_fresh:clean(),
+    %% Cleaning can do extra load on the database and disturb other tests.
+    %% We do it once in end_per_suite.
+%   escalus_fresh:clean(),
     delete_users(Config2).
 
 init_modules(rdbms, muc_light, Config) ->
