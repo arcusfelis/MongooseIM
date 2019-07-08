@@ -73,11 +73,18 @@ function run_test_job
     JOB=$1
     import_job_env_vars $JOB
 
+    exit_code=0
     # Takes:
     # - ERLANG_VERSION
     # - BUILD_VOLUME
     # - TEST_CONTAINER_NAME
-    buffered_async_helper "job_$JOB" ./tools/test_runner/docker-test.sh
+    buffered_async_helper "job_$JOB" ./tools/test_runner/docker-test.sh || exit_code=$?
+
+    if [ $exit_code -ne 0 ]; then
+        docker logs mongooseim-riak-job-$JOB || true
+    fi
+
+    exit $exit_code
 )}
 
 function setup_db
