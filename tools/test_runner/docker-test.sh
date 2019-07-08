@@ -50,6 +50,7 @@ docker run -d  \
     --tmpfs /opt/mongooseim:exec \
     --add-host muc.localhost:127.0.0.1 \
     --name=$TEST_CONTAINER_NAME \
+     --cpu-shares=256 \
     $IMAGE \
     tail -F /var/log/progress || echo "Skip starting Test container"
 

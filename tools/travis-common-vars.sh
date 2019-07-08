@@ -54,7 +54,7 @@ function container_name
 function docker_service
 {
     if [ ! -z "$DOCKER_NETWORK" ]; then
-        echo " --network-alias=$1 --network=$DOCKER_NETWORK "
+        echo " --network-alias=$1 --network=$DOCKER_NETWORK  --cpu-shares=128 "
     fi
 }
 
