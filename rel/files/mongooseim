@@ -83,7 +83,9 @@ relx_gen_id() {
 
 is_zombie() {
     local PID=$1
-    ps aux | awk '"[Zzs]" ~ $8 { printf("%s, PID = %d\n", $8, $2); }' | grep "$PID"
+    # PROCESS STATE CODES from "man ps"
+    # Z    defunct ("zombie") process, terminated but not reaped by its parent.
+    ps aux | awk '$8 ~ /Z/ { printf("%s, PID = %d\n", $8, $2); }' | grep "$PID"
 }
 
 wait_for_pid_exit() {
