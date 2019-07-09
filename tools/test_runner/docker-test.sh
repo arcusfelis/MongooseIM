@@ -47,8 +47,8 @@ docker run -d  \
     -v $(pwd):/opt/mongooseim_src \
     -v $BUILD_VOLUME:/opt/mongooseim_build:ro \
     -v ~/.cache/rebar3:/root/.cache/rebar3 \
-    --tmpfs /opt/mongooseim:exec \
     --add-host muc.localhost:127.0.0.1 \
+    --memory-swappiness 0 \
     --name=$TEST_CONTAINER_NAME \
      --cpu-shares=256 \
     $IMAGE \
