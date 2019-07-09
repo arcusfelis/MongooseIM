@@ -81,7 +81,12 @@ function run_test_job
     buffered_async_helper "job_$JOB" ./tools/test_runner/docker-test.sh || exit_code=$?
 
     if [ $exit_code -ne 0 ]; then
-        docker logs mongooseim-riak-job-$JOB || true
+        CONTAINERS=$(docker network inspect -f "{{range .Containers}} {{.Name}}{{end}}" $DOCKER_NETWORK)
+        for CONTAINER in $CONTAINERS; do
+            if ! echo "job" | grep job; then # Do not print job output
+                docker logs --tail 1000 $CONTAINER | "$SED" -e 's/^/['"$CONTAINER"']    /' || true
+            fi
+        done
     fi
 
     exit $exit_code
