@@ -109,7 +109,8 @@ http_requests(_Config) ->
                       expected_codes => ExpectedCodes})
     end,
     assert_cowboy_handler_calls(dummy_http_handler, init, 50),
-    assert_cowboy_handler_calls(dummy_http_handler, terminate, 50).
+    assert_cowboy_handler_calls(dummy_http_handler, terminate, 50),
+    ok.
 
 ws_request_bad_protocol(_Config) ->
     %% Given
@@ -418,5 +419,5 @@ ws_websocket_terminate(_Reason, _Req, no_ws_state) ->
 
 assert_cowboy_handler_calls(M, F, Num) ->
     Fun = fun() -> meck:num_calls(M, F, '_') end,
-    async_helper:wait_until(Fun, Num).
+    async_helper:wait_until(Fun, Num, #{time_left => timer:seconds(30)}).
 
