@@ -30,14 +30,24 @@ check_node() {
  fi
 }
 
+print_logs() {
+    cat _build/$1/rel/mongooseim/log/crash.log | "$SED" -e 's/^/[crash.log]    /'
+}
+
 # Ensures that node is up
 # Prints node information
 # First argument is node directory name
 # Fails if the node does not appear after 1 minute
 wait_for_node() {
   echo "waiting for ${1}: "
-  check_node "$1" || { echo "not started"; return 1;}
+  exit_code=0
+  check_node "$1" || exit_code="$?"
+  if [ $exit_code -ne 0 ]; then
+      echo "Node $1 not running"
+      print_logs $1
+  fi
   ${BASE}/_build/${1}/rel/mongooseim/bin/mongooseimctl status
+  return $exit_code
 }
 
 # DEV_NODES_ARRAY is defined in travis-common-vars.sh

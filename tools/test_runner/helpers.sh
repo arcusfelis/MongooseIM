@@ -4,7 +4,7 @@ export ROOT_SCRIPT_PID=${ROOT_SCRIPT_PID:-$$}
 # This function creates subshell.
 function time_buffered
 {
-    tools/test_runner/time_buffered $1
+    no_buffer tools/test_runner/time_buffered $1
 }
 
 # unbuffer command
@@ -64,8 +64,9 @@ function buffered_async_helper
     # 2>&1 - redirect erros to stdout
     "$@" > "$LOG_FILE" 2>&1 || ret_val="$?"
 
+    # Give a chance for tail to finish reading
     # Kill tail, so time_buffered can detact broken pipe
-    kill -15 "$TAIL_PID"
+    sleep 1 && kill -15 "$TAIL_PID" &
 
     echo "FINISHED: $THREAD_NAME returns $ret_val"
     return "$ret_val"
