@@ -96,9 +96,9 @@ stop ()
     "$RUNNER_SCRIPT_DIR"/mongooseim stop
 }
 
-stop_forced ()
+force_stop ()
 {
-    "$RUNNER_SCRIPT_DIR"/mongooseim stop_forced
+    "$RUNNER_SCRIPT_DIR"/mongooseim force_stop
 }
 
 # attach to server
@@ -280,7 +280,7 @@ done
 case $1 in
     'start') start;;
     'stop') stop;;
-    'stop_forced') stop_forced;;
+    'force_stop') force_stop;;
     'join_cluster') join_cluster;;
     'leave_cluster') leave_cluster;;
     'remove_from_cluster') remove_from_cluster;;

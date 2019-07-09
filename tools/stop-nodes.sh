@@ -17,7 +17,7 @@ source tools/test_runner/helpers.sh
 # Fails if release for the node is not compiled
 stop_node() {
   echo -n "${1} stop: "
-  ${BASE}/_build/${1}/rel/mongooseim/bin/mongooseimctl stop_forced || echo ok
+  ${BASE}/_build/${1}/rel/mongooseim/bin/mongooseimctl force_stop || echo ok
 }
 
 # DEV_NODES_ARRAY is defined in travis-common-vars.sh

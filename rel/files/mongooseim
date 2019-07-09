@@ -96,11 +96,11 @@ wait_for_pid_exit() {
         sleep 1
         echo "Waiting for $PID for $DURATION seconds"
         DURATION=$(($DURATION + 1))
-        if [ "$1" = "stop_forced" ] && [ "$DURATION" = 30 ]; then
+        if [ "$1" = "force_stop" ] && [ "$DURATION" = 30 ]; then
             echo "Force kill $PID using SIGTERM"
             kill -15 "$PID"
         fi
-        if [ "$1" = "stop_forced" ] && [ "$DURATION" = 60 ]; then
+        if [ "$1" = "force_stop" ] && [ "$DURATION" = 60 ]; then
             echo "Process $PID runs for too long"
             ps aux | grep "$PID"
 
@@ -133,7 +133,7 @@ case "$1" in
         "$ERTS_PATH"/run_erl -daemon "$PIPE_DIR" "$RUNNER_LOG_DIR" "exec \"$RUNNER_BASE_DIR/bin/$SCRIPT\" console $@" 2>&1
         ;;
 
-    stop|stop_forced)
+    stop|force_stop)
         # Wait for the node to completely stop...
         PID=$(cat "$EJABBERD_PID_PATH" || echo "no_pid")
         nodetool stop
@@ -253,7 +253,7 @@ case "$1" in
         fi
         ;;
     *)
-        echo "Usage: $SCRIPT {start|stop|stop_forced|restart|reboot|ping|live|console|console_clean|foreground|attach|debug|version}"
+        echo "Usage: $SCRIPT {start|stop|force_stop|restart|reboot|ping|live|console|console_clean|foreground|attach|debug|version}"
         exit 1
         ;;
 esac
