@@ -335,13 +335,20 @@ elif [ "$db" = 'elasticsearch' ]; then
     ELASTICSEARCH_PM_MAPPING_DATA=$(cat "$ELASTICSEARCH_PM_MAPPING")
     ELASTICSEARCH_MUC_MAPPING_DATA=$(cat "$ELASTICSEARCH_MUC_MAPPING")
     echo "Putting ElasticSearch mappings"
+
+    # Wait for ElasticSearch endpoint before applying bindings
+    for i in 1..10; do
+        if docker exec $ELASTICSEARCH_NAME curl -X PUT $ELASTICSEARCH_URL ; then
+            break
+        fi
+    done
+
     (docker exec $ELASTICSEARCH_NAME \
         curl -X PUT $ELASTICSEARCH_URL/messages -d "$ELASTICSEARCH_PM_MAPPING_DATA" -w "status: %{http_code}" | grep "status: 200" > /dev/null) || \
-        echo "Failed to put PM mapping into ElasticSearch"
+        (echo "Failed to put PM mapping into ElasticSearch" && exit 1)
     (docker exec $ELASTICSEARCH_NAME \
         curl -X PUT $ELASTICSEARCH_URL/muc_messages -d "$ELASTICSEARCH_MUC_MAPPING_DATA" -w "status: %{http_code}" | grep "status: 200" > /dev/null) || \
-        echo "Failed to put MUC mapping into ElasticSearch"
-    #curl -XPUT 'http://localhost:9200/_all/_settings?preserve_existing=true' -d '{ "index.refresh_interval" : "1" }'
+        (echo "Failed to put MUC mapping into ElasticSearch" && exit 1)
 
 elif [ "$db" = 'mssql' ]; then
     # LICENSE STUFF, IMPORTANT
