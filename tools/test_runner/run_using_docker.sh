@@ -81,12 +81,15 @@ function run_test_job
     buffered_async_helper "job_$JOB" ./tools/test_runner/docker-test.sh || exit_code=$?
 
     if [ $exit_code -ne 0 ]; then
+        echo "Print container logs:"
         CONTAINERS=$(docker network inspect -f "{{range .Containers}} {{.Name}}{{end}}" $DOCKER_NETWORK)
+        echo "CONTAINERS are $CONTAINERS"
         for CONTAINER in $CONTAINERS; do
-            if ! echo "job" | grep job; then # Do not print job output
+            if ! echo "$CONTAINER" | grep mongooseim-test-job; then # Do not print job output
                 docker logs --tail 1000 $CONTAINER | "$SED" -e 's/^/['"$CONTAINER"']    /' || true
             fi
         done
+        sleep 5
     fi
 
     exit $exit_code
