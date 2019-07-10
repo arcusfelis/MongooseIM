@@ -86,9 +86,10 @@ function run_test_job
         echo "CONTAINERS are $CONTAINERS"
         for CONTAINER in $CONTAINERS; do
             if ! echo "$CONTAINER" | grep mongooseim-test-job; then # Do not print job output
-                docker logs --tail 1000 $CONTAINER | "$SED" -e 's/^/['"$CONTAINER"']    /' || true
+                docker logs --tail 1000 $CONTAINER | no_buffer "$SED" -e 's/^/['"$CONTAINER"']    /' || true
             fi
         done
+        echo "Printing container logs: done"
         sleep 5
     fi
 
