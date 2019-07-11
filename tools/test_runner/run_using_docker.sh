@@ -85,6 +85,11 @@ function run_test_job
         CONTAINERS=$(docker network inspect -f "{{range .Containers}} {{.Name}}{{end}}" $DOCKER_NETWORK)
         echo "CONTAINERS are $CONTAINERS"
         for CONTAINER in $CONTAINERS; do
+            # Riak does not print logs
+            if echo "$CONTAINER" | grep mongooseim-riak; then
+                docker exec -it "$CONTAINER" tail -n 1000 /var/log/riak/console.log | no_buffer "$SED" -e 's/^/['"$CONTAINER"'][console.log]    /' || true
+            fi
+
             if ! echo "$CONTAINER" | grep mongooseim-test-job; then # Do not print job output
                 docker logs --tail 1000 $CONTAINER | no_buffer "$SED" -e 's/^/['"$CONTAINER"']    /' || true
             fi
