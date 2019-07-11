@@ -72,14 +72,19 @@ function buffered_async_helper
     return "$ret_val"
 }
 
+# Fails, if command fails
 function async_helper
 {
     local THREAD_NAME=$1
     shift 1
 
     local ret_val=0
+
     # 2>&1 - redirect erros to stdout
-    "$@" 2>&1 | "$SED" -e 's/^/'["$THREAD_NAME"']    /' || ret_val="$?"
+    "$@" 2>&1 \
+        > >( # Start subshell before starting command, so ret_val contains correct value
+            "$SED" -e 's/^/'["$THREAD_NAME"']    /'
+        ) || ret_val="$?"
 
     echo "FINISHED: $THREAD_NAME returns $ret_val"
     return "$ret_val"
