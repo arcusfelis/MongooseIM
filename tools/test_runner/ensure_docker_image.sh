@@ -10,7 +10,8 @@ function do_bootstap
     export RUNLEVEL=1
     echo "reload yes\nprecedence ::ffff:0:0/96 100\nprecedence ::/0 10" > /etc/gai.conf
     time apt-get update
-    time apt-get install -y unixodbc-dev tdsodbc socat rsync locales
+    # tools/travis-publish-github-comment.sh needs jq
+    time apt-get install -y unixodbc-dev tdsodbc socat rsync locales jq
     locale-gen en_US.UTF-8
 }
 
