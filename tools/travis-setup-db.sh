@@ -334,15 +334,16 @@ elif [ "$db" = 'elasticsearch' ]; then
     ELASTICSEARCH_MUC_MAPPING="$(pwd)/priv/elasticsearch/muc.json"
     ELASTICSEARCH_PM_MAPPING_DATA=$(cat "$ELASTICSEARCH_PM_MAPPING")
     ELASTICSEARCH_MUC_MAPPING_DATA=$(cat "$ELASTICSEARCH_MUC_MAPPING")
-    echo "Putting ElasticSearch mappings"
 
     # Wait for ElasticSearch endpoint before applying bindings
-    for i in 1..10; do
+    for i in 1..15; do
         if docker exec $ELASTICSEARCH_NAME curl -X PUT $ELASTICSEARCH_URL ; then
             break
         fi
+        sleep 1
     done
 
+    echo "Putting ElasticSearch mappings"
     (docker exec $ELASTICSEARCH_NAME \
         curl -X PUT $ELASTICSEARCH_URL/messages -d "$ELASTICSEARCH_PM_MAPPING_DATA" -w "status: %{http_code}" | grep "status: 200" > /dev/null) || \
         (echo "Failed to put PM mapping into ElasticSearch" && exit 1)
