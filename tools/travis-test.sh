@@ -164,6 +164,8 @@ run_tests() {
   BIG_STATUS=0
   run_test_preset || BIG_STATUS=$?
 
+  tools/travis-publish-github-comment.sh
+
   # If /tmp/ct_summary is not empty file
   if [ "$RETRY_BIG_TESTS" = true ] && [ -s /tmp/ct_summary ]; then
       echo "Stopping MongooseIM nodes before retry"
@@ -184,9 +186,11 @@ run_tests() {
       ./tools/test_runner/selected-tests-to-test-spec.sh $(cat /tmp/ct_summary)
       export TESTSPEC=auto_big_tests.spec
 
-     BIG_STATUS=0
+      BIG_STATUS=0
       # Disable cover for rerun
       COVER_ENABLED=false run_test_preset || BIG_STATUS=$?
+
+      tools/travis-publish-github-comment.sh
   fi
 
   SUMMARIES_DIRS=${BASE}/big_tests/ct_report/ct_run*
