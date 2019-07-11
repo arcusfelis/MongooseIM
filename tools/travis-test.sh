@@ -5,6 +5,7 @@
 # - COVER_ENABLED
 # - STOP_NODES (default false)
 set -o pipefail
+set -e
 IFS=$'\n\t'
 
 DEFAULT_PRESET=internal_mnesia
