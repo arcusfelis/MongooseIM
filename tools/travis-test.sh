@@ -184,6 +184,7 @@ run_tests() {
       ./tools/test_runner/selected-tests-to-test-spec.sh $(cat /tmp/ct_summary)
       export TESTSPEC=auto_big_tests.spec
 
+     BIG_STATUS=0
       # Disable cover for rerun
       COVER_ENABLED=false run_test_preset || BIG_STATUS=$?
   fi
