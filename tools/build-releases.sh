@@ -29,6 +29,7 @@ function sync_node
 }
 
 COMPILED_DEFAULT=false
+FIRST_NODE=
 
 function try_sync_node
 {
@@ -47,6 +48,25 @@ function try_sync_node
     fi
 }
 
+function try_fast_node
+{
+    local NODE=$1
+
+    if [[ "$FIRST_NODE" = "" ]]; then
+        FIRST_NODE=$NODE
+        make $NODE
+    else
+        # Clone from first node
+        rsync -a _build/$FIRST_NODE/ _build/$NODE/
+
+        mkdir -p _build/.test_runner/
+        cp rel/$NODE.vars.config _build/.test_runner/dev.vars.config
+        ( cd tools/overlay_project/; ../../rebar3 release )
+
+        rsync -a tools/overlay_project/_build/default/rel/mongooseim/_prefix/  _build/$NODE/rel/mongooseim/
+    fi
+}
+
 # "make devrel", but for a list of dev nodes
 if [ -z "$DEV_NODES" ] || [ "$BUILD_MIM" = false ]; then
     echo "Skip make devrel"
@@ -56,10 +76,7 @@ elif [ "$TRY_SYNC" = true ]; then
     done
 elif [ "$TRY_FAST" = true ]; then
     for NODE in $DEV_NODES; do
-        mkdir -p _build/.test_runner/
-        cp rel/$NODE.vars.config _build/.test_runner/dev.vars.config
-        time make dev
-        rsync -a _build/dev/ _build/$NODE/
+        time try_fast_node $NODE
     done
 else
     echo "Build $DEV_NODES"
