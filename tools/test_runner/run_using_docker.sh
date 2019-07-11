@@ -87,6 +87,7 @@ function run_test_job
         for CONTAINER in $CONTAINERS; do
             # Riak does not print logs
             if echo "$CONTAINER" | grep mongooseim-riak; then
+                echo "Printing Riak console.log"
                 docker exec -it "$CONTAINER" tail -n 1000 /var/log/riak/console.log | no_buffer "$SED" -e 's/^/['"$CONTAINER"'][console.log]    /' || true
             fi
 
