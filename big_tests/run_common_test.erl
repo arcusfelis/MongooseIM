@@ -50,6 +50,8 @@ opts() ->
 %% Args are {key :: atom(), val :: string()} pairs.
 %% "=" is an invalid character in option name or value.
 main(RawArgs) ->
+    application:load(escalus),
+    application:set_env(escalus, fresh_clean_overrun_time, 15000),
     maybe_copy_files_compiled_by_rebar(),
 
     Args = [raw_to_arg(Raw) || Raw <- RawArgs],
@@ -319,7 +321,7 @@ maybe_compile_cover(Nodes) ->
     import_code_paths(hd(Nodes)),
 
     cover:start(Nodes),
-    Dir = rpc:call(hd(Nodes), code, lib_dir, [mongooseim, ebin]),
+    Dir = call(hd(Nodes), code, lib_dir, [mongooseim, ebin]),
 
     %% Time is in microseconds
     {Time, Compiled} = timer:tc(fun() ->
@@ -573,7 +575,7 @@ travis_fold(Description, Fun) ->
 %% It allows cover:analyse/2 to find source file by calling
 %% Module:module_info(compiled).
 import_code_paths(FromNode) when is_atom(FromNode) ->
-    Paths = rpc:call(FromNode, code, get_path, []),
+    Paths = call(FromNode, code, get_path, []),
     code:add_paths(Paths).
 
 %% Gets result of file operation and prints filename, if we have any issues.
