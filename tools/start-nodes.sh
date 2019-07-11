@@ -2,6 +2,9 @@
 
 MAIN_PID=$$
 
+# This script adds a marker into logs, so we would know which lines are new
+START_NODES_DATE=$(date)
+
 # This script has no arguments
 # You can override a list of nodes to start by using DEV_NODES env variable
 # DEV_NODES="mim1 mim2" ./tools/start-nodes.sh
@@ -18,6 +21,10 @@ source tools/test_runner/helpers.sh
 # Does not fail if the node is already running (but prints a message)
 # Fails if release for the node is not compiled
 start_node() {
+  # Make a marker to know which lines are new
+  # We would not handle log rotation though
+  echo "start_node $START_NODES_DATE" >> _build/$1/rel/mongooseim/log/erlang.log.1 || true
+
   echo -n "${1} start: "
   ${BASE}/_build/${1}/rel/mongooseim/bin/mongooseimctl start && echo ok || echo failed
 }
@@ -31,7 +38,13 @@ check_node() {
 }
 
 print_logs() {
-    cat _build/$1/rel/mongooseim/log/crash.log | "$SED" -e 's/^/[crash.log]    /'
+    echo "Print logs for $1"
+    # Show only extra lines by matching from the marker, set in start_node function in this script
+
+    # Match from TERMINATE till the end of file example:
+    # sed -n -e '/TERMINATE/,$p'
+    # https://stackoverflow.com/questions/7103531/how-to-get-the-part-of-file-after-the-line-that-matches-grep-expression-first
+    cat _build/$1/rel/mongooseim/log/erlang.log.1 | sed -n -e '/start_node '"$START_NODES_DATE"'/,$p' | "$SED" -e 's/^/[erlang.log.1]    /'
 }
 
 # Ensures that node is up
@@ -42,18 +55,22 @@ wait_for_node() {
   echo "waiting for ${1}: "
   exit_code=0
   check_node "$1" || exit_code="$?"
+  # TODO --print-startup-logs
   if [ $exit_code -ne 0 ]; then
       echo "Node $1 not running"
       print_logs $1
   fi
+  echo "${1} status:"
   ${BASE}/_build/${1}/rel/mongooseim/bin/mongooseimctl status
-  return $exit_code
+  # Exit from subprocess
+  exit $exit_code
 }
 
 # DEV_NODES_ARRAY is defined in travis-common-vars.sh
 # and contains node names mim1, mim2, ...
 start_nodes() {
   local pids=()
+
   for node in ${DEV_NODES_ARRAY[@]}; do
     async_helper "start_node_$node" start_node $node &
     HELPER_PID=$!
