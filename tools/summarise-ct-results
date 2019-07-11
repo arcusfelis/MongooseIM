@@ -51,10 +51,13 @@ verify_results_with_groups(OkGroups, FailedGroups, EventuallyOkTests,
             erlang:halt(100405);
         AutoSkipped > 0 ->
             io:format("Failing the test due to auto skipped cases~n"),
+            io:format("summarise-ct-results exits with code ~p~n", [AutoSkipped]),
             erlang:halt(AutoSkipped);
         true ->
             io:format("Failing the test due failed rerun groups~n"),
-            erlang:halt(FailedGroups + FailedTests - EventuallyOkTests)
+            ExitCode = FailedGroups + FailedTests - EventuallyOkTests,
+            io:format("summarise-ct-results exits with code ~p~n", [ExitCode]),
+            erlang:halt(ExitCode)
     end.
 
 suite_summaries(Directories) ->
