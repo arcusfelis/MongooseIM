@@ -5,6 +5,7 @@ source tools/travis-common-vars.sh
 source tools/test_runner/helpers.sh
 
 SKIP_DB_SETUP="${SKIP_DB_SETUP:-false}"
+DELAY_SETUP_DB="${DELAY_SETUP_DB:-0}"
 
 ERLANG_VERSIONS="$(tools/test_runner/read_jobs.sh list_erlang_versions)"
 echo "ERLANG_VERSIONS=$ERLANG_VERSIONS"
@@ -104,6 +105,7 @@ function run_test_job
 
 function setup_db
 {
+    sleep $DELAY_SETUP_DB
     for JOB in $FINAL_JOBS; do
        setup_job_db "$JOB"
     done

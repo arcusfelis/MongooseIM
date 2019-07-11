@@ -18,13 +18,13 @@ otp_release:
 matrix:
   include:
       - name: "20.3 mssql/ldap"
-        script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 3 4 --skip-auto-recompile
+        script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 3 4 --skip-auto-recompile --delay-setup-db 90
       - name: "20.3 small/mnesia/elasticsearch_cassandra"
-        script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 1 2 5 --skip-auto-recompile
+        script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 1 2 5 --skip-auto-recompile --delay-setup-db 90
       - name: "21.3 pgsql/mysql"
-        script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 7 8 --skip-auto-recompile
+        script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 7 8 --skip-auto-recompile --delay-setup-db 90
       - name: "21.3 small/riak"
-        script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 9 19 --skip-auto-recompile
+        script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 9 19 --skip-auto-recompile --delay-setup-db 90
 
       - name: "20.3 mssql/ldap"
         script: ./tools/test-runner.sh --skip-cover-stop --docker --fast-build --verbose --retry-big-tests --jobs 3 4 --skip-auto-recompile

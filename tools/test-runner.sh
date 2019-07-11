@@ -291,6 +291,7 @@ KEEP_COVER_RUNNING_DEFAULT=0
 PRESET_ENABLED_DEFAULT=true
 
 PAUSE_BEFORE_BIG_TESTS=0
+DELAY_SETUP_DB=0
 BIG_TESTS=true
 BUILD_TESTS=true
 BUILD_MIM=true
@@ -353,6 +354,15 @@ case $key in
         shift # past argument
         SKIP_DB_SETUP=true
         DB_FROM_PRESETS=false
+    ;;
+
+    --delay-setup-db)
+        shift # past argument
+        DELAY_SETUP_DB=60
+        if [[ "$1" != --* ]]; then
+            DELAY_SETUP_DB=$1
+            shift # past argument
+        fi
     ;;
 
     # Similar how we parse --db option
@@ -703,6 +713,7 @@ export TESTSPEC="${TESTSPEC:-auto_big_tests.spec}"
 export START_NODES="$START_NODES"
 export STOP_NODES="$STOP_NODES"
 export PAUSE_BEFORE_BIG_TESTS="$PAUSE_BEFORE_BIG_TESTS"
+export DELAY_SETUP_DB="$DELAY_SETUP_DB"
 export RESET_DOCKER_CONTAINERS="$RESET_DOCKER_CONTAINERS"
 export RESET_DOCKER_VOLUMES="$RESET_DOCKER_VOLUMES"
 export RESTART_DOCKER_CONTAINERS="$RESTART_DOCKER_CONTAINERS"
