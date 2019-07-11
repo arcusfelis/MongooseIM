@@ -19,6 +19,8 @@ if [ -z "$COMMENTER_GITHUB_TOKEN" ]; then
     exit 0
 fi
 
+JOB="${JOB:-}"
+
 # COMMENTER_GITHUB_USER is nickname of a special github user.
 # COMMENTER_GITHUB_TOKEN is token with scope public repo.
 # Token can be obtained here https://github.com/settings/tokens/new
@@ -40,6 +42,8 @@ touch /tmp/ct_markdown
 
 PRESET="${PRESET:-default}"
 TRAVIS_OTP_RELEASE="${TRAVIS_OTP_RELEASE:-unknown}"
+# If running in docker, ERLANG_VERSION is set
+ERLANG_VERSION="${ERLANG_VERSION:-$TRAVIS_OTP_RELEASE}"
 
 function remove_ct_log_links
 {
@@ -160,7 +164,7 @@ fi
 
 # Link to a travis job
 JOB_URL="https://travis-ci.org/$TRAVIS_REPO_SLUG/jobs/$TRAVIS_JOB_ID"
-DESC_BODY="[$TRAVIS_JOB_NUMBER]($JOB_URL) / Erlang $TRAVIS_OTP_RELEASE / $PRESET / $TRAVIS_COMMIT"$'\n'
+DESC_BODY="[$TRAVIS_JOB_NUMBER]($JOB_URL) $JOB / Erlang $ERLANG_VERSION / $PRESET / $TRAVIS_COMMIT"$'\n'
 # This file is created by ct_markdown_errors_hook
 ERRORS_BODY="$(cat /tmp/ct_markdown || echo '/tmp/ct_markdown missing')"
 BODY="${DESC_BODY}${REPORTS_URL_BODY}${COUNTERS_BODY}${ERRORS_BODY}${TRUNCATED_BODY}"
