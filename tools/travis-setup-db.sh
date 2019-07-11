@@ -323,7 +323,7 @@ elif [ "$db" = 'elasticsearch' ]; then
            -e "http.host=0.0.0.0" \
            -e "transport.host=127.0.0.1" \
            -e "xpack.security.enabled=false" \
-           -e "ES_JAVA_OPTS=-Xmx256m -Xms256m" \
+           -e "ES_JAVA_OPTS=-Xmx521m -Xms256m" \
            --name $ELASTICSEARCH_NAME \
            $ELASTICSEARCH_IMAGE
     echo "Waiting for ElasticSearch to start listening on port"
@@ -336,10 +336,11 @@ elif [ "$db" = 'elasticsearch' ]; then
     ELASTICSEARCH_MUC_MAPPING_DATA=$(cat "$ELASTICSEARCH_MUC_MAPPING")
 
     # Wait for ElasticSearch endpoint before applying bindings
-    for i in 1..15; do
-        if docker exec $ELASTICSEARCH_NAME curl -X PUT $ELASTICSEARCH_URL ; then
+    for i in 1..30; do
+        if docker exec $ELASTICSEARCH_NAME curl $ELASTICSEARCH_URL ; then
             break
         fi
+        echo "Waiting for ElasticSearch $i"
         sleep 1
     done
 
