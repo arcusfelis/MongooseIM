@@ -161,8 +161,8 @@ run_tests() {
 
   maybe_pause_before_test
 
-  run_test_preset
-  BIG_STATUS=$?
+  BIG_STATUS=0
+  run_test_preset || BIG_STATUS=$?
 
   # If /tmp/ct_summary is not empty file
   if [ "$RETRY_BIG_TESTS" = true ] && [ -s /tmp/ct_summary ]; then
@@ -185,23 +185,22 @@ run_tests() {
       export TESTSPEC=auto_big_tests.spec
 
       # Disable cover for rerun
-      COVER_ENABLED=false run_test_preset
-      BIG_STATUS=$?
+      COVER_ENABLED=false run_test_preset || BIG_STATUS=$?
   fi
 
   SUMMARIES_DIRS=${BASE}/big_tests/ct_report/ct_run*
   SUMMARIES_DIR=$(choose_newest_directory ${SUMMARIES_DIRS})
   echo "SUMMARIES_DIR=$SUMMARIES_DIR"
-  ${TOOLS}/summarise-ct-results ${SUMMARIES_DIR}
-  BIG_STATUS_BY_SUMMARY=$?
+  BIG_STATUS_BY_SUMMARY=0
+  ${TOOLS}/summarise-ct-results ${SUMMARIES_DIR} || BIG_STATUS_BY_SUMMARY=$?
 
   echo
   echo "All tests done."
 
-  grep "fail_ci_build=true" ${BASE}/_build/mim*/rel/mongooseim/log/ejabberd.log
-  # If phrase found than exit with code 1
-  test $? -eq 1
-  LOG_STATUS=$?
+  LOG_STATUS=0
+  if grep "fail_ci_build=true" ${BASE}/_build/mim*/rel/mongooseim/log/ejabberd.log ; then
+      LOG_STATUS=1
+  fi
 
   if [ $SMALL_STATUS -eq 0 -a $BIG_STATUS -eq 0 -a $BIG_STATUS_BY_SUMMARY -eq 0 -a $LOG_STATUS -eq 0 ]
   then
@@ -232,6 +231,7 @@ run_tests() {
       echo "Keep MongooseIM nodes running"
   fi
 
+  echo "run_tests returns $RESULT"
   exit ${RESULT}
 }
 
