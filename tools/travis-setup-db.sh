@@ -336,7 +336,7 @@ elif [ "$db" = 'elasticsearch' ]; then
     ELASTICSEARCH_MUC_MAPPING_DATA=$(cat "$ELASTICSEARCH_MUC_MAPPING")
 
     # Wait for ElasticSearch endpoint before applying bindings
-    for i in 1..30; do
+    for i in {1..30}; do
         if docker exec $ELASTICSEARCH_NAME curl $ELASTICSEARCH_URL ; then
             break
         fi
