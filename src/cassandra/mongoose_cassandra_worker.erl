@@ -571,9 +571,17 @@ get_client_loop(PoolName, RetryNo) ->
             case is_process_alive(Pid) of
                 true -> Client;
                 _ -> throw({dead, Pid})
-            end
+            end;
+        {error, cluster_not_configured} ->
+            throw(cluster_not_configured)
     catch
-        E:R -> ?INFO_MSG("error getting client: ~p retry: ~p", [{E, R}, RetryNo]),
+        E:R ->
+               case RetryNo of
+                   0 ->
+                       ?WARNING_MSG("error getting client: ~p retry: ~p pool: ~p", [{E, R}, RetryNo, PoolName]);
+                   _ ->
+                       ?INFO_MSG("error getting client: ~p retry: ~p pool: ~p", [{E, R}, RetryNo, PoolName])
+               end,
                Wait = rand:uniform(10),
                timer:sleep(Wait),
                get_client_loop(PoolName, RetryNo + 1)

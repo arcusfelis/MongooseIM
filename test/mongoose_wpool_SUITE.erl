@@ -46,6 +46,7 @@ init_per_suite(Config) ->
     ok = meck:new(wpool, [no_link, passthrough]),
     ok = meck:new(mongoose_wpool, [no_link, passthrough]),
     ok = meck:new(ejabberd_config, [no_link]),
+    meck:expect(ejabberd_config, get_local_option_or_default, fun(_, Default) -> Default end),
     meck:expect(ejabberd_config, get_global_option,
                 fun(hosts) -> [<<"a.com">>, <<"b.com">>, <<"c.eu">>] end),
     Self = self(),
@@ -186,9 +187,9 @@ dead_pool_is_restarted(_C) ->
     {PoolName, KillingSwitch} = start_killable_pool(Size, kill_and_restart),
     %% set the switch to kill every new worker
     set_killing_switch(KillingSwitch, true),
+    Pids = [whereis(wpool_pool:worker_name(PoolName, I)) || I <- lists:seq(1, Size)],
     %% kill existing workers so they will be restarted
-    [erlang:exit(whereis(wpool_pool:worker_name(PoolName, I)), kill) ||
-     I <- lists:seq(1, Size)],
+    [erlang:exit(Pid, kill) || Pid <- Pids, Pid =/= undefined],
 
     wait_until_pool_is_dead(PoolName),
     %% set the switch to stop killing workers

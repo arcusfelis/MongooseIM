@@ -202,7 +202,7 @@ big_batch_read_write_unstable_connection_should_succeed(Config) ->
 %%
 
 reset_all_cassandra_connections_loop() ->
-    reset_all_cassandra_connections_loop(timer:seconds(5)).
+    reset_all_cassandra_connections_loop(timer:seconds(10)).
 
 reset_all_cassandra_connections_loop(Interval) ->
     {ok, ProxyPid} = gun:open(?TCP_PROXY_API_HOST, ?TCP_PROXY_API_PORT),

@@ -30,7 +30,7 @@ Where:
 * `Tag` is a name to distinguish pools with the same `Type` and `Host` parameter.
 * `PoolOptions` is a list of `{key, value}` pairs as defined in [worker_pool doc](https://github.com/inaka/worker_pool#starting-a-pool)
    with the following exception:
-    * `strategy` - specifies the worker selection strategy for the given pool, default is `best_worker`,
+    * `strategy` - specifies the worker selection strategy for the given pool, default is `available_worker`,
       more details on this can be found in [Choosing strategy in worker_pool doc](https://github.com/inaka/worker_pool#choosing-a-strategy)
     * `call_timeout` - specifies the timeout, in milliseconds, for a call operation to the pool
 * `ConnectionOptions` - options list passed to the `start` function of the pool type

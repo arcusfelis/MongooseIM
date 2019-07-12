@@ -108,7 +108,7 @@ start(Type, Host, Tag, PoolOpts, ConnOpts) ->
 
     case mongoose_wpool_mgr:start(Type, Host, Tag, WpoolOptsIn, ConnOpts) of
         {ok, Pid} ->
-            Strategy = proplists:get_value(strategy, Opts, best_worker),
+            Strategy = proplists:get_value(strategy, Opts, available_worker),
             CallTimeout = proplists:get_value(call_timeout, Opts, 5000),
             ets:insert(?MODULE, #mongoose_wpool{name = {Type, Host, Tag},
                                                 strategy = Strategy,
@@ -173,11 +173,19 @@ get_worker(Type, Host) ->
 get_worker(Type, Host, Tag) ->
     case get_pool(Type, Host, Tag) of
         {ok, #mongoose_wpool{strategy = Strategy} = Pool} ->
-            Worker = wpool_pool:Strategy(make_pool_name(Pool)),
+            Worker = get_worker_from_sup(make_pool_name(Pool), Strategy),
             {ok, whereis(Worker)};
         Err ->
             Err
     end.
+
+get_worker_from_sup(Sup, available_worker) ->
+    %% Would next_available_worker + handling no_available_workers error be faster?
+    wpool_pool:next_worker(Sup);
+get_worker_from_sup(Sup, {hash_worker, HashKey}) ->
+    wpool_pool:hash_worker(Sup, HashKey);
+get_worker_from_sup(Sup, Strategy) ->
+    wpool_pool:Strategy(Sup).
 
 call(Type, Request) ->
     call(Type, global, Request).

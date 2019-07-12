@@ -99,7 +99,10 @@ c2s_is_killed_when_too_many_messages_in_the_queue(_) ->
                 fun(go_to_sleep, StateName, ProcState) ->
                         Self ! c2s_going_to_sleep,
                         ct:pal("going to sleep"),
-                        timer:sleep(2000),
+                        receive
+                            ejabberd_c2s_continue ->
+                                ok
+                        end,
                         {next_state, StateName, ProcState};
                    (Event, StateName, ProcState) ->
                         meck:passthrough([Event, StateName, ProcState])
@@ -126,6 +129,8 @@ c2s_is_killed_when_too_many_messages_in_the_queue(_) ->
 
     [p1_fsm_old:send_all_state_event(C2SPid, {event, I}) ||
      I <- lists:seq(1, MaxQueueSize + 1)],
+
+    C2SPid ! ejabberd_c2s_continue,
 
     receive
         {'DOWN', Ref, process, C2SPid,

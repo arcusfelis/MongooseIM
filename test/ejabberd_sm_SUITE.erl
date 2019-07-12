@@ -69,7 +69,7 @@ init_per_group(redis, Config) ->
 
 init_redis_group(true, Config) ->
     Self = self(),
-    spawn(fun() ->
+    proc_lib:spawn(fun() ->
                   register(test_helper, self()),
                   mongoose_wpool:ensure_started(),
                   % This would be started via outgoing_pools in normal case
@@ -324,6 +324,7 @@ unload_meck() ->
 set_test_case_meck(MaxUserSessions) ->
     meck:new(ejabberd_config, []),
     meck:expect(ejabberd_config, get_local_option, fun(_) -> undefined end),
+    meck:expect(ejabberd_config, get_local_option_or_default, fun(_, Default) -> Default end),
     meck:new(acl, []),
     meck:expect(acl, match_rule, fun(_, _, _) -> MaxUserSessions end),
     meck:new(ejabberd_hooks, []),
@@ -454,8 +455,19 @@ n(Node) ->
 
 
 is_redis_running() ->
-    [] =/= os:cmd("ps aux | grep '[r]edis'").
-
+    case eredis:start_link() of
+        {ok, Client} ->
+            Result = eredis:q(Client, [<<"PING">>], 5000),
+            eredis:stop(Client),
+            case Result of
+                {ok,<<"PONG">>} ->
+                    true;
+                _ ->
+                    false
+            end;
+        _ ->
+            false
+    end.
 
 try_to_reproduce_race_condition(Config) ->
     SID = {p1_time_compat:timestamp(), self()},

@@ -42,6 +42,7 @@ start(normal, _Args) ->
     init_log(),
     mongoose_fips:notify(),
     write_pid_file(),
+    update_status_file(starting),
     db_init(),
     application:start(cache_tab),
 
@@ -72,6 +73,7 @@ start(normal, _Args) ->
     mongoose_metrics:init(),
     ejabberd_listener:start_listeners(),
     ejabberd_admin:start(),
+    update_status_file(started),
     ?INFO_MSG("ejabberd ~s is started in the node ~p", [?MONGOOSE_VERSION, node()]),
     Sup;
 start(_, _) ->
@@ -83,11 +85,11 @@ start(_, _) ->
 prep_stop(State) ->
     mongoose_deprecations:stop(),
     ejabberd_listener:stop_listeners(),
+    broadcast_c2s_shutdown(),
+    wait_for_session_drain(),
     stop_modules(),
     stop_services(),
     mongoose_subhosts:stop(),
-    broadcast_c2s_shutdown(),
-    timer:sleep(5000),
     mongoose_wpool:stop(),
     mongoose_metrics:remove_all_metrics(),
     State.
@@ -96,6 +98,7 @@ prep_stop(State) ->
 stop(_State) ->
     ?INFO_MSG("ejabberd ~s is stopped in the node ~p", [?MONGOOSE_VERSION, node()]),
     delete_pid_file(),
+    update_status_file(stopped),
     %%ejabberd_debug:stop(),
     ok.
 
@@ -203,6 +206,14 @@ write_pid_file(Pid, PidFilename) ->
             throw({cannot_write_pid_file, PidFilename, Reason})
     end.
 
+update_status_file(Status) ->
+    case ejabberd:get_status_file() of
+        false ->
+            ok;
+        StatusFilename ->
+            file:write_file(StatusFilename, atom_to_list(Status))
+    end.
+
 -spec delete_pid_file() -> 'ok' | {'error', atom()}.
 delete_pid_file() ->
     case ejabberd:get_pid_file() of
@@ -236,3 +247,24 @@ maybe_disable_default_logger() ->
         _E:_R ->
             ok
     end.
+
+wait_for_session_drain() ->
+    wait_for_session_drain(?MYHOSTS, [], 10).
+
+wait_for_session_drain(_, _, 0) ->
+    {error, times_limit};
+wait_for_session_drain([Host|Hosts], ActiveHosts, Times) ->
+    {ok, Data} = mongoose_metrics:get_metric_value(Host, sessionCount),
+    Value = proplists:get_value(value, Data),
+    case Value of
+        0 ->
+            wait_for_session_drain(Hosts, ActiveHosts, Times);
+        _ ->
+            ?INFO_MSG("event=wait_for_session_drain host=~ts sessions=~p", [Host, Value]),
+            wait_for_session_drain(Hosts, [Host|ActiveHosts], Times)
+    end;
+wait_for_session_drain([], [], _Times) ->
+    ok;
+wait_for_session_drain([], ActiveHosts, Times) ->
+    timer:sleep(500),
+    wait_for_session_drain(lists:reverse(ActiveHosts), [], Times - 1).

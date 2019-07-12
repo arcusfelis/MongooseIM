@@ -50,13 +50,27 @@ opts() ->
 %% Args are {key :: atom(), val :: string()} pairs.
 %% "=" is an invalid character in option name or value.
 main(RawArgs) ->
+    application:load(escalus),
+    application:set_env(escalus, fresh_clean_overrun_time, 15000),
+    maybe_copy_files_compiled_by_rebar(),
+
     Args = [raw_to_arg(Raw) || Raw <- RawArgs],
     Opts = apply_preset_enabled(args_to_opts(Args)),
     try
+        CTRunDirsBeforeRun = ct_run_dirs(),
         Results = run(Opts),
         %% Waiting for messages to be flushed
         timer:sleep(50),
-        ExitStatusByGroups = anaylyze_groups_runs(),
+        CTRunDirsAfterRun = ct_run_dirs(),
+        NewCTRunDirs = CTRunDirsAfterRun -- CTRunDirsBeforeRun,
+        ExitStatusByGroups =
+            case NewCTRunDirs of
+                [] ->
+                    io:format("WARNING: ct_run directory has not been created~nResults ~p~n",  [Results]),
+                    undefined;
+                [_] ->
+                    anaylyze_groups_runs(hd(NewCTRunDirs))
+            end,
         ExitStatusByTestCases = process_results(Results),
         case ExitStatusByGroups of
             undefined ->
@@ -143,7 +157,7 @@ tests_to_run(TestSpec) ->
     TestSpecFile = atom_to_list(TestSpec),
     [
      {spec, TestSpecFile}
-    ].
+    ] ++ ct_opts().
 
 save_count(Test, Configs) ->
     Repeat = case proplists:get_value(repeat, Test) of
@@ -189,7 +203,8 @@ run_test(Test, PresetsToRun, CoverOpts) ->
             R
     end.
 
-get_ct_config([{spec, Spec}]) ->
+get_ct_config(Opts) ->
+    Spec = proplists:get_value(spec, Opts),
     Props = read_file(Spec),
     ConfigFile = case proplists:lookup(config, Props) of
         {config, [Config]} -> Config;
@@ -281,9 +296,6 @@ call(Node, M, F, A) ->
             Result
     end.
 
-get_apps() ->
-    [mongooseim].
-
 prepare_cover(Test, true) ->
     io:format("Preparing cover~n"),
     prepare(Test);
@@ -306,12 +318,17 @@ maybe_compile_cover([]) ->
     ok;
 maybe_compile_cover(Nodes) ->
     io:format("cover: compiling modules for nodes ~p~n", [Nodes]),
-    Apps = get_apps(),
     import_code_paths(hd(Nodes)),
+
+    cover:start(Nodes),
+    Dir = call(hd(Nodes), code, lib_dir, [mongooseim, ebin]),
+
     %% Time is in microseconds
     {Time, Compiled} = timer:tc(fun() ->
-                    multicall(Nodes, mongoose_cover_helper, start, [Apps],
-                              cover_timeout())
+                            Results = cover:compile_beam_directory(Dir),
+                            Ok = [X || X = {ok, _} <- Results],
+                            NotOk = Results -- Ok,
+                            #{ok => length(Ok), failed => NotOk}
                         end),
     travis_fold("cover compiled output", fun() ->
             io:format("cover: compiled ~p~n", [Compiled])
@@ -322,20 +339,13 @@ maybe_compile_cover(Nodes) ->
 analyze(Test, CoverOpts) ->
     io:format("Coverage analyzing~n"),
     Nodes = get_mongoose_nodes(Test),
-    report_time("Export cover data from MongooseIM nodes", fun() ->
-            multicall(Nodes, mongoose_cover_helper, analyze, [], cover_timeout())
-        end),
-    case os:getenv("KEEP_COVER_RUNNING") of
-        "1" ->
-            io:format("Skip stopping cover~n"),
-            ok;
-        _ ->
-            report_time("Stopping cover on MongooseIM nodes", fun() ->
-                            multicall(Nodes, mongoose_cover_helper, stop, [], cover_timeout())
-                    end)
-    end,
-    cover:start(),
+    analyze(Test, CoverOpts, Nodes).
+
+analyze(_Test, _CoverOpts, []) ->
+    ok;
+analyze(Test, CoverOpts, Nodes) ->
     deduplicate_cover_server_console_prints(),
+    %% Import small tests cover
     Files = filelib:wildcard(repo_dir() ++ "/_build/**/cover/*.coverdata"),
     io:format("Files: ~p", [Files]),
     report_time("Import cover data into run_common_test node", fun() ->
@@ -349,6 +359,15 @@ analyze(Test, CoverOpts) ->
             make_html(modules_to_analyze(CoverOpts));
         _ ->
             ok
+    end,
+    case os:getenv("KEEP_COVER_RUNNING") of
+        "1" ->
+            io:format("Skip stopping cover~n"),
+            ok;
+        _ ->
+            report_time("Stopping cover on MongooseIM nodes", fun() ->
+                        cover:stop([node()|Nodes])
+                    end)
     end.
 
 make_html(Modules) ->
@@ -556,7 +575,7 @@ travis_fold(Description, Fun) ->
 %% It allows cover:analyse/2 to find source file by calling
 %% Module:module_info(compiled).
 import_code_paths(FromNode) when is_atom(FromNode) ->
-    Paths = rpc:call(FromNode, code, get_path, []),
+    Paths = call(FromNode, code, get_path, []),
     code:add_paths(Paths).
 
 %% Gets result of file operation and prints filename, if we have any issues.
@@ -579,11 +598,10 @@ deduplicate_cover_server_console_prints() ->
     CoverPid = whereis(cover_server),
     dedup_proxy_group_leader:start_proxy_group_leader_for(CoverPid).
 
-anaylyze_groups_runs() ->
-    CTRunDirs = filelib:wildcard("ct_report/ct_run*"),
-    SortFun = fun(F1, F2) -> filelib:last_modified(F1) > filelib:last_modified(F2) end,
-    SortedCTRunDirs = lists:sort(SortFun, CTRunDirs),
-    LatestCTRun = hd(SortedCTRunDirs),
+ct_run_dirs() ->
+    filelib:wildcard("ct_report/ct_run*").
+
+anaylyze_groups_runs(LatestCTRun) ->
     case file:consult(LatestCTRun ++ "/all_groups.summary") of
         {ok, Terms} ->
             proplists:get_value(total_failed, Terms, undefined);
@@ -591,3 +609,25 @@ anaylyze_groups_runs() ->
             error_logger:error_msg("Error reading all_groups.summary: ~p~n", [Error]),
             undefined
     end.
+
+ct_opts() ->
+    case os:getenv("SKIP_AUTO_COMPILE") of
+        "true" ->
+            [{auto_compile, false}];
+        _ ->
+            []
+    end.
+
+maybe_copy_files_compiled_by_rebar() ->
+    case os:getenv("SKIP_AUTO_COMPILE") of
+        "true" ->
+            copy_files_compiled_by_rebar();
+        _ ->
+            ok
+    end.
+
+copy_files_compiled_by_rebar() ->
+    Path = "_build/default/lib/ejabberd_tests/ebin/",
+    {ok, Files} = file:list_dir(Path),
+    [{ok, _} = file:copy(Path ++ F, "tests/" ++ F) || F <- Files, filename:extension(F) =:= ".beam"],
+    ok.

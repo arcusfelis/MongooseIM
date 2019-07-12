@@ -112,27 +112,30 @@ end_per_testcase(CaseName, Config) ->
 %%%===================================================================
 
 simple_message(Config) ->
+    do_simple_message(Config, 10000).
+
+do_simple_message(Config, Timeout) ->
     escalus:fresh_story(Config, [{alice2, 1}, {alice, 1}], fun(Alice2, Alice1) ->
 
         %% User on the main server sends a message to a user on a federated server
         escalus:send(Alice1, escalus_stanza:chat_to(Alice2, <<"Hi, foreign Alice!">>)),
 
         %% User on the federated server receives the message
-        Stanza = escalus:wait_for_stanza(Alice2, 10000),
+        Stanza = escalus:wait_for_stanza(Alice2, Timeout),
         escalus:assert(is_chat_message, [<<"Hi, foreign Alice!">>], Stanza),
 
         %% User on the federated server sends a message to the main server
         escalus:send(Alice2, escalus_stanza:chat_to(Alice1, <<"Nice to meet you!">>)),
 
         %% User on the main server receives the message
-        Stanza2 = escalus:wait_for_stanza(Alice1, 10000),
+        Stanza2 = escalus:wait_for_stanza(Alice1, Timeout),
         escalus:assert(is_chat_message, [<<"Nice to meet you!">>], Stanza2)
 
     end).
 
 timeout_waiting_for_message(Config) ->
     try
-        simple_message(Config),
+        do_simple_message(Config, 1000),
         ct:fail("got message but shouldn't")
     catch
         error:timeout_when_waiting_for_stanza ->
@@ -143,11 +146,11 @@ connections_info(Config) ->
     simple_message(Config),
     Node = ct:get_config({hosts, mim, node}),
     FedDomain = ct:get_config({hosts, fed, domain}),
-    S2SIn = distributed_helper:rpc(Node, ejabberd_s2s, get_info_s2s_connections, [in]),
+    S2SIn = mongoose_helper:successful_rpc(Node, ejabberd_s2s, get_info_s2s_connections, [in]),
     ct:pal("S2sIn: ~p", [S2SIn]),
     true = lists:any(fun(PropList) -> [FedDomain] =:= proplists:get_value(domains, PropList) end,
                      S2SIn),
-    S2SOut = distributed_helper:rpc(Node, ejabberd_s2s, get_info_s2s_connections, [out]),
+    S2SOut = mongoose_helper:successful_rpc(Node, ejabberd_s2s, get_info_s2s_connections, [out]),
     ct:pal("S2sOut: ~p", [S2SOut]),
     true = lists:any(fun(PropList) -> FedDomain =:= proplists:get_value(server, PropList) end,
                      S2SOut),

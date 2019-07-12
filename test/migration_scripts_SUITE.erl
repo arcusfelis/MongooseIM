@@ -4,6 +4,7 @@
 -export([all/0, groups/0, init_per_suite/1, end_per_suite/1]).
 % sender-jid-from-mam-message.escript test cases
 -export([
+         script_usage_is_printed/1,
          sender_jid_from_mam_muc_eterm_stream/1,
          sender_jid_from_mam_muc_xml_stream/1,
          sender_jid_from_mam_muc_doesnt_crash_on_unsupported_eterm_input/1,
@@ -24,6 +25,7 @@ all() ->
 groups() ->
     [
      {sender_jid_from_mam_message, [parallel], [
+                                                script_usage_is_printed,
                                                 sender_jid_from_mam_muc_eterm_stream,
                                                 sender_jid_from_mam_muc_xml_stream,
                                                 sender_jid_from_mam_muc_doesnt_crash_on_unsupported_eterm_input,
@@ -40,7 +42,7 @@ init_per_suite(Config) ->
 
 end_per_suite(Config) ->
     {ok, DebugData} = file:read_file("/tmp/script-debug"),
-    ct:pal("~p", [DebugData]),
+    ct:pal("DebugData ~p", [DebugData]),
     Config.
 
 %% ----------------------------------------------------------
@@ -48,6 +50,17 @@ end_per_suite(Config) ->
 %% ----------------------------------------------------------
 
 %% ----------------- sender-jid-from-mam-message.escript ----------------------
+
+script_usage_is_printed(_Config) ->
+    Port = script_helper:start("tools/migration/sender-jid-from-mam-message.escript", []),
+    receive
+        {Port, {data, Data}} ->
+            ct:pal("script_usage_is_printed ~p", [Data]);
+        {Port, {exit_status, ExitStatus}} ->
+            ct:fail({port_exit, Port, {exit_status, ExitStatus}})
+    after 15000 ->
+            ct:fail(timeout)
+    end.
 
 sender_jid_from_mam_muc_eterm_stream(_Config) ->
     Port = script_helper:start("tools/migration/sender-jid-from-mam-message.escript", ["eterm"]),

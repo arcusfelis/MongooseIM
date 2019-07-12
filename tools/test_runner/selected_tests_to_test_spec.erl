@@ -35,8 +35,22 @@ is_big_spec(Atom) ->
     Path = filename:join("big_tests/tests", FileName),
     does_file_exist(Path).
 
+%% Takes spec in form with or without _SUITE.
 spec_to_module(Atom) ->
-    list_to_atom(hd(string:tokens(atom_to_list(Atom), ":")) ++ "_SUITE").
+    Head = hd(string:tokens(atom_to_list(Atom), ":")),
+    list_to_atom(maybe_truncate_suite(Head) ++ "_SUITE").
+
+maybe_truncate_suite(Head) ->
+    maybe_remove_suffix("_SUITE", Head).
+
+maybe_remove_suffix(Suffix, Str) ->
+    case lists:suffix(Suffix, Str) of
+        true ->
+            %% Return Str without suffix
+            lists:sublist(Str, length(Str) - length(Suffix));
+        false ->
+            Str
+    end.
 
 does_file_exist(Filename) ->
     case file:read_file_info(Filename) of
@@ -61,17 +75,29 @@ write_big_tests_spec(BigSpecs) ->
     ok.
 
 make_small_tests_spec(SmallSpecs) ->
-    [make_test_spec("test", SmallSpec) || SmallSpec <- SmallSpecs].
+    remove_duplicates([make_test_spec("test", SmallSpec) || SmallSpec <- SmallSpecs]).
 
 make_big_tests_spec(BigSpecs) ->
-    [make_test_spec("tests", BigSpec) || BigSpec <- BigSpecs].
+    remove_duplicates([make_test_spec("tests", BigSpec) || BigSpec <- BigSpecs]).
 
 %% Make something like:
 % {groups, "test", acc_SUITE, [basic], {cases, [store_and_retrieve]}}.
 make_test_spec(Dir, Atom) ->
     SubAtoms = lists:map(fun list_to_atom/1,
                          string:tokens(atom_to_list(Atom), ":")),
-    make_test_spec_sub_atoms(Dir, SubAtoms).
+    make_test_spec_sub_atoms(Dir, simplify_spec(SubAtoms)).
+
+%% Example:
+%%  mod_global_distrib_SUITE:init_per_suite => mod_global_distrib_SUITE
+simplify_spec([_|_] = Parts) ->
+    case lists:member(lists:last(Parts), [init_per_suite, init_per_testcase, init_per_group]) of
+        true ->
+            lists:droplast(Parts);
+        false ->
+            Parts
+    end;
+simplify_spec(Parts) ->
+    Parts.
 
 make_test_spec_sub_atoms(Dir, [ModulePart]) ->
     %% Run the whole suite
@@ -122,3 +148,17 @@ is_spec_term(X) when element(1, X) == suites;
     true;
 is_spec_term(_) ->
     false.
+
+% like lists:usort/1, but keeps order.
+remove_duplicates(List) ->
+    remove_duplicates(List, []).
+
+remove_duplicates([H|T], Acc) ->
+    case lists:member(H, Acc) of
+        true ->
+            remove_duplicates(T, Acc);
+        false ->
+            remove_duplicates(T, [H|Acc])
+    end;
+remove_duplicates([], Acc) ->
+    lists:reverse(Acc).

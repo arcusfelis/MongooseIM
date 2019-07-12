@@ -54,12 +54,14 @@ suite() ->
 init_per_suite(Config) ->
     [application:start(App) || App <- ?APPS],
     {ok, Pid} = create_handlers(),
+    spawn_process_monitor(),
     [{meck_pid, Pid}|Config].
 
 end_per_suite(Config) ->
     mnesia:stop(),
     mnesia:delete_schema([node()]),
     remove_handlers(Config),
+    stop_process_monitor(),
     Config.
 
 init_per_group(routing, Config) ->
@@ -79,12 +81,13 @@ init_per_testcase(_CaseName, Config) ->
 
 end_per_testcase(_CaseName, Config) ->
     reset_history(),
+    reset_process_monitor(),
     Config.
 
 %%--------------------------------------------------------------------
 %% Tests
 %%--------------------------------------------------------------------
-http_requests(_Config) ->
+http_requests(Config) ->
     %% Given
     Host = ?SERVER,
     Path = <<"/">>,
@@ -108,8 +111,18 @@ http_requests(_Config) ->
                       codes => Codes,
                       expected_codes => ExpectedCodes})
     end,
-    assert_cowboy_handler_calls(dummy_http_handler, init, 50),
-    assert_cowboy_handler_calls(dummy_http_handler, terminate, 50).
+    assert_cowboy_handler_calls(Config, dummy_http_handler, init, 50),
+    wait_for_all_pids_to_finish(dummy_http_handler),
+    % Cowboy can shutdown some handlers, that time out without calling terminate function.
+    % Reason for termination would be "shutdown", not normal in such case.
+    %
+    % Shutdown timeout is 5 seconds and eventually would happen, if the test is run enough times.
+    % Happens more often on the slow computers.
+    %
+    % Do debug this, add into group specs {repeat_until_any_fail, 1000}
+    ShuttedDownHandlers = get_shutted_down_handlers(),
+    assert_cowboy_handler_calls(Config, dummy_http_handler, terminate, 50 - length(ShuttedDownHandlers)),
+    ok.
 
 ws_request_bad_protocol(_Config) ->
     %% Given
@@ -125,7 +138,7 @@ ws_request_bad_protocol(_Config) ->
     %% Then
     assert_status_code(Response, 404).
 
-ws_requests_xmpp(_Config) ->
+ws_requests_xmpp(Config) ->
     %% Given
     Host = "localhost",
     Port = 8080,
@@ -144,11 +157,11 @@ ws_requests_xmpp(_Config) ->
     %% Then
     %% dummy_ws1_handler:init/2 is not called since mod_cowboy takes over
     Responses = lists:duplicate(50, BinaryPong),
-    assert_cowboy_handler_calls(dummy_ws1_handler, websocket_init, 1),
-    assert_cowboy_handler_calls(dummy_ws1_handler, websocket_handle, 50),
+    assert_cowboy_handler_calls(Config, dummy_ws1_handler, websocket_init, 1),
+    assert_cowboy_handler_calls(Config, dummy_ws1_handler, websocket_handle, 50),
     ok = meck:wait(dummy_ws1_handler, websocket_terminate, '_', 1000).
 
-ws_requests_other(_Config) ->
+ws_requests_other(Config) ->
     %% Given
     Host = "localhost",
     Port = 8080,
@@ -167,8 +180,8 @@ ws_requests_other(_Config) ->
     %% Then
 
     Responses = lists:duplicate(50, TextPong),
-    assert_cowboy_handler_calls(dummy_ws2_handler, websocket_init, 1),
-    assert_cowboy_handler_calls(dummy_ws2_handler, websocket_handle, 50),
+    assert_cowboy_handler_calls(Config, dummy_ws2_handler, websocket_init, 1),
+    assert_cowboy_handler_calls(Config, dummy_ws2_handler, websocket_handle, 50),
     ok = meck:wait(dummy_ws2_handler, websocket_terminate, '_', 1000).
 
 mixed_requests(_Config) ->
@@ -388,8 +401,10 @@ remove_handlers(Config) ->
 reset_history() ->
     [ok = meck:reset(Handler) || {Handler, _} <- handlers()].
 
+
 %% cowboy_http_handler
 handler_init(Req, _Opts) ->
+    monitor_handler_process(),
     Req1 = cowboy_req:reply(200, Req),
     {ok, Req1, no_state}.
 
@@ -416,7 +431,98 @@ ws_websocket_info(_Info, no_ws_state) ->
 ws_websocket_terminate(_Reason, _Req, no_ws_state) ->
     ok.
 
-assert_cowboy_handler_calls(M, F, Num) ->
+assert_cowboy_handler_calls(Config, M, F, Num) ->
     Fun = fun() -> meck:num_calls(M, F, '_') end,
-    async_helper:wait_until(Fun, Num).
+    try async_helper:wait_until(Fun, Num, #{time_left => timer:seconds(30)})
+    catch Class:Reason ->
+              Stacktrace = erlang:get_stacktrace(),
+              MeckHistory = meck_proc:get_history(M),
+              ct:pal("meck history: ~p", [MeckHistory]),
+              write_meck_history(Config, MeckHistory),
+              Pids = [element(1, X) || X <- MeckHistory],
+              AlivePids = lists:usort([Pid || Pid <- Pids, is_process_alive(Pid)]),
+              ct:pal("AlivePids ~p", [AlivePids]),
+              PidFun = [{Pid, HistoryFun} || {Pid, {_, HistoryFun, _}, _} <- MeckHistory],
+              ct:pal("PidFun ~p", [PidFun]),
+              ct:pal("Downs ~p", [get_monitor_state()]),
+              erlang:raise(Class, Reason, Stacktrace)
+    end.
 
+write_meck_history(Config, MeckHistory) ->
+    HistBin = term_to_binary(MeckHistory),
+    PrivDir = proplists:get_value(priv_dir, Config),
+    Filename = filename:join(PrivDir, "meck_history.bin"),
+    ct:pal("write meck history into ~ts", [Filename]),
+    file:write_file(Filename, HistBin),
+    ok.
+
+%% Return a list of processes, that have called the module.
+get_caller_pids(M) ->
+    MeckHistory = meck_proc:get_history(M),
+    lists:usort([element(1, X) || X <- MeckHistory]).
+
+wait_for_all_pids_to_finish(M) ->
+    GetAlivePidsFun = fun() ->
+        HandlerPids = get_caller_pids(M),
+        lists:usort(lists:filter(fun is_process_alive/1, HandlerPids))
+        end,
+    async_helper:wait_until(GetAlivePidsFun, [], #{time_left => timer:seconds(30)}).
+
+
+%% Code for process monitoring.
+%% We want to know reason of termination of processes.
+%% Call monitor_handler_process() from inside process to monitor.
+
+spawn_process_monitor() ->
+    spawn(fun() -> register(process_monitor, self()), process_monitor_loop([]) end).
+
+stop_process_monitor() ->
+    process_monitor ! stop.
+
+monitor_handler_process() ->
+    process_monitor ! {monitor, self()},
+    receive
+        process_monitor_ok ->
+            ok
+    after 5000 ->
+           error(monitor_handler_process_timeout)
+    end.
+
+reset_process_monitor() ->
+    process_monitor ! {reset, self()},
+    receive
+        reset_ok ->
+            ok
+    after 5000 ->
+              error(reset_process_monitor_timeout)
+    end.
+
+get_monitor_state() ->
+    process_monitor ! {get_state, self()},
+    receive
+        {monitor_state, List} ->
+            List
+    after 5000 ->
+              error(reset_process_monitor_timeout)
+    end.
+
+process_monitor_loop(List) ->
+    receive
+        {monitor, Pid} ->
+            monitor(process, Pid),
+            Pid ! process_monitor_ok,
+            process_monitor_loop(List);
+        {get_state, Pid} ->
+            Pid ! {monitor_state, List},
+            process_monitor_loop(List);
+        {'DOWN', _, _, _, _} = Down ->
+            process_monitor_loop([Down|List]);
+        {reset, Pid} ->
+            Pid ! reset_ok,
+            process_monitor_loop([]);
+        stop ->
+            stop
+    end.
+
+get_shutted_down_handlers() ->
+   [Pid || {'DOWN', _, process, Pid, shutdown} <- get_monitor_state()].

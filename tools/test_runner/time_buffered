@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+
+function writer
+{
+    local sleep_pidfile=$1
+    while read line; do
+        printf "%d %s\n" "$(date +%s)" "$line"
+    done
+    # Oh, the pipe is closed, flush.
+    # Interrupt sleeping.
+    local sleep_pid=$(cat "$sleep_pidfile" || true)
+    # Signal the process below to set delay=0.
+    if [ -z "$sleep_pidfile" ]; then
+        kill $sleep_pid &2>/dev/null || true
+    fi
+}
+
+function reader
+{
+    local delay=$1
+    local sleep_pidfile=$2
+    local buffer=""
+    while read ts line; do
+        now=$(date +%s)
+        if (( now - ts < delay)); then
+            printf "%s" "$buffer"
+            buffer=""
+            sleep $(( now - ts )) &
+            local sleep_pid="$!"
+            echo "$sleep_pid" > "$sleep_pidfile"
+            # If wait (and sleep) fails, most likely it has been killed by kill above
+            wait "$sleep_pid" || delay=0
+        fi
+        buffer=$(printf "%s\n%s\n" "$buffer" "$line")
+    done
+}
+
+# Bash version
+function time_buffered
+{
+    local sleep_pidfile=$(mktemp)
+    local delay=$1
+    writer "$sleep_pidfile" | reader "$delay" "$sleep_pidfile"
+    rm -f "$sleep_pidfile"
+}
+
+
+if [[ ! $1 =~ ^[0-9]+$ ]]; then
+    echo "Bad arguments"
+    echo "Usage:"
+    echo "time_buffered SECONDS"
+    exit 1
+fi
+
+SECONDS=$1
+time_buffered "$SECONDS"

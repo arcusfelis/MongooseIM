@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+echo "Running from inside docker"
+
+# Copy stdout and stderr into file, docker can use as a log
+# https://unix.stackexchange.com/questions/67652/copy-stdout-and-stderr-to-a-log-file-and-leave-them-on-the-console-within-the-sc
+#
+# Used by tail -f command running by "docker-run"
+# so, you can use "docker logs this-container" to see logs.
+exec &> >(tee /var/log/progress)
+
+# Ensure, that ROOT_SCRIPT_PID env variable is not passed from the man test-runner script.
+unset ROOT_SCRIPT_PID
+
+set -eu
+
+# -o allexport enables all following variable definitions to be exported.
+# +o allexport disables this feature.
+set -o allexport
+source /env_vars
+set +o allexport
+
+echo "Load env variables:"
+cat /env_vars
+
+# rsync -a src_directory/ dst_directory/
+
+# c_src can contain some compiled files we don't want
+echo "Rsync code"
+time rsync -a \
+    --exclude _build \
+    --exclude big_tests/_build \
+    --exclude big_tests/ct_report \
+    --exclude src/eldap_filter_yecc.erl \
+    --exclude '*.o' \
+    --exclude '*.d' \
+    --exclude '*.beam' \
+    --exclude 'priv/lib/*.so' \
+    /opt/mongooseim_src/ \
+    /opt/mongooseim/
+
+echo "Rsync code done"
+
+cd /opt/mongooseim/
+source tools/travis-common-vars.sh
+source tools/test_runner/helpers.sh
+
+BUILD_MIM="${BUILD_MIM:-true}"
+BUILD_TESTS="${BUILD_TESTS:-true}"
+
+pids=()
+
+if [ "$BUILD_MIM" = true ]; then
+    echo "Build releases"
+    buffered_async_helper "build_nodes" ./tools/build-releases.sh &
+    pid="$!"
+    describe_pid "$pid" "build_nodes"
+    pids+=("$pid")
+fi
+
+if [ "$BUILD_TESTS" = true ]; then
+    echo "Build tests"
+    buffered_async_helper "build_tests" ./tools/travis-build-tests.sh &
+    pid="$!"
+    describe_pid "$pid" "build_tests"
+    pids+=("$pid")
+fi
+
+wait_for_pids "${pids[@]}"

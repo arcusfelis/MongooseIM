@@ -142,7 +142,7 @@ try_register(_Config) ->
 
 % get_password + get_password_s
 get_password(_Config) ->
-    case scram:enabled(?DOMAIN1) of
+    case mongoose_scram:enabled(?DOMAIN1) of
         false ->
             <<"makota">> = ejabberd_auth_http:get_password(<<"alice">>, ?DOMAIN1),
             <<"makota">> = ejabberd_auth_http:get_password_s(<<"alice">>, ?DOMAIN1);
@@ -190,6 +190,7 @@ meck_config(Config) ->
                     _ -> []
                 end,
     meck:new(ejabberd_config),
+    meck:expect(ejabberd_config, get_local_option_or_default, fun(_, Default) -> Default end),
     meck:expect(ejabberd_config, get_local_option,
                 fun(auth_opts, _Host) ->
                         [
@@ -206,7 +207,7 @@ meck_cleanup() ->
 do_scram(Pass, Config) ->
     case lists:keyfind(scram_group, 1, Config) of
         {_, true} ->
-            scram:serialize(scram:password_to_scram(Pass, scram:iterations(?DOMAIN1)));
+            mongoose_scram:serialize(mongoose_scram:password_to_scram(Pass, mongoose_scram:iterations(?DOMAIN1)));
         _ ->
             Pass
     end.

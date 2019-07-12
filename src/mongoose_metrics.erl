@@ -176,6 +176,17 @@ remove_all_metrics() ->
 all_metrics_are_global() ->
     ejabberd_config:get_local_option(all_metrics_are_global).
 
+extra_metrics_options() ->
+    Opts = ejabberd_config:get_local_option_or_default(extra_metrics_options, []),
+    patch_opts(Opts).
+
+patch_opts([{min_heap_size,0}|Opts]) ->
+    [{min_heap_size,1}|patch_opts(Opts)];
+patch_opts([Opt|Opts]) ->
+    [Opt|patch_opts(Opts)];
+patch_opts([]) ->
+    [].
+
 pick_by_all_metrics_are_global(WhenGlobal, WhenNot) ->
     case all_metrics_are_global() of
         true -> WhenGlobal;
@@ -345,7 +356,8 @@ ensure_metric(Host, Metric, Type, ShortType) when is_list(Metric) ->
     case exometer:info(PrefixedMetric, type) of
         ShortType -> {ok, already_present};
         undefined ->
-            case catch exometer:new(PrefixedMetric, Type) of
+            Opts = extra_metrics_options(),
+            case catch exometer:new(PrefixedMetric, Type, Opts) of
                 {'EXIT', {exists, _}} -> {ok, already_present};
                 ok -> ok;
                 {'EXIT', Error} -> {error, Error}

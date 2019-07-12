@@ -9,6 +9,7 @@ set -e
 
 # We use BASE and DEV_NODES_ARRAY variables from here
 source tools/travis-common-vars.sh
+source tools/test_runner/helpers.sh
 
 # Stops node
 # First argument is node directory name
@@ -16,23 +17,7 @@ source tools/travis-common-vars.sh
 # Fails if release for the node is not compiled
 stop_node() {
   echo -n "${1} stop: "
-  ${BASE}/_build/${1}/rel/mongooseim/bin/mongooseimctl stop && echo ok || echo failed
-}
-
-async_helper() {
-  local ret_val=0 output=""
-  output="$("$@")" || ret_val="$?"
-  echo; echo "$output"; echo
-  return "$ret_val"
-}
-
-wait_for_pids() {
-  ## wait for all pids
-  wait "$@" || true
-  ## wait for pids one by one, so script can be stopped on error
-  for pid in "$@"; do
-    wait "$pid"
-  done
+  ${BASE}/_build/${1}/rel/mongooseim/bin/mongooseimctl force_stop || echo ok
 }
 
 # DEV_NODES_ARRAY is defined in travis-common-vars.sh
@@ -40,8 +25,10 @@ wait_for_pids() {
 stop_nodes() {
   local pids=()
   for node in ${DEV_NODES_ARRAY[@]}; do
-    async_helper stop_node $node &
-    pids+=("$!")
+    async_helper "stop_node_$node" stop_node $node &
+    HELPER_PID="$!"
+    describe_pid "$HELPER_PID" " {stop_node_$node} "
+    pids+=("$HELPER_PID")
   done
   wait_for_pids "${pids[@]}"
 }

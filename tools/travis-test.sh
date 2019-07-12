@@ -5,12 +5,15 @@
 # - COVER_ENABLED
 # - STOP_NODES (default false)
 set -o pipefail
+set -e
 IFS=$'\n\t'
 
 DEFAULT_PRESET=internal_mnesia
 PRESET="${PRESET-$DEFAULT_PRESET}"
 SMALL_TESTS="${SMALL_TESTS:-true}"
 COVER_ENABLED="${COVER_ENABLED:-true}"
+RETRY_BIG_TESTS="${RETRY_BIG_TESTS:-false}"
+SKIP_AUTO_COMPILE="${SKIP_AUTO_COMPILE:-false}"
 
 while getopts ":p::s::e::c:" opt; do
   case $opt in
@@ -70,7 +73,13 @@ choose_newest_directory() {
 run_small_tests() {
   tools/print-dots.sh start
   tools/print-dots.sh monitor $$
+  rm -f _build/test/logs/retry.spec
   make ct
+  if [ -f "_build/test/logs/retry.spec" ]; then
+      echo "Print _build/test/logs/retry.spec:"
+      cat _build/test/logs/retry.spec
+      echo ""
+  fi
   tools/print-dots.sh stop
   SMALL_SUMMARIES_DIRS=${BASE}/_build/test/logs/ct_run*
   SMALL_SUMMARIES_DIR=$(choose_newest_directory ${SMALL_SUMMARIES_DIRS})
@@ -100,11 +109,15 @@ run_test_preset() {
   cd ${BASE}/big_tests
   local MAKE_RESULT=0
   TESTSPEC=${TESTSPEC:-default.spec}
+  PREPARE="prepare"
+  if [ "$SKIP_AUTO_COMPILE" = "true" ]; then
+      PREPARE=""
+  fi
   if [ "$COVER_ENABLED" = "true" ]; then
-    make cover_test_preset TESTSPEC=$TESTSPEC PRESET=$PRESET
+    make cover_test_preset $MAKE_ARGS TESTSPEC=$TESTSPEC PRESET=$PRESET PREPARE=$PREPARE
     MAKE_RESULT=$?
   else
-    make test_preset TESTSPEC=$TESTSPEC PRESET=$PRESET
+    make test_preset $MAKE_ARGS TESTSPEC=$TESTSPEC PRESET=$PRESET PREPARE=$PREPARE
     MAKE_RESULT=$?
   fi
   cd -
@@ -142,26 +155,57 @@ run_tests() {
   echo "Running big tests (big_tests)"
   echo "############################"
 
-  time ${TOOLS}/start-nodes.sh || { echo "Failed to start MongooseIM nodes"; return 1; }
+  rm -f /tmp/ct_summary
+
+  time ${TOOLS}/start-nodes.sh || ( echo "Failed to start MongooseIM nodes"; return 1; )
 
   maybe_pause_before_test
 
-  run_test_preset
-  BIG_STATUS=$?
+  BIG_STATUS=0
+  run_test_preset || BIG_STATUS=$?
+
+  tools/travis-publish-github-comment.sh
+
+  # If /tmp/ct_summary is not empty file
+  if [ "$RETRY_BIG_TESTS" = true ] && [ -s /tmp/ct_summary ]; then
+      echo "Stopping MongooseIM nodes before retry"
+      ./tools/stop-nodes.sh
+
+      # Resetting Mnesia
+      rm -rf _build/*/rel/mongooseim/Mnesia*
+
+      echo "Starting MongooseIM nodes for retry"
+      time PRINT_MIM_LOGS=true ${TOOLS}/start-nodes.sh || ( echo "Failed to start MongooseIM nodes"; return 1; )
+      maybe_pause_before_test
+
+      echo "Failed cases after first run:"
+      cat /tmp/ct_summary
+      echo ""
+
+      echo "Generate retry auto_big_tests.spec"
+      ./tools/test_runner/selected-tests-to-test-spec.sh $(cat /tmp/ct_summary)
+      export TESTSPEC=auto_big_tests.spec
+
+      BIG_STATUS=0
+      # Disable cover for rerun
+      COVER_ENABLED=false run_test_preset || BIG_STATUS=$?
+
+      tools/travis-publish-github-comment.sh
+  fi
 
   SUMMARIES_DIRS=${BASE}/big_tests/ct_report/ct_run*
   SUMMARIES_DIR=$(choose_newest_directory ${SUMMARIES_DIRS})
   echo "SUMMARIES_DIR=$SUMMARIES_DIR"
-  ${TOOLS}/summarise-ct-results ${SUMMARIES_DIR}
-  BIG_STATUS_BY_SUMMARY=$?
+  BIG_STATUS_BY_SUMMARY=0
+  ${TOOLS}/summarise-ct-results ${SUMMARIES_DIR} || BIG_STATUS_BY_SUMMARY=$?
 
   echo
   echo "All tests done."
 
-  grep "fail_ci_build=true" ${BASE}/_build/mim*/rel/mongooseim/log/ejabberd.log
-  # If phrase found than exit with code 1
-  test $? -eq 1
-  LOG_STATUS=$?
+  LOG_STATUS=0
+  if grep "fail_ci_build=true" ${BASE}/_build/mim*/rel/mongooseim/log/ejabberd.log ; then
+      LOG_STATUS=1
+  fi
 
   if [ $SMALL_STATUS -eq 0 -a $BIG_STATUS -eq 0 -a $BIG_STATUS_BY_SUMMARY -eq 0 -a $LOG_STATUS -eq 0 ]
   then
@@ -177,6 +221,13 @@ run_tests() {
     print_running_nodes
   fi
 
+  # If /tmp/ct_summary is not empty file
+  if [ -s /tmp/ct_summary ]; then
+      echo "Failed big cases:"
+      cat /tmp/ct_summary
+      echo ""
+  fi
+
   # Do not stop nodes if big tests failed
   if [ "$STOP_NODES" = true ] && [ $BIG_STATUS -eq 0 ] && [ $BIG_STATUS_BY_SUMMARY -eq 0 ]; then
       echo "Stopping MongooseIM nodes"
@@ -185,6 +236,7 @@ run_tests() {
       echo "Keep MongooseIM nodes running"
   fi
 
+  echo "run_tests returns $RESULT"
   exit ${RESULT}
 }
 

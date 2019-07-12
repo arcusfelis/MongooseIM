@@ -31,9 +31,11 @@
 
 -spec is_rdbms_enabled(Host :: binary()) -> boolean().
 is_rdbms_enabled(Host) ->
-    case rpc(mim(), mongoose_rdbms, sql_transaction, [Host, fun erlang:yield/0]) of
+    try rpc(mim(), mongoose_rdbms, sql_transaction, [Host, fun erlang:yield/0]) of
         {atomic, _} -> true;
         _ -> false
+    % Maybe wpool error
+    catch _:_ -> false
     end.
 
 -spec mnesia_or_rdbms_backend() -> atom().

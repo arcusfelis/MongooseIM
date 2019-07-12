@@ -396,8 +396,8 @@ run_interactive(Cmd, Response, Timeout) ->
     ejabberdctl_helper:loop(Cmd, Port, [], Timeout).
 
 nodes_clustered(Node1, Node2, ShouldBe) ->
-    DbNodes1 = distributed_helper:rpc(Node1, mnesia, system_info, [db_nodes]),
-    DbNodes2 = distributed_helper:rpc(Node2, mnesia, system_info, [db_nodes]),
+    DbNodes1 = mongoose_helper:successful_rpc(Node1, mnesia, system_info, [db_nodes]),
+    DbNodes2 = mongoose_helper:successful_rpc(Node2, mnesia, system_info, [db_nodes]),
     Pairs = [{Node1, DbNodes2, ShouldBe},
         {Node2, DbNodes1, ShouldBe},
         {Node1, DbNodes1, true},
@@ -406,6 +406,6 @@ nodes_clustered(Node1, Node2, ShouldBe) ->
         || {Element, List, ShouldBelong} <- Pairs].
 
 have_node_in_mnesia(Node1, Node2, ShouldBe) ->
-    DbNodes1 = distributed_helper:rpc(Node1, mnesia, system_info, [db_nodes]),
+    DbNodes1 = mongoose_helper:successful_rpc(Node1, mnesia, system_info, [db_nodes]),
     ?assertEqual(ShouldBe, lists:member(Node2, DbNodes1)).
 

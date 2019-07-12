@@ -10,6 +10,8 @@ if [ "$#" = 0 ]; then
     exit 1
 fi
 
+KILL_WAIT="${KILL_WAIT:-0}"
+
 PID_TO_MONITOR=$1
 # Consume PID_TO_MONITOR
 shift
@@ -28,8 +30,9 @@ if [ "$#" -ne 0 ]; then
     # kill: kill PID failed: no such process
     # Monitor PID_TO_MONITOR
     (while kill -0 $PID_TO_MONITOR 2&> /dev/null; do sleep 1; done)
-    # Ehen PID_TO_MONITOR is dead...
+    # When PID_TO_MONITOR is dead...
+    sleep "$KILL_WAIT"
     verbose_print "kill_processes_on_exit: $@"
     # Kill the rest of arguments
-    kill $@ 2&> /dev/null
+    kill -TERM $@ 2&> /dev/null
 fi

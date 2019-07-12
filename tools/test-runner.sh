@@ -4,6 +4,7 @@
 # - COVER_ENABLED
 # - PRESET
 # - DB
+# - JOBS
 # - DEV_NODES
 # - TEST_HOSTS
 # - VERBOSE
@@ -23,6 +24,7 @@ Options:
 --one-node            -- the same as "--dev-nodes mim1 --test-hosts mim --"
 --skip-preset         -- skip preset application, ignores --preset. Also known as quick mode
 --skip-cover          -- disable coverage reports
+--skip-cover-stop     -- keep cover running
 --skip-small-tests    -- disable small tests
 --skip-big-tests      -- disable big tests
 --skip-build-tests    -- disable big test compilation
@@ -32,6 +34,7 @@ Options:
 --skip-setup-db       -- do not start any databases, the same as "--db --" option
 --tls-dist            -- enable encryption between nodes in big tests
 --verbose             -- print script output
+--print-logs          -- print MongooseIM logs to the shell
 --colors              -- force colors in help and examples commands
 --pause [SECONDS]     -- pause before big_tests execution
 
@@ -284,20 +287,31 @@ TEST_HOSTS_ARRAY=(
 
 SMALL_TESTS_DEFAULT=true
 COVER_ENABLED_DEFAULT=true
+KEEP_COVER_RUNNING_DEFAULT=0
 PRESET_ENABLED_DEFAULT=true
 
 PAUSE_BEFORE_BIG_TESTS=0
+DELAY_SETUP_DB=0
 BIG_TESTS=true
 BUILD_TESTS=true
 BUILD_MIM=true
 START_NODES=true
 STOP_NODES=true
 TLS_DIST=no
+RETRY_BIG_TESTS=false
 
 SELECTED_TESTS=()
 STOP_SCRIPT=false
 SKIP_DB_SETUP=false
 DB_FROM_PRESETS=true
+USE_DOCKER_FOR_TEST_RUNNER=false
+RESET_DOCKER_CONTAINERS=false
+RESET_DOCKER_VOLUMES=false
+RESTART_DOCKER_CONTAINERS=false
+
+TRY_FAST=false
+TRY_SYNC=false
+SKIP_AUTO_COMPILE=false
 
 # Parse command line arguments
 # Prefer arguments to env variables
@@ -342,6 +356,15 @@ case $key in
         DB_FROM_PRESETS=false
     ;;
 
+    --delay-setup-db)
+        shift # past argument
+        DELAY_SETUP_DB=60
+        if [[ "$1" != --* ]]; then
+            DELAY_SETUP_DB=$1
+            shift # past argument
+        fi
+    ;;
+
     # Similar how we parse --db option
     --preset)
         shift # past argument
@@ -356,6 +379,24 @@ case $key in
                 shift # past value
             else
                 echo "No more presets"
+                break
+            fi
+        done
+    ;;
+
+    # Similar how we parse --db option
+    --jobs)
+        shift # past argument
+        JOBS=""
+        while [[ $# -gt 0 ]]
+        do
+            key="$1"
+            if [[ "$key" != --* ]]; then
+                echo "Job argument parsed $key"
+                JOBS="$JOBS $key"
+                shift # past value
+            else
+                echo "No more jobs"
                 break
             fi
         done
@@ -410,6 +451,11 @@ case $key in
         COVER_ENABLED=false
     ;;
 
+    --skip-cover-stop)
+        shift # past argument
+        KEEP_COVER_RUNNING=1
+    ;;
+
     --skip-preset)
         shift # past argument
         # Disable preset application
@@ -424,6 +470,12 @@ case $key in
     --skip-big-tests)
         shift # past argument
         BIG_TESTS=false
+    ;;
+    
+    --skip-build)
+        shift # past argument
+        BUILD_TESTS=false
+        BUILD_MIM=false
     ;;
 
     --skip-build-tests)
@@ -452,8 +504,18 @@ case $key in
         TLS_DIST=yes
     ;;
 
+    --retry-big-tests)
+        shift # past argument
+        RETRY_BIG_TESTS=true
+    ;;
+
     --verbose)
         export VERBOSE=1
+        shift # past argument
+    ;;
+
+    --print-logs)
+        export PRINT_MIM_LOGS=true
         shift # past argument
     ;;
 
@@ -510,6 +572,48 @@ case $key in
         shift # consume argument, continue execution
         # Appends "--skip-small-tests ... --skip-preset" arguments to the current positional parameters
         set -- --skip-small-tests --skip-setup-db --dev-nodes --test-hosts --skip-cover --skip-preset "$@"
+    ;;
+
+    --reset-docker)
+        RESET_DOCKER_CONTAINERS=true
+        RESET_DOCKER_VOLUMES=true
+        shift # past argument
+    ;;
+    --reset-docker-containers)
+        RESET_DOCKER_CONTAINERS=true
+        shift # past argument
+    ;;
+
+    --reset-docker-volumes)
+        RESET_DOCKER_VOLUMES=true
+        shift # past argument
+    ;;
+
+    --restart-docker-containers)
+        RESTART_DOCKER_CONTAINERS=true
+        shift # past argument
+    ;;
+
+    --docker)
+        USE_DOCKER_FOR_TEST_RUNNER=true
+        shift # past argument
+    ;;
+
+    --fast-build)
+        TRY_FAST=true
+        shift # past argument
+    ;;
+
+    --sync-build)
+        TRY_SYNC=true
+        shift # past argument
+    ;;
+
+--skip-auto-recompile)
+        # Skips ct autorecompile feature in big tests
+        # Useful, if you know, that test code is up to date (i.e. compiled at build step)
+        SKIP_AUTO_COMPILE=true
+        shift # past argument
     ;;
 
     --)
@@ -570,6 +674,7 @@ fi
 # Use env variable or default
 export SMALL_TESTS="${SMALL_TESTS:-$SMALL_TESTS_DEFAULT}"
 export COVER_ENABLED="${COVER_ENABLED:-$COVER_ENABLED_DEFAULT}"
+export KEEP_COVER_RUNNING="${KEEP_COVER_RUNNING:-$KEEP_COVER_RUNNING_DEFAULT}"
 export PRESET_ENABLED="${PRESET_ENABLED:-$PRESET_ENABLED_DEFAULT}"
 
 # Join array to string
@@ -591,6 +696,7 @@ TEST_HOSTS_DEFAULT="${TEST_HOSTS_ARRAY[@]}"
 # Use empty DEV_NODES (DEV_NODES="") to skip node compilation and restart
 export PRESET="${PRESET-$PRESETS_DEFAULT}"
 export DB="${DB-$DBS_DEFAULT}"
+export JOBS="${JOBS-}"
 export DEV_NODES="${DEV_NODES-$DEV_NODES_DEFAULT}"
 export TEST_HOSTS="${TEST_HOSTS-$TEST_HOSTS_DEFAULT}"
 export BUILD_TESTS="$BUILD_TESTS"
@@ -599,14 +705,23 @@ export TLS_DIST="$TLS_DIST"
 # Pass extra arguments from tools/test_runner/selected-tests-to-test-spec.sh
 # to rebar3 in Makefile
 if [[ -f "auto_small_tests.spec" ]]; then
-    export REBAR_CT_EXTRA_ARGS=" --spec \"$(pwd)/auto_small_tests.spec\" "
+    export REBAR_CT_EXTRA_ARGS=" --spec \"auto_small_tests.spec\" "
 else
     export REBAR_CT_EXTRA_ARGS=""
 fi
-export TESTSPEC="auto_big_tests.spec"
+export TESTSPEC="${TESTSPEC:-auto_big_tests.spec}"
 export START_NODES="$START_NODES"
 export STOP_NODES="$STOP_NODES"
 export PAUSE_BEFORE_BIG_TESTS="$PAUSE_BEFORE_BIG_TESTS"
+export DELAY_SETUP_DB="$DELAY_SETUP_DB"
+export RESET_DOCKER_CONTAINERS="$RESET_DOCKER_CONTAINERS"
+export RESET_DOCKER_VOLUMES="$RESET_DOCKER_VOLUMES"
+export RESTART_DOCKER_CONTAINERS="$RESTART_DOCKER_CONTAINERS"
+export RETRY_BIG_TESTS="$RETRY_BIG_TESTS"
+export TRY_FAST="$TRY_FAST"
+export TRY_SYNC="$TRY_SYNC"
+export SKIP_AUTO_COMPILE="$SKIP_AUTO_COMPILE"
+export SKIP_DB_SETUP="$SKIP_DB_SETUP"
 
 # Debug printing
 echo "Variables:"
@@ -624,7 +739,24 @@ echo "    TESTSPEC=$TESTSPEC"
 echo "    TLS_DIST=$TLS_DIST"
 echo "    START_NODES=$START_NODES"
 echo "    STOP_NODES=$STOP_NODES"
+echo "    RETRY_BIG_TESTS=$RETRY_BIG_TESTS"
+echo "    JOBS=$JOBS"
+echo "    RESET_DOCKER_CONTAINERS=$RESET_DOCKER_CONTAINERS"
+echo "    RESET_DOCKER_VOLUMES=$RESET_DOCKER_VOLUMES"
+echo "    RESTART_DOCKER_CONTAINERS=$RESTART_DOCKER_CONTAINERS"
+echo "    TRY_SYNC=$TRY_SYNC"
+echo "    TRY_FAST=$TRY_FAST"
+echo "    SKIP_AUTO_COMPILE=$SKIP_AUTO_COMPILE"
 echo ""
+
+./tools/test_runner/selected-tests-to-test-spec.sh "${SELECTED_TESTS[@]}"
+
+make certs
+
+if [ "$USE_DOCKER_FOR_TEST_RUNNER" = true ]; then
+    ./tools/test_runner/run_using_docker.sh
+    exit 0
+fi
 
 ./tools/build-releases.sh
 

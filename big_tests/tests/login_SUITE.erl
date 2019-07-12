@@ -26,8 +26,9 @@
 -include_lib("exml/include/exml.hrl").
 
 -import(distributed_helper, [mim/0,
-                             require_rpc_nodes/1,
-                             rpc/4]).
+                             require_rpc_nodes/1]).
+
+rpc(N, M, F, A) -> mongoose_helper:successful_rpc(N, M, F, A).
 
 %%--------------------------------------------------------------------
 %% Suite configuration

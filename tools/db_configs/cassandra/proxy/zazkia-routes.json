@@ -13,7 +13,7 @@
       "receiving-from-client": true,
       "sending-to-service": true,
       "receiving-from-service": true,
-      "verbose": true
+      "verbose": false
     }
   }
 ]
