@@ -148,7 +148,8 @@ file_exists(Node, Filename) ->
       Value :: string().
 modify_config_file(CfgVarsToChange, Config) ->
     Node = ct:get_config({hosts, mim, node}),
-    modify_config_file(Node, "vars.config", CfgVarsToChange, Config).
+    VarsFile = ct:get_config({hosts, mim, vars}),
+    modify_config_file(Node, VarsFile, CfgVarsToChange, Config).
 
 -spec modify_config_file(node(), string(), [{ConfigVariable, Value}], ct_config()) -> ok when
       ConfigVariable :: atom(),
