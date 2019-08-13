@@ -21,6 +21,8 @@
 
 -export([main/1, analyze/2]).
 
+-export([ct_run_test/1]).
+
 -define(CT_DIR, filename:join([".", "tests"])).
 -define(CT_REPORT, filename:join([".", "ct_report"])).
 
@@ -217,10 +219,19 @@ do_run_quick_test(Test, CoverOpts) ->
             [{ok, {Ok, Failed, UserSkipped, AutoSkipped}}]
     end.
 
+ct_run_test(Test) ->
+    load_test_modules(Test),
+    ct:run_test([{label, Name} | Test]).
+
 run_config_test({Name, Variables}, Test, N, Tests) ->
     enable_preset(Name, Variables, Test, N, Tests),
-    load_test_modules(Test),
-    Result = ct:run_test([{label, Name} | Test]),
+
+    {ok, Node1} = ct_slave:start(ct1, [{monitor_master, true}, {env, os:list_env_vars()}]),
+    Paths = code:get_path(),
+    ok = rpc:call(Node1, code, add_paths, [Paths]),
+    CtOpts = [{label, Name} | Test],
+    Result = rpc:call(Node1, ?MODULE, ct_run_test, [CtOpts]),
+
     case Result of
         {error, Reason} ->
             throw({ct_error, Reason});
