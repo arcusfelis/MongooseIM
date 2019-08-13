@@ -39,5 +39,5 @@ if [ "$VERBOSE" = "1" ]; then
     kill $tail_pid
     exit $exit_code
 else
-    $@ > "$OUT_FILE" 2>&1 || (cat "$OUT_FILE"; exit 1)
+    $@ > "$OUT_FILE" 2>&1 || (cat "$OUT_FILE"; echo "Waiting before exit"; sleep 5; exit 1)
 fi
