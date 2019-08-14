@@ -253,6 +253,7 @@ ct_slave_opts() ->
      {env, os:list_env_vars()},
      {boot_timeout, 15}, %% seconds
      {init_timeout, 10}, %% seconds
+     {erl_flags, case os:getenv("EXTRA_ARGS") of false -> ""; ExtraArgs -> ExtraArgs end},
      {startup_timeout, 10}]. %% seconds
 
 enable_preset(Name, PresetVars, Test, N, Tests) ->

@@ -27,6 +27,7 @@ COMMON_OPTS := -sname test -setcookie ejabberd -hidden \
                $(TLS_DIST_OPTS) \
                -env REPO_DIR "$(ABS_REPO_DIR)" \
                -env TEST_DIR "$(ABS_TEST_DIR)" \
+               -env EXTRA_ARGS " $(TLS_DIST_OPTS) " \
                -pa `pwd`/_build/default/lib/*/ebin \
                    `pwd`/tests \
                $(DEPS_PATHS)
