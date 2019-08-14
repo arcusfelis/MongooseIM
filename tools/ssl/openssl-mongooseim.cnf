@@ -31,10 +31,6 @@ nsComment                   = "Fake Dev-Only Certificate"
 DNS.1       = localhost
 
 ##adding node names to let tls distribution with OTP 20.3
-DNS.2       = mim1@localhost
-DNS.3       = mim2@localhost
-DNS.4       = fed1@localhost
-DNS.5       = reg1@localhost
-DNS.6       = mim3@localhost
+DNS.2       = *@localhost
 
 IP          = 127.0.0.1
