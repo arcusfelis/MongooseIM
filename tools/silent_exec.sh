@@ -35,9 +35,9 @@ if [ "$VERBOSE" = "1" ]; then
     tail -f "$OUT_FILE" &
     tail_pid=$!
     exit_code=0
-    $@ 2>&1 > "$OUT_FILE" || exit_code=$?
+    "$@" 2>&1 > "$OUT_FILE" || exit_code=$?
     kill $tail_pid
     exit $exit_code
 else
-    $@ > "$OUT_FILE" 2>&1 || (cat "$OUT_FILE"; echo "Waiting before exit"; sleep 5; exit 1)
+    "$@" > "$OUT_FILE" 2>&1 || (cat "$OUT_FILE"; echo "Waiting before exit"; sleep 5; exit 1)
 fi
