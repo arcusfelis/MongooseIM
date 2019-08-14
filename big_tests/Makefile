@@ -46,6 +46,9 @@ cover_test_clean: get-deps
 	rm -rf tests/*.beam
 	$(MAKE) cover_test
 
+run_erl: $(PREPARE)
+	erl $(COMMON_OPTS) $(ADD_OPTS)
+
 quicktest: $(PREPARE)
 	$(RUN) erl -noinput $(COMMON_OPTS) $(ADD_OPTS) \
 			-s run_common_test main test=quick spec=$(TESTSPEC)
