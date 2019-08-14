@@ -161,6 +161,7 @@ save_count(Test, Configs) ->
     file:write_file("/tmp/ct_count", integer_to_list(Repeat*Times)).
 
 run_test(Test, PresetsToRun, CoverOpts) ->
+    ensure_nodes_running(Test),
     prepare_cover(Test, CoverOpts),
     error_logger:info_msg("Presets to run ~p", [PresetsToRun]),
     {ConfigFile, Props} = get_ct_config(Test),
@@ -207,6 +208,7 @@ preset_names(Presets) ->
     [Preset||{Preset, _} <- Presets].
 
 do_run_quick_test(Test, CoverOpts) ->
+    ensure_nodes_running(Test),
     prepare_cover(Test, CoverOpts),
     load_test_modules(Test),
     Result = ct:run_test(Test),
@@ -676,4 +678,17 @@ try_load_module(Module) ->
     case code:is_loaded(Module) of
         true -> already_loaded;
         _ -> code:load_file(Module)
+    end.
+
+
+ensure_nodes_running(Test) ->
+    Nodes = get_mongoose_nodes(Test),
+    Results = [{Node, net_adm:ping(Node)} || Node <- Nodes],
+    Pangs = [Node || {Node, pang} <- Results],
+    case Pangs of
+        [] ->
+            ok;
+        _ ->
+            io:format("ensure_nodes_running failed, results = ~p", [Results]),
+            error({nodes_down, Pangs})
     end.
