@@ -224,9 +224,7 @@ ct_run_test(Test) ->
 
 run_config_test({Name, Variables}, Test, N, Tests) ->
     enable_preset(Name, Variables, Test, N, Tests),
-    {ok, Node1} = ct_slave:start(ct1, ct_slave_opts()),
-    Paths = code:get_path(),
-    ok = rpc:call(Node1, code, add_paths, [Paths]),
+    Node1 = start_slave(ct1),
     CtOpts = [{label, Name} | Test],
     Result = rpc:call(Node1, ?MODULE, ct_run_test, [CtOpts]),
 
@@ -235,6 +233,18 @@ run_config_test({Name, Variables}, Test, N, Tests) ->
             throw({ct_error, Reason});
         {Ok, Failed, {UserSkipped, AutoSkipped}} ->
             {ok, {Ok, Failed, UserSkipped, AutoSkipped}}
+    end.
+
+start_slave(Name) ->
+    Opts = ct_slave_opts(),
+    case timer:tc(fun() -> ct_slave:start(Name, Opts) end) of
+        {Time, {ok, Node}} ->
+            io:format("Starting slave took ~p milliseconds", [Time div 1000]),
+            Paths = code:get_path(),
+            ok = rpc:call(Node, code, add_paths, [Paths]),
+            Node;
+        Other ->
+            error({failed_to_start, Name, Other, Opts})
     end.
 
 ct_slave_opts() ->
