@@ -224,8 +224,7 @@ ct_run_test(Test) ->
 
 run_config_test({Name, Variables}, Test, N, Tests) ->
     enable_preset(Name, Variables, Test, N, Tests),
-
-    {ok, Node1} = ct_slave:start(ct1, [{monitor_master, true}, {env, os:list_env_vars()}]),
+    {ok, Node1} = ct_slave:start(ct1, ct_slave_opts()),
     Paths = code:get_path(),
     ok = rpc:call(Node1, code, add_paths, [Paths]),
     CtOpts = [{label, Name} | Test],
@@ -237,6 +236,13 @@ run_config_test({Name, Variables}, Test, N, Tests) ->
         {Ok, Failed, {UserSkipped, AutoSkipped}} ->
             {ok, {Ok, Failed, UserSkipped, AutoSkipped}}
     end.
+
+ct_slave_opts() ->
+    [{monitor_master, true},
+     {env, os:list_env_vars()},
+     {boot_timeout, 15}, %% seconds
+     {init_timeout, 10}, %% seconds
+     {startup_timeout, 10}]. %% seconds
 
 enable_preset(Name, PresetVars, Test, N, Tests) ->
     %% TODO: Do this with a multicall, otherwise it's not as fast as possible (not parallelized).
