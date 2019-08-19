@@ -222,7 +222,7 @@ do_run_quick_test(Test, CoverOpts) ->
 
 ct_run_test(Test) ->
     load_test_modules(Test),
-    ct:run_test([{label, Name} | Test]).
+    ct:run_test(Test).
 
 run_config_test({Name, Variables}, Test, N, Tests) ->
     enable_preset(Name, Variables, Test, N, Tests),
