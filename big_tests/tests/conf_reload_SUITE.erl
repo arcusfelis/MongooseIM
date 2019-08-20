@@ -156,8 +156,8 @@ unregister_user_by_ejabberd_admin(User, Host) ->
     rpc(mim(), ejabberd_admin, unregister, [User, Host]).
 
 change_domain_in_config_file(Config) ->
-    ejabberd_node_utils:modify_config_file(
-      [mk_value_for_hosts_pattern(?RELOADED_DOMAIN)], Config).
+    Vars = [mk_value_for_hosts_pattern(?RELOADED_DOMAIN)],
+    ejabberd_node_utils:modify_config_file(Vars, Config).
 
 mk_value_for_hosts_pattern(Domain) ->
     {hosts, "[\"" ++ binary_to_list(Domain) ++ "\"]"}.
