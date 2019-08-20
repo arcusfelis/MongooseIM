@@ -83,7 +83,7 @@
 %% {userconfig, {ct_config_plain, ["test.config"]}}.
 
 %% But we use config with preprocessing:
-{userconfig, {mim_ct_config, ["test.config"]}}.
+%%{userconfig, {mim_ct_config, ["test.config"]}}.
 
 {logdir, "ct_report"}.
 
