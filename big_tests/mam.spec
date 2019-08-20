@@ -16,7 +16,6 @@
 {suites, "tests", mongoose_cassandra_SUITE}.
 {suites, "tests", mongoose_elasticsearch_SUITE}.
 
-{userconfig, {mim_ct_config, ["test.config"]}}.
 {logdir, "ct_report"}.
 
 %% ct_tty_hook will log CT failures to TTY verbosely
