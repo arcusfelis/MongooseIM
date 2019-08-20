@@ -25,7 +25,7 @@
     file_exists/1, file_exists/2,
     backup_config_file/1, backup_config_file/2,
     restore_config_file/1, restore_config_file/2,
-    modify_config_file/2, modify_config_file/4,
+    modify_config_file/2,
     get_cwd/2]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -41,9 +41,6 @@ backup_config_path(Node, Config) ->
 
 config_template_path(Config) ->
     filename:join([path_helper:repo_dir(Config), "rel", "files", "mongooseim.cfg"]).
-
-config_vars_path(File, Config) ->
-    filename:join([path_helper:repo_dir(Config), "rel", File]).
 
 ctl_path(Node, Config) ->
     filename:join([cwd(Node, Config), "bin", "mongooseimctl"]).
@@ -148,35 +145,13 @@ file_exists(Node, Filename) ->
       Value :: string().
 modify_config_file(CfgVarsToChange, Config) ->
     Node = ct:get_config({hosts, mim, node}),
-    VarsFile = ct:get_config({hosts, mim, vars}),
-    modify_config_file(Node, VarsFile, CfgVarsToChange, Config).
-
--spec modify_config_file(node(), string(), [{ConfigVariable, Value}], ct_config()) -> ok when
-      ConfigVariable :: atom(),
-      Value :: string().
-modify_config_file(Node, VarsFile, CfgVarsToChange, Config) ->
+    Vars = maps:from_list(ct:get_config({hosts, mim})),
+    FinalVars = maps:merge(Vars, maps:from_list(CfgVarsToChange)),
     CurrentCfgPath = current_config_path(Node, Config),
     {ok, CfgTemplate} = file:read_file(config_template_path(Config)),
-    CfgVarsPath = config_vars_path("vars.config", Config),
-    {ok, DefaultVars} = file:consult(CfgVarsPath),
-    {ok, NodeVars} = file:consult(config_vars_path(VarsFile, Config)),
-    PresetVars = case proplists:get_value(preset, Config) of
-                     undefined ->
-                         [];
-                     Name ->
-                         Presets = ct:get_config(ejabberd_presets),
-                         proplists:get_value(list_to_existing_atom(Name), Presets)
-                 end,
-    CfgVars1 = dict:to_list(dict:merge(fun(_, V, _) -> V end,
-                                       dict:from_list(NodeVars),
-                                       dict:from_list(DefaultVars))),
-    CfgVars = dict:to_list(dict:merge(fun(_, V, _) -> V end,
-                                      dict:from_list(PresetVars),
-                                      dict:from_list(CfgVars1))),
-    UpdatedCfgVars = update_config_variables(CfgVarsToChange, CfgVars),
     %% Render twice to replace variables in variables
-    UpdatedCfgFileTmp = bbmustache:render(CfgTemplate, UpdatedCfgVars, [{key_type, atom}]),
-    UpdatedCfgFile = bbmustache:render(UpdatedCfgFileTmp, UpdatedCfgVars, [{key_type, atom}]),
+    UpdatedCfgFileTmp = bbmustache:render(CfgTemplate, FinalVars, [{key_type, atom}]),
+    UpdatedCfgFile = bbmustache:render(UpdatedCfgFileTmp, FinalVars, [{key_type, atom}]),
     ok = ejabberd_node_utils:call_fun(Node, file, write_file, [CurrentCfgPath, UpdatedCfgFile]).
 
 -spec get_cwd(node(), ct_config()) -> string().
@@ -190,8 +165,3 @@ get_cwd(Node, Config) ->
 set_ejabberd_node_cwd(Node, Config) ->
     {ok, Cwd} = call_fun(Node, file, get_cwd, []),
     [{{ejabberd_cwd, Node}, Cwd} | Config].
-
-update_config_variables(CfgVarsToChange, CfgVars) ->
-    lists:foldl(fun({Var, Val}, Acc) ->
-                        lists:keystore(Var, 1, Acc,{Var, Val})
-                end, CfgVars, CfgVarsToChange).
