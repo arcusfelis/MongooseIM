@@ -196,9 +196,9 @@ run_test(Test, PresetsToRun, CoverOpts) ->
 get_ct_config(Opts) ->
     Spec = proplists:get_value(spec, Opts),
     Props = read_file(Spec),
-    ConfigFile = case proplists:lookup(config, Props) of
-        {config, [Config]} -> Config;
-        _                  -> "test.config"
+    ConfigFile = case proplists:lookup(userconfig, Props) of
+        {userconfig, {_Driver, [Config]}} -> Config;
+        _                                  -> "test.config"
     end,
     {ok, ConfigProps} = handle_file_error(ConfigFile, file:consult(ConfigFile)),
     {ConfigFile, ConfigProps}.
@@ -209,8 +209,7 @@ preset_names(Presets) ->
 do_run_quick_test(Test, CoverOpts) ->
     ensure_nodes_running(Test),
     prepare_cover(Test, CoverOpts),
-    load_test_modules(Test),
-    Result = ct:run_test(Test),
+    Result = ct_run_test(Test),
     case Result of
         {error, Reason} ->
             throw({ct_error, Reason});
