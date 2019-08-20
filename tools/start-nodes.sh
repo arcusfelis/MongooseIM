@@ -7,6 +7,8 @@
 # Stop script on an error
 set -e
 
+exit 0
+
 # We use BASE and DEV_NODES_ARRAY variables from here
 source tools/travis-common-vars.sh
 
