@@ -79,7 +79,12 @@
 {suites, "tests", mongoose_elasticsearch_SUITE}.
 {suites, "tests", sasl_external_SUITE}.
 
-{config, ["test.config"]}.
+%% Default config reader is:
+%% {userconfig, {ct_config_plain, ["test.config"]}}.
+
+%% But we use config with preprocessing:
+{userconfig, {mim_ct_config, ["test.config"]}}.
+
 {logdir, "ct_report"}.
 
 %% ct_tty_hook will log CT failures to TTY verbosely
