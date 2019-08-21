@@ -28,7 +28,15 @@ run(RunConfig) ->
     mim_ct_cover:analyze_cover(RunConfig1),
     {Result, [TestConfig]}.
 
-ct_run(RunConfig = #{test_spec := TestSpec, test_config := TestConfigFile, test_config_out := TestConfigFileOut}) ->
+ct_run(RunConfig) ->
+    try
+        do_ct_run(RunConfig)
+    catch Class:Reason ->
+              Stacktrace = erlang:get_stacktrace(),
+              { {error, {Class, Reason, Stacktrace}}, RunConfig }
+    end.
+
+do_ct_run(RunConfig = #{test_spec := TestSpec, test_config := TestConfigFile, test_config_out := TestConfigFileOut}) ->
     mim_ct_preload:load_test_modules(TestSpec),
     {ok, TestConfig} = file:consult(TestConfigFile),
     %% RunConfig overrides TestConfig
@@ -52,7 +60,8 @@ init_hosts(TestConfig) ->
     TestConfig1 = load_hosts(TestConfig),
     io:format("all hosts loaded~n", []),
     TestConfig2 = mim_ct_ports:rewrite_ports(TestConfig1),
-    make_hosts(TestConfig2).
+    TestConfig3 = add_prefix(TestConfig2),
+    make_hosts(TestConfig3).
 
 load_hosts(TestConfig = #{hosts := Hosts}) ->
     Hosts2 = [{HostId, maps:to_list(load_host(HostId, maps:from_list(HostConfig), TestConfig))} || {HostId, HostConfig} <- Hosts],
@@ -62,8 +71,8 @@ make_hosts(TestConfig = #{hosts := Hosts}) ->
     Hosts2 = [{HostId, maps:to_list(make_host(HostId, maps:from_list(HostConfig)))} || {HostId, HostConfig} <- Hosts],
     TestConfig#{hosts => Hosts2}.
 
-load_host(HostId, HostConfig, TestConfig = #{repo_dir := RepoDir}) ->
-    HostConfig1 = HostConfig#{repo_dir => RepoDir, build_dir => "_build/ng" ++ atom_to_list(HostId), prototype_dir => "_build/mim1"},
+load_host(HostId, HostConfig, TestConfig = #{repo_dir := RepoDir, prefix := Prefix}) ->
+    HostConfig1 = HostConfig#{repo_dir => RepoDir, build_dir => "_build/" ++ Prefix ++ atom_to_list(HostId), prototype_dir => "_build/mim1", prefix => Prefix},
     Result = mim_node:load(maybe_add_preset(HostConfig1, TestConfig), TestConfig),
     io:format("~p loaded~n", [HostId]),
     Result.
@@ -101,3 +110,25 @@ get_existing(Key, Proplist) ->
         _ ->
             error({not_found, Key, Proplist})
     end.
+
+add_prefix(TestConfig = #{prefix := Prefix}) ->
+    add_prefix_to_opts([ejabberd_node, ejabberd2_node], Prefix, TestConfig);
+add_prefix(TestConfig) ->
+    TestConfig.
+
+add_prefix_to_opts([Opt|Opts], Prefix, TestConfig) ->
+    add_prefix_to_opts(Opts, Prefix, add_prefix_to_opt(Opt, Prefix, TestConfig));
+add_prefix_to_opts([], _Prefix, TestConfig) ->
+    TestConfig.
+
+add_prefix_to_opt(Opt, Prefix, TestConfig) ->
+    case maps:find(Opt, TestConfig) of
+        {ok, Value} ->
+            Value2 = add_prefix(Prefix, Value),
+            TestConfig#{Opt => Value2};
+        error ->
+            TestConfig
+    end.
+
+add_prefix(Prefix, Value) when is_atom(Value) ->
+    list_to_atom(Prefix ++ atom_to_list(Value)).

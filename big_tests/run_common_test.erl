@@ -65,9 +65,11 @@ run(#opts{test = quick, cover = Cover, spec = Spec}) ->
 run(#opts{test = full, spec = Spec, preset = [Preset|_], cover = Cover}) ->
     Master = #{cover_enabled => true, cover_lib_dir => "_build/mim1/lib/mongooseim/ebin/",
                repo_dir => path_helper:repo_dir([]), auto_compile => auto_compile()},
-    Job = #{test_spec => atom_to_list(Spec), test_config => "test.config", test_config_out => "_build/test.config",
-                         first_port => 6000, preset => Preset, slave_node => ct1},
-    Result = mim_ct:run_jobs(Master, [Job]),
+    Job1 = #{test_spec => "default1.spec", test_config => "test.config", test_config_out => "_build/test1.config",
+                         first_port => 6000, preset => Preset, slave_node => ct1, prefix => "ng1"},
+    Job2 = #{test_spec => "default2.spec", test_config => "test.config", test_config_out => "_build/test2.config",
+                         first_port => 7000, preset => Preset, slave_node => ct2, prefix => "ng2"},
+    Result = mim_ct:run_jobs(Master, [Job1, Job2]),
     case Result of
     {ok, _} ->
         init:stop(0);
