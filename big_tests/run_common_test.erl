@@ -63,11 +63,11 @@ main(RawArgs) ->
 run(#opts{test = quick, cover = Cover, spec = Spec}) ->
     error(todo);
 run(#opts{test = full, spec = Spec, preset = [Preset|_], cover = Cover}) ->
-    Result = mim_ct:run(#{test_spec => atom_to_list(Spec), test_config => "test.config", test_config_out => "_build/test.config",
-                         cover_enabled => true, cover_lib_dir => "_build/mim1/lib/mongooseim/ebin/",
-                         repo_dir => path_helper:repo_dir([]),
-                         first_port => 6000, preset => Preset,
-                         auto_compile => auto_compile()}),
+    Master = #{cover_enabled => true, cover_lib_dir => "_build/mim1/lib/mongooseim/ebin/",
+               repo_dir => path_helper:repo_dir([]), auto_compile => auto_compile()},
+    Job = #{test_spec => atom_to_list(Spec), test_config => "test.config", test_config_out => "_build/test.config",
+                         first_port => 6000, preset => Preset, slave_node => ct1},
+    Result = mim_ct:run_jobs(Master, [Job]),
     case Result of
     {ok, _} ->
         init:stop(0);

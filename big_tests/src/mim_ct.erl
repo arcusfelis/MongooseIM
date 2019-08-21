@@ -1,12 +1,31 @@
 -module(mim_ct).
 -export([run/1]).
+-export([run_jobs/2]).
 
-run(RunConfig = #{test_spec := TestSpec, test_config := TestConfigFile, test_config_out := TestConfigFileOut}) ->
+-export([ct_run/1]).
+
+
+run_jobs(MasterConfig, JobConfigs) ->
+    MasterConfig1 = mim_ct_cover:start_cover(MasterConfig),
+    HelperState = mim_ct_helper:before_start(),
+    JobResults = mim_ct_parallel:parallel_map(fun(Job) -> do_job(MasterConfig1, Job) end, JobConfigs),
+    GoodResults = [GoodResult || {ok, GoodResult} <- JobResults],
+    {CtResults, TestConfigs} = lists:unzip(GoodResults),
+    Result = mim_ct_helper:after_test(CtResults, HelperState),
+    mim_ct_cover:analyze_cover(MasterConfig1),
+    {Result, TestConfigs}.
+
+do_job(MasterConfig, Job = #{slave_node := SlaveName}) ->
+    RunConfig = maps:merge(MasterConfig, Job),
+    Node = mim_ct_master:start_slave(SlaveName),
+    rpc:call(Node, mim_ct, ct_run, [RunConfig]).
+
+run(RunConfig) ->
     RunConfig1 = mim_ct_cover:start_cover(RunConfig),
     HelperState = mim_ct_helper:before_start(),
     {CtResult, TestConfig} = ct_run(RunConfig1),
     Result = mim_ct_helper:after_test([CtResult], HelperState),
-    mim_ct_cover:analyze_cover(RunConfig),
+    mim_ct_cover:analyze_cover(RunConfig1),
     {Result, [TestConfig]}.
 
 ct_run(RunConfig = #{test_spec := TestSpec, test_config := TestConfigFile, test_config_out := TestConfigFileOut}) ->
