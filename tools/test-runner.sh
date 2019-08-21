@@ -268,10 +268,6 @@ DBS_ARRAY=(
 
 DEV_NODES_ARRAY=(
     mim1
-    mim2
-    mim3
-    fed1
-    reg1
 )
 
 TEST_HOSTS_ARRAY=(
