@@ -24,9 +24,7 @@
 
 
 %%
-%% Entry
-%%
-
+%% Entry %% 
 -record(opts, {test,
                spec,
                cover,
@@ -69,7 +67,9 @@ run(#opts{test = full, spec = Spec, preset = [Preset|_], cover = Cover}) ->
                          first_port => 6000, preset => Preset, slave_node => ct1, prefix => "ng1"},
     Job2 = #{test_spec => "default2.spec", test_config => "test.config", test_config_out => "_build/test2.config",
                          first_port => 7000, preset => Preset, slave_node => ct2, prefix => "ng2"},
-    Result = mim_ct:run_jobs(Master, [Job1, Job2]),
+    Job3 = #{test_spec => "default3.spec", test_config => "test.config", test_config_out => "_build/test3.config",
+                         first_port => 8000, preset => Preset, slave_node => ct3, prefix => "ng3"},
+    Result = mim_ct:run_jobs(Master, [Job1, Job2, Job3]),
     case Result of
     {ok, _} ->
         init:stop(0);
