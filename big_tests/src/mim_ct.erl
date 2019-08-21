@@ -2,6 +2,7 @@
 -export([run/1]).
 
 run(RunConfig = #{test_spec := TestSpec, test_config := TestConfigFile, test_config_out := TestConfigFileOut}) ->
+    mim_ct_preload:load_test_modules(TestSpec),
     {ok, TestConfig} = file:consult(TestConfigFile),
     %% RunConfig overrides TestConfig
     TestConfig1 = maps:merge(maps:from_list(TestConfig), RunConfig),
@@ -9,7 +10,9 @@ run(RunConfig = #{test_spec := TestSpec, test_config := TestConfigFile, test_con
     TestConfig3 = init_hosts(TestConfig2),
     TestConfigFileOut2 = filename:absname(TestConfigFileOut, path_helper:test_dir([])),
     ok = write_terms(TestConfigFileOut, mim_ct_config_ports:preprocess(maps:to_list(TestConfig3))),
-    CtOpts = [{spec, TestSpec}, {userconfig, {ct_config_plain, [TestConfigFileOut2]}}],
+    CtOpts = [{spec, TestSpec},
+              {userconfig, {ct_config_plain, [TestConfigFileOut2]}}, 
+              {auto_compile, maps:get(auto_compile, RunConfig, true)}],
     HelperState = mim_ct_helper:before_start(),
     CtResult = ct:run_test(CtOpts),
     Result = mim_ct_helper:after_test([CtResult], HelperState),
@@ -74,4 +77,3 @@ get_existing(Key, Proplist) ->
         _ ->
             error({not_found, Key, Proplist})
     end.
-        
