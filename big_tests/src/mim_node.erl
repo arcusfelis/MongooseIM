@@ -11,7 +11,8 @@
 load(NodeConfig, TestConfig) ->
     NodeConfig1 = make_abs_paths(NodeConfig),
     NodeConfig2 = overlay_vars(NodeConfig1),
-    apply_preset(NodeConfig2, TestConfig).
+    NodeConfig3 = apply_preset(NodeConfig2, TestConfig),
+    apply_prefix(NodeConfig3).
 
 make(NodeConfig) ->
     NodeConfig1 = copy_release(NodeConfig),
@@ -146,3 +147,10 @@ apply_preset(NodeConfig = #{preset := PresetName, cluster := Cluster}, TestConfi
 apply_preset(NodeConfig, _TestConfig) ->
     io:format("Ignore presets", []),
     NodeConfig.
+
+apply_prefix(NodeConfig = #{node := Node, node_name := NodeName, prefix := Prefix}) ->
+    NodeConfig#{node => list_to_atom(Prefix ++ atom_to_list(Node)), node_name => Prefix ++ NodeName};
+apply_prefix(NodeConfig = #{}) ->
+    io:format("Ignore prefix", []),
+    NodeConfig.
+
