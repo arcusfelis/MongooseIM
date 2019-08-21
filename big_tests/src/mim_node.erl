@@ -1,19 +1,22 @@
 -module(mim_node).
--export([make/2]).
+-export([load/2]).
+-export([make/1]).
 
+%% Sets variables without touching anything on disk
 %% Options:
 %% - prototype_dir = "_build/name"
 %% - build_dir = "_build/name"
 %% - vars = "mim1.vars.config"
 %% - repo_dir = REPO_DIR, abs path
-make(NodeConfig, TestConfig) ->
+load(NodeConfig, TestConfig) ->
     NodeConfig1 = make_abs_paths(NodeConfig),
-    NodeConfig2 = copy_release(NodeConfig1),
-    NodeConfig3 = overlay_vars(NodeConfig2),
-    NodeConfig4 = apply_preset(NodeConfig3, TestConfig),
-    NodeConfig5 = rewrite_ports(NodeConfig4),
-    NodeConfig6 = apply_template(NodeConfig5),
-    start(NodeConfig6).
+    NodeConfig2 = overlay_vars(NodeConfig1),
+    apply_preset(NodeConfig2, TestConfig).
+
+make(NodeConfig) ->
+    NodeConfig1 = copy_release(NodeConfig),
+    NodeConfig2 = apply_template(NodeConfig1),
+    start(NodeConfig2).
 
 start(NodeConfig = #{build_dir := BuildDir}) ->
     Ctl = filename:join(BuildDir, "rel/mongooseim/bin/mongooseimctl"),

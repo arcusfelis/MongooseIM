@@ -6,7 +6,7 @@ run(RunConfig = #{test_spec := TestSpec, test_config := TestConfigFile, test_con
     %% RunConfig overrides TestConfig
     TestConfig1 = maps:merge(maps:from_list(TestConfig), RunConfig),
     TestConfig2 = mim_ct_cover:start_cover(TestConfig1),
-    TestConfig3 = start_nodes(TestConfig2),
+    TestConfig3 = init_hosts(TestConfig2),
     TestConfigFileOut2 = filename:absname(TestConfigFileOut, path_helper:test_dir([])),
     ok = write_terms(TestConfigFileOut, mim_ct_config_ports:preprocess(maps:to_list(TestConfig3))),
     CtOpts = [{spec, TestSpec}, {userconfig, {ct_config_plain, [TestConfigFileOut2]}}],
@@ -21,23 +21,32 @@ write_terms(Filename, List) ->
     Text = lists:map(Format, List),
     file:write_file(Filename, Text).
 
-start_nodes(TestConfig = #{hosts := Hosts}) ->
-    Hosts1 = add_host_numbers(Hosts),
-    Hosts2 = [{HostId, maps:to_list(start_host(HostId, maps:from_list(HostConfig), TestConfig))} || {HostId, HostConfig} <- Hosts1],
+init_hosts(TestConfig) ->
+    TestConfig1 = load_hosts(TestConfig),
+    io:format("all hosts loaded~n", []),
+    TestConfig2 = mim_ct_ports:rewrite_ports(TestConfig1),
+    make_hosts(TestConfig2).
+
+load_hosts(TestConfig = #{hosts := Hosts}) ->
+    Hosts2 = [{HostId, maps:to_list(load_host(HostId, maps:from_list(HostConfig), TestConfig))} || {HostId, HostConfig} <- Hosts],
     TestConfig#{hosts => Hosts2}.
 
-start_host(HostId, HostConfig = #{host_number := HostNumber}, TestConfig = #{repo_dir := RepoDir, first_port := FirstPort}) ->
-    ReservedPortsPerHost = 100,
-    FirstHostPort = FirstPort + (HostNumber - 1) * ReservedPortsPerHost,
-    HostConfig1 = HostConfig#{repo_dir => RepoDir, build_dir => "_build/ng" ++ atom_to_list(HostId), prototype_dir => "_build/mim1", first_port => FirstHostPort},
-    Result = mim_node:make(maybe_add_preset(HostConfig1, TestConfig), TestConfig),
+make_hosts(TestConfig = #{hosts := Hosts}) ->
+    Hosts2 = [{HostId, maps:to_list(make_host(HostId, maps:from_list(HostConfig)))} || {HostId, HostConfig} <- Hosts],
+    TestConfig#{hosts => Hosts2}.
+
+load_host(HostId, HostConfig, TestConfig = #{repo_dir := RepoDir}) ->
+    HostConfig1 = HostConfig#{repo_dir => RepoDir, build_dir => "_build/ng" ++ atom_to_list(HostId), prototype_dir => "_build/mim1"},
+    Result = mim_node:load(maybe_add_preset(HostConfig1, TestConfig), TestConfig),
+    io:format("~p loaded~n", [HostId]),
+    Result.
+
+make_host(HostId, HostConfig) ->
+    Result = mim_node:make(HostConfig),
     io:format("~p started~n", [HostId]),
     Result.
 
-add_host_numbers(Hosts) ->
-    [{HostId, [{host_number, HostNum}|HostConfig]} || {HostNum, {HostId, HostConfig}} <- lists:zip(lists:seq(1, length(Hosts)), Hosts)].
-
-maybe_add_preset(HostConfig, TestConfig = #{preset := Preset}) ->
+maybe_add_preset(HostConfig, _TestConfig = #{preset := Preset}) ->
     HostConfig#{preset => Preset};
 maybe_add_preset(HostConfig, _TestConfig) ->
     HostConfig.
