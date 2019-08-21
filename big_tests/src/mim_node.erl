@@ -131,7 +131,10 @@ rewrite_ports(NodeConfig) ->
 is_port_option(K) ->
      lists:suffix("_port", atom_to_list(K)).
 
-apply_preset(NodeConfig = #{preset := PresetName}, TestConfig = #{ejabberd_presets := Presets}) ->
+apply_preset(NodeConfig = #{preset := PresetName, cluster := Cluster}, TestConfig = #{ejabberd_presets := Presets}) 
+    %% We apply preset options to `mim` and `reg` clusters
+    %% Otherwise we would receive registration conflict in s2s suite, if presets are applied for fed.
+    when Cluster =:= mim; Cluster =:= reg ->
     case proplists:get_value(PresetName, Presets) of
         undefined ->
             error(#{error => preset_not_found, preset_name => PresetName, ejabberd_presets => Presets});
