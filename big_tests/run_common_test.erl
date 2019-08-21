@@ -62,8 +62,11 @@ main(RawArgs) ->
 run(#opts{test = quick, cover = Cover, spec = Spec}) ->
     error(todo);
 run(#opts{test = full, spec = Spec, preset = [Preset|_], cover = Cover}) ->
-    Result = mim_ct:run(#{test_spec => atom_to_list(Spec), test_config => "test.config", test_config_out => "_build/test.config", cover_enabled => true, 
-                 cover_lib_dir => "_build/mim1/lib/mongooseim/ebin/", repo_dir => path_helper:repo_dir([]), first_port => 6000, preset => Preset}),
+    Result = mim_ct:run(#{test_spec => atom_to_list(Spec), test_config => "test.config", test_config_out => "_build/test.config",
+                         cover_enabled => true, cover_lib_dir => "_build/mim1/lib/mongooseim/ebin/",
+                         repo_dir => path_helper:repo_dir([]),
+                         first_port => 6000, preset => Preset,
+                         auto_compile => auto_compile()}),
     case Result of
     {ok, _} ->
         init:stop(0);
@@ -121,3 +124,14 @@ parse_bool("true") ->
     true;
 parse_bool(_) ->
     false.
+
+auto_compile() ->
+    %% Tell Common Tests that it should not compile any more files
+    %% (they are compiled by rebar)
+    case os:getenv("SKIP_AUTO_COMPILE") of
+        "true" ->
+            false;
+        _ ->
+            true
+    end.
+
