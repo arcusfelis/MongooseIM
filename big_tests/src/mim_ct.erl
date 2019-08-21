@@ -26,6 +26,7 @@ run(RunConfig) ->
     {CtResult, TestConfig} = ct_run(RunConfig1),
     Result = mim_ct_helper:after_test([CtResult], HelperState),
     mim_ct_cover:analyze_cover(RunConfig1),
+    io:format("CtResult ~p~n", [CtResult]),
     {Result, [TestConfig]}.
 
 ct_run(RunConfig) ->
