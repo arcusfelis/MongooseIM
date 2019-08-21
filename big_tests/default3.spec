@@ -11,32 +11,14 @@
 %% do not remove below SUITE if testing mongoose
 {suites, "tests", mongoose_sanity_checks_SUITE}.
 
-{suites, "tests", rdbms_SUITE}.
-{suites, "tests", race_conditions_SUITE}.
-{suites, "tests", acc_e2e_SUITE}.
-{suites, "tests", accounts_SUITE}.
-{suites, "tests", adhoc_SUITE}.
-{suites, "tests", amp_big_SUITE}.
-{suites, "tests", anonymous_SUITE}.
-{suites, "tests", bosh_SUITE}.
-{suites, "tests", carboncopy_SUITE}.
-{suites, "tests", connect_SUITE}.
-{suites, "tests", component_SUITE}.
-{suites, "tests", disco_and_caps_SUITE}.
-{suites, "tests", gdpr_SUITE}.
-{suites, "tests", inbox_SUITE}.
-{suites, "tests", jingle_SUITE}.
-{suites, "tests", last_SUITE}.
-{suites, "tests", login_SUITE}.
-{suites, "tests", mam_SUITE}.
-{suites, "tests", mod_aws_sns_SUITE}.
-{suites, "tests", mod_blocking_SUITE}.
-{suites, "tests", mod_event_pusher_rabbit_SUITE}.
-{suites, "tests", mod_http_notification_SUITE}.
-{suites, "tests", mod_http_upload_SUITE}.
-{suites, "tests", mod_ping_SUITE}.
-{suites, "tests", mod_time_SUITE}.
-{suites, "tests", mod_version_SUITE}.
+{suites, "tests", ejabberdctl_SUITE}.
+{suites, "tests", cluster_commands_SUITE}.
+{suites, "tests", conf_reload_SUITE}.
+{suites, "tests", metrics_api_SUITE}.
+{suites, "tests", metrics_c2s_SUITE}.
+{suites, "tests", metrics_roster_SUITE}.
+{suites, "tests", metrics_register_SUITE}.
+{suites, "tests", metrics_session_SUITE}.
 
 %% Default config reader is:
 %% {userconfig, {ct_config_plain, ["test.config"]}}.
