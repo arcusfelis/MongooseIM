@@ -2,22 +2,27 @@
 -export([run/1]).
 
 run(RunConfig = #{test_spec := TestSpec, test_config := TestConfigFile, test_config_out := TestConfigFileOut}) ->
+    RunConfig1 = mim_ct_cover:start_cover(RunConfig),
+    HelperState = mim_ct_helper:before_start(),
+    {CtResult, TestConfig} = ct_run(RunConfig1),
+    Result = mim_ct_helper:after_test([CtResult], HelperState),
+    mim_ct_cover:analyze_cover(RunConfig),
+    {Result, [TestConfig]}.
+
+ct_run(RunConfig = #{test_spec := TestSpec, test_config := TestConfigFile, test_config_out := TestConfigFileOut}) ->
     mim_ct_preload:load_test_modules(TestSpec),
     {ok, TestConfig} = file:consult(TestConfigFile),
     %% RunConfig overrides TestConfig
     TestConfig1 = maps:merge(maps:from_list(TestConfig), RunConfig),
-    TestConfig2 = mim_ct_cover:start_cover(TestConfig1),
+    TestConfig2 = mim_ct_cover:add_cover_node_to_hosts(TestConfig1),
     TestConfig3 = init_hosts(TestConfig2),
     TestConfigFileOut2 = filename:absname(TestConfigFileOut, path_helper:test_dir([])),
     ok = write_terms(TestConfigFileOut, mim_ct_config_ports:preprocess(maps:to_list(TestConfig3))),
     CtOpts = [{spec, TestSpec},
               {userconfig, {ct_config_plain, [TestConfigFileOut2]}}, 
               {auto_compile, maps:get(auto_compile, RunConfig, true)}],
-    HelperState = mim_ct_helper:before_start(),
     CtResult = ct:run_test(CtOpts),
-    Result = mim_ct_helper:after_test([CtResult], HelperState),
-    TestConfig4 = mim_ct_cover:analyze_cover(TestConfig3),
-    {Result, TestConfig4}.
+    {CtResult, TestConfig3}.
 
 write_terms(Filename, List) ->
     Format = fun(Term) -> io_lib:format("~tp.~n", [Term]) end,

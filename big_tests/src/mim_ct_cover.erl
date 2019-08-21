@@ -1,7 +1,11 @@
 -module(mim_ct_cover).
 -export([start_cover/1]).
 -export([analyze_cover/1]).
+-export([add_cover_node_to_hosts/1]).
 
+start_cover(TestConfig = #{cover_node := CoverNode}) ->
+    io:format("Cover is already started at node ~p~n", [CoverNode]),
+    TestConfig;
 start_cover(TestConfig = #{repo_dir := RepoDir, cover_enabled := true, cover_lib_dir := Dir}) ->
     Dir2 = filename:absname(Dir, RepoDir),
     code:add_path(Dir2),
@@ -17,11 +21,10 @@ start_cover(TestConfig = #{repo_dir := RepoDir, cover_enabled := true, cover_lib
         end),
     mim_ct_helper:report_progress("~nCover compilation took ~ts~n",
                                   [mim_ct_helper:microseconds_to_string(Time)]),
-    add_cover_node_to_hosts(node(), TestConfig);
+    add_cover_node_to_config(node(), TestConfig);
 start_cover(TestConfig = #{}) ->
     io:format("cover disabled", []),
     TestConfig.
-
 
 analyze_cover(TestConfig = #{repo_dir := RepoDir, cover_enabled := true}) ->
     %% Import small tests cover
@@ -53,7 +56,10 @@ analyze_cover(TestConfig = #{repo_dir := RepoDir, cover_enabled := true}) ->
 modules_to_analyze() ->
     lists:usort(cover:imported_modules() ++ cover:modules()).
 
-add_cover_node_to_hosts(CoverNode, TestConfig) ->
+add_cover_node_to_config(Node, TestConfig) ->
+    TestConfig#{cover_node => Node}.
+
+add_cover_node_to_hosts(TestConfig = #{cover_node := CoverNode}) ->
     add_opt_to_hosts(cover_node, CoverNode, TestConfig).
 
 add_opt_to_hosts(OptName, OptValue, TestConfig = #{hosts := Hosts}) ->
