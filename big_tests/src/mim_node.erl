@@ -41,10 +41,10 @@ wait_for_pang(Node) ->
 
 start(NodeConfig = #{build_dir := BuildDir, node := Node}) ->
     Ctl = filename:join(BuildDir, "rel/mongooseim/bin/mongooseimctl"),
-    StartResult = os:cmd(Ctl ++ " start"),
+    StartResult = erlsh:run([Ctl, "start"]),
     io:format("waiting for ~p~n", [Node]),
-    StartedResult = os:cmd(Ctl ++ " started"),
-    StatusResult = os:cmd(Ctl ++ " status"),
+    StartedResult = erlsh:run([Ctl, "started"]),
+    {_, _, StatusResult} = erlsh:run([Ctl, "status"]),
     io:format("Node status ~p~n~ts~n", [Node, StatusResult]),
     NodeConfig#{start_result => StartResult, started_result => StartedResult, status_result => StatusResult}.
 
@@ -55,11 +55,11 @@ make_abs_paths(NodeConfig = #{prototype_dir := ProtoDir, build_dir := BuildDir, 
         build_dir => filename:absname(BuildDir, RepoDir)}.
 
 copy_release(NodeConfig = #{prototype_dir := FromDir, build_dir := ToDir}) ->
-    %% FIXME escaping
-    CopyResult = os:cmd("rsync --exclude rel/mongooseim/Mnesia.* "
-           "--exclude rel/mongooseim/var "
-           "--exclude rel/mongooseim/log "
-           "-al " ++ FromDir ++ "/" ++ " " ++ ToDir ++ "/"),
+    CopyResult = erlsh:run(["rsync", 
+            "--exclude", "rel/mongooseim/Mnesia.*",
+            "--exclude", "rel/mongooseim/var",
+            "--exclude", "rel/mongooseim/log",
+            "-al", FromDir ++ "/", ToDir ++ "/"]),
     NodeConfig#{copy_result => CopyResult}.
 
 
