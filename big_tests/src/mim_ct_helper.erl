@@ -49,7 +49,9 @@ after_test(CtResults, #{before_start_dirs := CTRunDirsBeforeRun}) ->
     %% Waiting for messages to be flushed
     timer:sleep(50),
     CTRunDirsAfterRun = ct_run_dirs(),
-    ExitStatusByGroups = exit_status_by_groups(CTRunDirsBeforeRun, CTRunDirsAfterRun),
+    NewCTRunDirs = CTRunDirsAfterRun -- CTRunDirsBeforeRun,
+    print_ct_summaries(NewCTRunDirs),
+    ExitStatusByGroups = exit_status_by_groups(NewCTRunDirs),
     ExitStatusByTestCases = process_results(Results),
     case {ExitStatusByGroups, ExitStatusByTestCases} of
         {ok, ok} ->
@@ -61,14 +63,30 @@ after_test(CtResults, #{before_start_dirs := CTRunDirsBeforeRun}) ->
 ct_run_dirs() ->
     filelib:wildcard("ct_report/ct_run*").
 
-exit_status_by_groups(CTRunDirsBeforeRun, CTRunDirsAfterRun) ->
-    NewCTRunDirs = CTRunDirsAfterRun -- CTRunDirsBeforeRun,
-    case NewCTRunDirs of
+print_ct_summaries(CTRunDirs) ->
+    [print_ct_summary(CTRunDir) || CTRunDir <- CTRunDirs],
+    ok.
+
+print_ct_summary(CTRunDir) ->
+    case file:read_file(filename:join(CTRunDir, ct_summary)) of
+        {ok, <<>>} ->
+            ok;
+        {ok, Bin} ->
+            io:format("~n==========================~n~n", []),
+            io:format("print_ct_summary ~ts:~n~n~ts", [CTRunDir, Bin]),
+            io:format("~n==========================~n", []),
+            ok;
+        _ ->
+            ok
+    end.
+
+exit_status_by_groups(CTRunDirs) ->
+    case CTRunDirs of
         [] ->
             io:format("WARNING: ct_run directory has not been created~n",  []),
             ok;
         [_|_] ->
-            Results = [anaylyze_groups_runs(NewCTRunDir) || NewCTRunDir <- NewCTRunDirs],
+            Results = [anaylyze_groups_runs(CTRunDir) || CTRunDir <- CTRunDirs],
             case [X || X <- Results, X =/= ok] of
                 [] ->
                     ok;
@@ -77,8 +95,8 @@ exit_status_by_groups(CTRunDirsBeforeRun, CTRunDirsAfterRun) ->
             end
     end.
 
-anaylyze_groups_runs(LatestCTRun) ->
-    case file:consult(LatestCTRun ++ "/all_groups.summary") of
+anaylyze_groups_runs(CTRunDir) ->
+    case file:consult(CTRunDir ++ "/all_groups.summary") of
         {ok, Terms} ->
             case proplists:get_value(total_failed, Terms, undefined) of
                 undefined ->
