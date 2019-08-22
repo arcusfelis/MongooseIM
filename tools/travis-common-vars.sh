@@ -18,6 +18,7 @@ START_NODES=${START_NODES:-true}
 
 DEFAULT_DEV_NODES="mim1 mim2 mim3 fed1 reg1"
 DEV_NODES="${DEV_NODES-$DEFAULT_DEV_NODES}"
+DB_PREFIX="${DB_PREFIX-mongooseim}"
 
 # Create a bash array DEFAULT_DEV_NODES with node names
 IFS=' ' read -r -a DEV_NODES_ARRAY <<< "$DEV_NODES"
@@ -57,5 +58,5 @@ function mount_ro_volume
 
 function db_name
 {
-    echo mongooseim-$1
+    echo $DB_PREFIX-$1
 }
