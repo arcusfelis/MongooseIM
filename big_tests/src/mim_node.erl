@@ -19,8 +19,25 @@ make(NodeConfig = #{node := Node}) ->
     NodeConfig1 = copy_release(NodeConfig),
     io:format("apply_template ~p~n", [Node]),
     NodeConfig2 = apply_template(NodeConfig1),
+    NodeConfig3 = stop(NodeConfig2),
     io:format("starting ~p~n", [Node]),
-    start(NodeConfig2).
+    start(NodeConfig3).
+
+stop(NodeConfig = #{node := Node}) ->
+    StopReturns = rpc:call(Node, init, stop, []),
+    io:format("StopReturns ~p for ~p~n", [StopReturns, Node]),
+    wait_for_pang(Node),
+    io:format("wait_for_pang returns ~p~n", [Node]),
+    NodeConfig.
+
+wait_for_pang(Node) ->
+    case net_adm:ping(Node) of
+        pang ->
+            ok;
+        pong ->
+            timer:sleep(100),
+            wait_for_pang(Node)
+    end.
 
 start(NodeConfig = #{build_dir := BuildDir, node := Node}) ->
     Ctl = filename:join(BuildDir, "rel/mongooseim/bin/mongooseimctl"),
