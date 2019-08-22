@@ -6,9 +6,12 @@
 
 
 run_jobs(MasterConfig, JobConfigs) ->
-    MasterConfig1 = mim_ct_cover:start_cover(MasterConfig),
+    %% Read configs sequentially
+    JobConfigs1 = [load_test_config(Job) || Job <- JobConfigs],
+    {MasterConfig1, JobConfigs2} = mim_ct_db:init_master(MasterConfig, JobConfigs1),
+    MasterConfig2 = mim_ct_cover:start_cover(MasterConfig1),
     HelperState = mim_ct_helper:before_start(),
-    JobResults = mim_ct_parallel:parallel_map(fun(Job) -> do_job(MasterConfig1, Job) end, JobConfigs),
+    JobResults = mim_ct_parallel:parallel_map(fun(Job) -> do_job(MasterConfig2, Job) end, JobConfigs2),
     GoodResults = [GoodResult || {ok, GoodResult} <- JobResults],
     {CtResults, TestConfigs} = lists:unzip(GoodResults),
     Result = mim_ct_helper:after_test(CtResults, HelperState),
@@ -17,11 +20,13 @@ run_jobs(MasterConfig, JobConfigs) ->
 
 do_job(MasterConfig, Job = #{slave_node := SlaveName}) ->
     RunConfig = maps:merge(MasterConfig, Job),
+    RunConfig1 = mim_ct_db:init_job(RunConfig),
     Node = mim_ct_master:start_slave(SlaveName),
-    rpc:call(Node, mim_ct, ct_run, [RunConfig]).
+    rpc:call(Node, mim_ct, ct_run, [RunConfig1]).
 
 run(RunConfig) ->
-    RunConfig1 = mim_ct_cover:start_cover(RunConfig),
+    RunConfig0 = load_test_config(RunConfig),
+    RunConfig1 = mim_ct_cover:start_cover(RunConfig0),
     HelperState = mim_ct_helper:before_start(),
     {CtResult, TestConfig} = ct_run(RunConfig1),
     Result = mim_ct_helper:after_test([CtResult], HelperState),
@@ -37,12 +42,14 @@ ct_run(RunConfig) ->
               { {error, {Class, Reason, Stacktrace}}, RunConfig }
     end.
 
-do_ct_run(RunConfig = #{test_spec := TestSpec, test_config := TestConfigFile, test_config_out := TestConfigFileOut}) ->
-    mim_ct_preload:load_test_modules(TestSpec),
+load_test_config(RunConfig = #{test_config := TestConfigFile}) ->
     {ok, TestConfig} = file:consult(TestConfigFile),
     %% RunConfig overrides TestConfig
-    TestConfig1 = maps:merge(maps:from_list(TestConfig), RunConfig),
-    TestConfig2 = mim_ct_cover:add_cover_node_to_hosts(TestConfig1),
+    maps:merge(maps:from_list(TestConfig), RunConfig).
+
+do_ct_run(RunConfig = #{test_spec := TestSpec, test_config := TestConfigFile, test_config_out := TestConfigFileOut}) ->
+    mim_ct_preload:load_test_modules(TestSpec),
+    TestConfig2 = mim_ct_cover:add_cover_node_to_hosts(RunConfig),
     TestConfig3 = init_hosts(TestConfig2),
     TestConfigFileOut2 = filename:absname(TestConfigFileOut, path_helper:test_dir([])),
     ok = write_terms(TestConfigFileOut, mim_ct_config_ports:preprocess(maps:to_list(TestConfig3))),

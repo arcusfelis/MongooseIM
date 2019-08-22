@@ -628,6 +628,4 @@ echo ""
 
 ./tools/test_runner/selected-tests-to-test-spec.sh "${SELECTED_TESTS[@]}"
 
-./tools/travis-setup-db.sh
-
 ./tools/travis-test.sh
