@@ -14,16 +14,21 @@ load(NodeConfig, TestConfig) ->
     NodeConfig3 = apply_preset(NodeConfig2, TestConfig),
     apply_prefix(NodeConfig3).
 
-make(NodeConfig) ->
+make(NodeConfig = #{node := Node}) ->
+    io:format("making ~p~n", [Node]),
     NodeConfig1 = copy_release(NodeConfig),
+    io:format("apply_template ~p~n", [Node]),
     NodeConfig2 = apply_template(NodeConfig1),
+    io:format("starting ~p~n", [Node]),
     start(NodeConfig2).
 
-start(NodeConfig = #{build_dir := BuildDir}) ->
+start(NodeConfig = #{build_dir := BuildDir, node := Node}) ->
     Ctl = filename:join(BuildDir, "rel/mongooseim/bin/mongooseimctl"),
     StartResult = os:cmd(Ctl ++ " start"),
+    io:format("waiting for ~p~n", [Node]),
     StartedResult = os:cmd(Ctl ++ " started"),
     StatusResult = os:cmd(Ctl ++ " status"),
+    io:format("Node status ~p~n~ts~n", [Node, StatusResult]),
     NodeConfig#{start_result => StartResult, started_result => StartedResult, status_result => StatusResult}.
 
 
