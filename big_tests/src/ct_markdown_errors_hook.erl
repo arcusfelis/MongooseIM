@@ -22,9 +22,10 @@ id(_Opts) ->
 %% @doc Always called before any other callback function. Use this to initiate
 %% any common state.
 init(_Id, _Opts) ->
-    File = "/tmp/ct_markdown",
-    TrFile = "/tmp/ct_markdown_truncated",
-    SummaryFile = "/tmp/ct_summary",
+    CtRunDir = filename:absname(""),
+    File = filename:join(CtRunDir, "ct_markdown"),
+    TrFile = filename:join(CtRunDir, "ct_markdown_truncated"),
+    SummaryFile = filename:join(CtRunDir, "ct_summary"),
     file:write_file(File, ""),
     file:write_file(SummaryFile, ""),
     file:delete(TrFile),
