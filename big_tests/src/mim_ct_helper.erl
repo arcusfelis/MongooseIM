@@ -58,7 +58,8 @@ after_test(CtResults, #{before_start_dirs := CTRunDirsBeforeRun}) ->
         {ok, ok} ->
             ok;
         Other ->
-            {error, Other}
+            {error, #{exit_status_by_groups => ExitStatusByGroups,
+                      exit_status_by_cases => ExitStatusByTestCases}}
     end.
 
 ct_run_dirs() ->

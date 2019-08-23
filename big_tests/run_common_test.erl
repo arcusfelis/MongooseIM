@@ -79,7 +79,7 @@ run(#opts{test = full, spec = Spec, preset = [Preset|_], cover = Cover}) ->
     case Result of
     {ok, _} ->
         init:stop(0);
-    {Failed, _} ->
+    {{error, Failed}, _} ->
         io:format("run_common_test finishes~nFailed:~n~p~n", [Failed]),
         init:stop(1)
     end.
