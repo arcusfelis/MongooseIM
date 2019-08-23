@@ -7,10 +7,15 @@ init_master(MasterConfig = #{repo_dir := RepoDir}, JobConfigs) ->
     io:format("MasterDbs ~p~n", [MasterDbs]),
     F = fun(DbType) ->
             {Time, InitDbReturns} = timer:tc(fun() -> init_db(DbType, RepoDir) end),
-            {_, _, Result} = InitDbReturns,
+            {Status, _, Result} = InitDbReturns,
             io:format("DB ~p started:~n~ts~n", [DbType, Result]),
-            mim_ct_helper:report_progress("Starting database ~p took ~ts~n",
-                                          [DbType, mim_ct_helper:microseconds_to_string(Time)]),
+            case Status of
+                skip ->
+                    ok;
+                _ ->
+                    mim_ct_helper:report_progress("Starting database ~p took ~ts~n",
+                                                  [DbType, mim_ct_helper:microseconds_to_string(Time)])
+            end,
             ok
         end,
     mim_ct_parallel:parallel_map(F, MasterDbs),
@@ -25,10 +30,15 @@ init_job(TestConfig) ->
     TestConfig.
 
 init_job_dbs([Db|Dbs], TestConfig) ->
-    {Time, TestConfig2} = timer:tc(fun() -> init_job_db(Db, TestConfig) end),
-    mim_ct_helper:report_progress("Starting database ~p took ~ts~n",
-                                  [Db, mim_ct_helper:microseconds_to_string(Time)]),
-    init_job_dbs(Dbs, TestConfig2);
+    {Time, Result} = timer:tc(fun() -> init_job_db(Db, TestConfig) end),
+    case Result of
+        skip ->
+            init_job_dbs(Dbs, TestConfig);
+        TestConfig2 ->
+            mim_ct_helper:report_progress("Starting database ~p took ~ts~n",
+                                          [Db, mim_ct_helper:microseconds_to_string(Time)]),
+            init_job_dbs(Dbs, TestConfig2)
+    end;
 init_job_dbs([], TestConfig) ->
     TestConfig.
 
@@ -57,9 +67,9 @@ init_job_db(ldap, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := R
 init_job_db(redis, TestConfig = #{job_number := JobNumber, hosts := Hosts}) ->
     Hosts2 = [{HostId, lists:keystore(redis_database, 1, Host, {redis_database, JobNumber})} || {HostId, Host} <- Hosts],
     TestConfig#{hosts => Hosts2};
-init_job_db(Db, TestConfig) ->
+init_job_db(Db, _TestConfig) ->
     io:format("init_job_db: Do nothing for db ~p~n", [Db]),
-    TestConfig.
+    skip.
 
 get_ports(PortPropertyName, _TestConfig = #{hosts := Hosts}) when is_atom(PortPropertyName) ->
     %% We expect one or zero ports here
@@ -89,13 +99,13 @@ preset_to_databases(Preset, JobConfig = #{ejabberd_presets := Presets}) ->
     proplists:get_value(dbs, PresetOpts, []).
 
 init_db(mysql, _RepoDir) ->
-    {done, 0, "skip for master"};
+    {skip, 0, "skip for master"};
 init_db(pgsql, _RepoDir) ->
-    {done, 0, "skip for master"};
+    {skip, 0, "skip for master"};
 init_db(riak, _RepoDir) ->
-    {done, 0, "skip for master"};
+    {skip, 0, "skip for master"};
 init_db(ldap, _RepoDir) ->
-    {done, 0, "skip for master"};
+    {skip, 0, "skip for master"};
 init_db(DbType, RepoDir) ->
     mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], #{env => #{"DB" => atom_to_list(DbType), "DB_PREFIX" => "mim-ct1"}, cwd => RepoDir}).
 
