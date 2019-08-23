@@ -33,6 +33,11 @@ init_job_db(mysql, TestConfig = #{prefix := Prefix, hosts := Hosts}) ->
     io:format("MysqlPorts ~p~n", [MysqlPorts]),
     [setup_mysql_container(DbPort, Prefix ++ "_mim_db_" ++ integer_to_list(DbPort)) || DbPort <- MysqlPorts],
     TestConfig;
+init_job_db(pgsql, TestConfig = #{prefix := Prefix, hosts := Hosts}) ->
+    PgsqlPorts = lists:delete(none, lists:usort([proplists:get_value(pgsql_port, Host, none) || {_HostId, Host} <- Hosts])),
+    io:format("PgsqlPorts ~p~n", [PgsqlPorts]),
+    [setup_pgsql_container(DbPort, Prefix ++ "_mim_db_" ++ integer_to_list(DbPort)) || DbPort <- PgsqlPorts],
+    TestConfig;
 init_job_db(Db, TestConfig) ->
     io:format("init_job_db: Do nothing for db ~p~n", [Db]),
     TestConfig.
@@ -62,6 +67,8 @@ preset_to_databases(Preset, JobConfig = #{ejabberd_presets := Presets}) ->
 
 init_db(mysql) ->
     {done, 0, "skip"};
+init_db(pgsql) ->
+    {done, 0, "skip"};
 init_db(DbType) ->
     RepoDir = path_helper:repo_dir([]),
     mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], #{env => #{"DB" => atom_to_list(DbType), "DB_PREFIX" => "mim-ct1"}, cwd => RepoDir}).
@@ -75,4 +82,11 @@ setup_mysql_container(DbPort, Prefix) ->
     Envs =#{env => #{"DB" => "mysql", "MYSQL_PORT" => integer_to_list(DbPort), "DB_PREFIX" => "mim-ct1-" ++ Prefix}, cwd => RepoDir},
     {done, _, Result} = mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], Envs),
     io:format("Setup mysql container ~p returns ~ts~n", [DbPort, Result]),
+    ok.
+
+setup_pgsql_container(DbPort, Prefix) ->
+    RepoDir = path_helper:repo_dir([]),
+    Envs =#{env => #{"DB" => "pgsql", "PGSQL_PORT" => integer_to_list(DbPort), "DB_PREFIX" => "mim-ct1-" ++ Prefix}, cwd => RepoDir},
+    {done, _, Result} = mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], Envs),
+    io:format("Setup pgsql container ~p returns ~ts~n", [DbPort, Result]),
     ok.
