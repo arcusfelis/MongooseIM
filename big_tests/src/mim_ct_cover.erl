@@ -16,7 +16,7 @@ start_cover(TestConfig = #{repo_dir := RepoDir, cover_enabled := true, cover_lib
                             NotOk = Results -- Ok,
                             #{ok => length(Ok), failed => NotOk}
                         end),
-    mim_ct_helper:travis_fold("cover compiled output", fun() ->
+    mim_ct_helper:travis_fold("cover.out", "cover compiled output", fun() ->
             io:format("cover: compiled ~p~n", [Compiled])
         end),
     mim_ct_helper:report_progress("~nCover compilation took ~ts~n",

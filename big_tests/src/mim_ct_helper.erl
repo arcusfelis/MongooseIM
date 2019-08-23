@@ -2,7 +2,7 @@
 -export([report_time/2]).
 -export([report_progress/2]).
 -export([microseconds_to_string/1]).
--export([travis_fold/2]).
+-export([travis_fold/3]).
 
 -export([before_start/0]).
 -export([after_test/2]).
@@ -28,14 +28,15 @@ report_progress(Format, Args) ->
     Message = io_lib:format(Format, Args),
     file:write_file("/tmp/progress", Message, [append]).
 
-travis_fold(Description, Fun) ->
+travis_fold(Id, Description, Fun) ->
     case os:getenv("TRAVIS_JOB_ID") of
         false ->
             Fun();
         _ ->
-            io:format("travis_fold:start:~ts~n", [Description]),
+            io:format("travis_fold:start:~ts~n", [Id]),
+            io:format("~ts~n", [Description]),
             Result = Fun(),
-            io:format("travis_fold:end:~ts~n", [Description]),
+            io:format("travis_fold:end:~ts~n", [Id]),
             Result
     end.
 
