@@ -44,6 +44,11 @@ init_job_db(riak, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := R
     [RiakPbPort] = get_ports(riak_pb_port, TestConfig),
     setup_riak_container(RiakPort, RiakPbPort, Prefix ++ "_mim_db_" ++ integer_to_list(RiakPort), RepoDir),
     TestConfig;
+init_job_db(ldap, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := RepoDir}) ->
+    [LdapPort] = get_ports(ldap_port, TestConfig),
+    [LdapSecurePort] = get_ports(ldap_secure_port, TestConfig),
+    setup_ldap_container(LdapPort, LdapSecurePort, Prefix ++ "_mim_db_" ++ integer_to_list(LdapPort), RepoDir),
+    TestConfig;
 init_job_db(redis, TestConfig = #{job_number := JobNumber, hosts := Hosts}) ->
     Hosts2 = [{HostId, lists:keystore(redis_database, 1, Host, {redis_database, JobNumber})} || {HostId, Host} <- Hosts],
     TestConfig#{hosts => Hosts2};
@@ -84,6 +89,8 @@ init_db(pgsql, _RepoDir) ->
     {done, 0, "skip for master"};
 init_db(riak, _RepoDir) ->
     {done, 0, "skip for master"};
+init_db(ldap, _RepoDir) ->
+    {done, 0, "skip for master"};
 init_db(DbType, RepoDir) ->
     mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], #{env => #{"DB" => atom_to_list(DbType), "DB_PREFIX" => "mim-ct1"}, cwd => RepoDir}).
 
@@ -112,4 +119,14 @@ setup_riak_container(RiakPort, RiakPbPort, Prefix, RepoDir) ->
     CmdOpts = #{env => Envs, cwd => RepoDir},
     {done, _, Result} = mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], CmdOpts),
     io:format("Setup riak container ~p returns ~ts~n", [RiakPort, Result]),
+    ok.
+
+setup_ldap_container(LdapPort, LdapSecurePort, Prefix, RepoDir) ->
+    Envs = #{"DB" => "ldap", 
+            "LDAP_PORT" => integer_to_list(LdapPort),
+            "LDAP_SECURE_PORT" => integer_to_list(LdapSecurePort), 
+            "DB_PREFIX" => "mim-ct1-" ++ Prefix},
+    CmdOpts = #{env => Envs, cwd => RepoDir},
+    {done, _, Result} = mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], CmdOpts),
+    io:format("Setup ldap container ~p returns ~ts~n", [LdapPort, Result]),
     ok.
