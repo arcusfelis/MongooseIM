@@ -2,10 +2,10 @@
 -export([init_master/2]).
 -export([init_job/1]).
 
-init_master(MasterConfig, JobConfigs) ->
+init_master(MasterConfig = #{repo_dir := RepoDir}, JobConfigs) ->
     MasterDbs = get_databases(MasterConfig, JobConfigs),
     io:format("MasterDbs ~p~n", [MasterDbs]),
-    Results = [init_db(DbType) || DbType <- MasterDbs],
+    Results = [init_db(DbType, RepoDir) || DbType <- MasterDbs],
     [io:format("DB ~p started:~n~ts~n", [DbType, Result]) || {DbType, {_, _, Result}} <- lists:zip(MasterDbs, Results)],
     {MasterConfig, JobConfigs}.
 
@@ -21,22 +21,22 @@ init_job_dbs([Db|Dbs], TestConfig) ->
 init_job_dbs([], TestConfig) ->
     TestConfig.
 
-init_job_db(mssql, TestConfig = #{prefix := Prefix}) ->
+init_job_db(mssql, TestConfig = #{prefix := Prefix, repo_dir := RepoDir}) ->
     DbName = Prefix ++ "_mim_db",
-    setup_mssql_database(DbName),
+    setup_mssql_database(DbName, RepoDir),
     TestConfig#{mssql_database => DbName};
-init_job_db(mysql, TestConfig = #{prefix := Prefix, hosts := Hosts}) ->
+init_job_db(mysql, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := RepoDir}) ->
     [DbPort] = get_ports(mysql_port, TestConfig),
-    setup_pgsql_container(DbPort, Prefix ++ "_mim_db_" ++ integer_to_list(DbPort)),
+    setup_mysql_container(DbPort, Prefix ++ "_mim_db_" ++ integer_to_list(DbPort), RepoDir),
     TestConfig;
-init_job_db(pgsql, TestConfig = #{prefix := Prefix, hosts := Hosts}) ->
+init_job_db(pgsql, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := RepoDir}) ->
     [DbPort] = get_ports(pgsql_port, TestConfig),
-    setup_pgsql_container(DbPort, Prefix ++ "_mim_db_" ++ integer_to_list(DbPort)),
+    setup_pgsql_container(DbPort, Prefix ++ "_mim_db_" ++ integer_to_list(DbPort), RepoDir),
     TestConfig;
-init_job_db(riak, TestConfig = #{prefix := Prefix, hosts := Hosts}) ->
+init_job_db(riak, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := RepoDir}) ->
     [RiakPort] = get_ports(riak_port, TestConfig),
     [RiakPbPort] = get_ports(riak_pb_port, TestConfig),
-    setup_riak_container(RiakPort, RiakPbPort, Prefix ++ "_mim_db_" ++ integer_to_list(RiakPort)),
+    setup_riak_container(RiakPort, RiakPbPort, Prefix ++ "_mim_db_" ++ integer_to_list(RiakPort), RepoDir),
     TestConfig;
 init_job_db(redis, TestConfig = #{job_number := JobNumber, hosts := Hosts}) ->
     Hosts2 = [{HostId, lists:keystore(redis_database, 1, Host, {redis_database, JobNumber})} || {HostId, Host} <- Hosts],
@@ -72,38 +72,33 @@ preset_to_databases(Preset, JobConfig = #{ejabberd_presets := Presets}) ->
     PresetOpts =  proplists:get_value(Preset, Presets, []),
     proplists:get_value(dbs, PresetOpts, []).
 
-init_db(mysql) ->
+init_db(mysql, _RepoDir) ->
     {done, 0, "skip for master"};
-init_db(pgsql) ->
+init_db(pgsql, _RepoDir) ->
     {done, 0, "skip for master"};
-init_db(riak) ->
+init_db(riak, _RepoDir) ->
     {done, 0, "skip for master"};
-init_db(DbType) ->
-    RepoDir = path_helper:repo_dir([]),
+init_db(DbType, RepoDir) ->
     mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], #{env => #{"DB" => atom_to_list(DbType), "DB_PREFIX" => "mim-ct1"}, cwd => RepoDir}).
 
-setup_mssql_database(DbName) ->
-    RepoDir = path_helper:repo_dir([]),
+setup_mssql_database(DbName, RepoDir) ->
     mim_ct_sh:run([filename:join([RepoDir, "tools", "setup-mssql-database.sh"])], #{env => #{"DB_NAME" => DbName, "DB_PREFIX" => "mim-ct1"}, cwd => RepoDir}).
 
-setup_mysql_container(DbPort, Prefix) ->
-    RepoDir = path_helper:repo_dir([]),
+setup_mysql_container(DbPort, Prefix, RepoDir) ->
     Envs = #{"DB" => "mysql", "MYSQL_PORT" => integer_to_list(DbPort), "DB_PREFIX" => "mim-ct1-" ++ Prefix},
     CmdOpts = #{env => Envs, cwd => RepoDir},
     {done, _, Result} = mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], CmdOpts),
     io:format("Setup mysql container ~p returns ~ts~n", [DbPort, Result]),
     ok.
 
-setup_pgsql_container(DbPort, Prefix) ->
-    RepoDir = path_helper:repo_dir([]),
+setup_pgsql_container(DbPort, Prefix, RepoDir) ->
     Envs = #{"DB" => "pgsql", "PGSQL_PORT" => integer_to_list(DbPort), "DB_PREFIX" => "mim-ct1-" ++ Prefix},
     CmdOpts = #{env => Envs, cwd => RepoDir},
     {done, _, Result} = mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], CmdOpts),
     io:format("Setup pgsql container ~p returns ~ts~n", [DbPort, Result]),
     ok.
 
-setup_riak_container(RiakPort, RiakPbPort, Prefix) ->
-    RepoDir = path_helper:repo_dir([]),
+setup_riak_container(RiakPort, RiakPbPort, Prefix, RepoDir) ->
     Envs = #{"DB" => "riak", 
             "RIAK_PORT" => integer_to_list(RiakPort),
             "RIAK_PB_PORT" => integer_to_list(RiakPbPort), 
