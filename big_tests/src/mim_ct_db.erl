@@ -38,6 +38,9 @@ init_job_db(pgsql, TestConfig = #{prefix := Prefix, hosts := Hosts}) ->
     io:format("PgsqlPorts ~p~n", [PgsqlPorts]),
     [setup_pgsql_container(DbPort, Prefix ++ "_mim_db_" ++ integer_to_list(DbPort)) || DbPort <- PgsqlPorts],
     TestConfig;
+init_job_db(redis, TestConfig = #{job_number := JobNumber, hosts := Hosts}) ->
+    Hosts2 = [{HostId, lists:keystore(redis_database, 1, Host, {redis_database, JobNumber})} || {HostId, Host} <- Hosts],
+    TestConfig#{hosts => Hosts2};
 init_job_db(Db, TestConfig) ->
     io:format("init_job_db: Do nothing for db ~p~n", [Db]),
     TestConfig.
