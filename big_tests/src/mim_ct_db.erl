@@ -5,8 +5,14 @@
 init_master(MasterConfig = #{repo_dir := RepoDir}, JobConfigs) ->
     MasterDbs = get_databases(MasterConfig, JobConfigs),
     io:format("MasterDbs ~p~n", [MasterDbs]),
+    F = fun(DbType) ->
+        {_, _, Result} = init_db(DbType, RepoDir),
+        io:format("DB ~p started:~n~ts~n", [DbType, Result]),
+        ok
+        end,
+    mim_ct_parallel:parallel_map(F, MasterDbs),
     Results = [init_db(DbType, RepoDir) || DbType <- MasterDbs],
-    [io:format("DB ~p started:~n~ts~n", [DbType, Result]) || {DbType, {_, _, Result}} <- lists:zip(MasterDbs, Results)],
+    io:format("init_master results are ~p~n", [Results]),
     {MasterConfig, JobConfigs}.
 
 init_job(TestConfig = #{preset := Preset}) ->
