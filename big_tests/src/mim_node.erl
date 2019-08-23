@@ -109,12 +109,33 @@ validate_term_file(RelDir, TermFile) ->
         {ok, _} ->
             ok;
         Other ->
+            print_file_with_lines(FilePath),
             error({validate_term_file_failed, [
                     {filename, FilePath},
                     {reason, Other}]
                   })
                     
     end.
+
+print_file_with_lines(FilePath) ->
+    case file:read_file(FilePath) of
+        {ok, Bin} ->
+            io:format("print_file_with_lines ~ts:~n~ts~n", [FilePath, format_with_line_numbers(Bin)]),
+            ok;
+        Other ->
+            Other
+    end.
+
+format_with_line_numbers(Bin) ->
+    LinesWithNumbers = enumerate(lines(Bin)),
+    [io_lib:format("~p: ~ts~n", [LineNum, LineText]) 
+     || {LineNum, LineText} <- LinesWithNumbers].
+
+enumerate(List) ->
+    lists:zip(lists:seq(1, length(List)), List).
+
+lines(Bin) ->
+    binary:split(Bin, [<<"\n">>, <<"\r">>], [global]).
 
 overlay_vars(NodeConfig = #{vars := VarsFile, repo_dir := RepoDir}) ->
     Vars = consult_map(filename:absname("rel/vars.config", RepoDir)),
