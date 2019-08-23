@@ -20,9 +20,11 @@ make(NodeConfig = #{node := Node}) ->
     io:format("apply_template ~p~n", [Node]),
     NodeConfig2 = apply_template(NodeConfig1),
     NodeConfig3 = stop(NodeConfig2),
+    %% Start with clean logs
+    NodeConfig4 = clean_logs(NodeConfig3),
     io:format("starting ~p~n", [Node]),
-    NodeConfig4 = start(NodeConfig3),
-    assert_node_running(NodeConfig4).
+    NodeConfig5 = start(NodeConfig4),
+    assert_node_running(NodeConfig5).
 
 stop(NodeConfig = #{node := Node}) ->
     StopReturns = rpc:call(Node, init, stop, []),
@@ -52,9 +54,13 @@ assert_node_running(NodeConfig = #{node := Node, build_dir := BuildDir}) ->
 
 print_logs(BuildDir) ->
     LogDir = filename:join(BuildDir, "rel/mongooseim/log"),
-    {ok, LogFiles} = file:list_dir(LogDir),
-    LogFiles1 = lists:sort(LogFiles),
-    [print_log_file(filename:join(LogDir, LogFile)) || LogFile <- LogFiles1].
+    case file:list_dir(LogDir) of
+        {ok, LogFiles} ->
+            LogFiles1 = lists:sort(LogFiles),
+            [print_log_file(Node, filename:join(LogDir, LogFile)) || LogFile <- LogFiles1];
+        Other ->
+            io:format("No logs in ~p - ~p~n", [LogDir, Other])
+    end.
 
 print_log_file(LogFile) ->
     F = fun() ->
@@ -66,6 +72,17 @@ print_log_file(LogFile) ->
             end
         end,
     mim_ct_helper:travis_fold("Log " ++ LogFile, F).
+
+clean_logs(NodeConfig = #{build_dir := BuildDir}) ->
+    LogDir = filename:join(BuildDir, "rel/mongooseim/log"),
+    case file:list_dir(LogDir) of
+        {ok, LogFiles} ->
+            [file:delete(filename:join(LogDir, LogFile)) || LogFile <- LogFiles],
+            NodeConfig;
+        _ ->
+            %% Directory does not exist
+            NodeConfig
+    end.
 
 start(NodeConfig = #{build_dir := BuildDir, node := Node}) ->
     Ctl = filename:join(BuildDir, "rel/mongooseim/bin/mongooseimctl"),
