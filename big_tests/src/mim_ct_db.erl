@@ -6,9 +6,12 @@ init_master(MasterConfig = #{repo_dir := RepoDir}, JobConfigs) ->
     MasterDbs = get_databases(MasterConfig, JobConfigs),
     io:format("MasterDbs ~p~n", [MasterDbs]),
     F = fun(DbType) ->
-        {_, _, Result} = init_db(DbType, RepoDir),
-        io:format("DB ~p started:~n~ts~n", [DbType, Result]),
-        ok
+            {Time, InitDbReturns} = timer:tc(fun() -> init_db(DbType, RepoDir) end),
+            {_, _, Result} = InitDbReturns,
+            io:format("DB ~p started:~n~ts~n", [DbType, Result]),
+            mim_ct_helper:report_progress("Starting database ~p took ~ts~n",
+                                          [DbType, mim_ct_helper:microseconds_to_string(Time)]),
+            ok
         end,
     mim_ct_parallel:parallel_map(F, MasterDbs),
     Results = [init_db(DbType, RepoDir) || DbType <- MasterDbs],
@@ -22,7 +25,9 @@ init_job(TestConfig) ->
     TestConfig.
 
 init_job_dbs([Db|Dbs], TestConfig) ->
-    TestConfig2 = init_job_db(Db, TestConfig),
+    {Time, TestConfig2} = timer:tc(fun() -> init_job_db(Db, TestConfig) end),
+    mim_ct_helper:report_progress("Starting database ~p took ~ts~n",
+                                  [Db, mim_ct_helper:microseconds_to_string(Time)]),
     init_job_dbs(Dbs, TestConfig2);
 init_job_dbs([], TestConfig) ->
     TestConfig.
