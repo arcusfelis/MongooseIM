@@ -165,9 +165,9 @@ write_stats_into_vars_file(Stats) ->
 %%
 %%     {Ok, Failed, UserSkipped, AutoSkipped}
 %%
-exit_code({Ok, Failed, _UserSkipped, AutoSkipped})
+exit_code({Ok, Failed, UserSkipped, AutoSkipped})
   when Ok == 0; Failed > 0; AutoSkipped > 0 ->
-    {error, failed};
+    {error, #{ok => Ok, failed => Failed, user_skipped => UserSkipped, auto_skipped => AutoSkipped}};
 exit_code({_, _, _, _}) ->
     ok.
 
