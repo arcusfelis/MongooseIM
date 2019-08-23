@@ -7,7 +7,7 @@
 
 run_jobs(MasterConfig, JobConfigs) ->
     %% Read configs sequentially
-    JobConfigs1 = [load_test_config(Job) || Job <- JobConfigs],
+    JobConfigs1 = [load_test_config(Job) || Job <- add_job_numbers(JobConfigs)],
     {MasterConfig1, JobConfigs2} = mim_ct_db:init_master(MasterConfig, JobConfigs1),
     MasterConfig2 = mim_ct_cover:start_cover(MasterConfig1),
     HelperState = mim_ct_helper:before_start(),
@@ -20,9 +20,8 @@ run_jobs(MasterConfig, JobConfigs) ->
 
 do_job(MasterConfig, Job = #{slave_node := SlaveName}) ->
     RunConfig = maps:merge(MasterConfig, Job),
-    RunConfig1 = mim_ct_db:init_job(RunConfig),
     Node = mim_ct_master:start_slave(SlaveName),
-    rpc:call(Node, mim_ct, ct_run, [RunConfig1]).
+    rpc:call(Node, mim_ct, ct_run, [RunConfig]).
 
 run(RunConfig) ->
     RunConfig0 = load_test_config(RunConfig),
@@ -68,8 +67,9 @@ init_hosts(TestConfig) ->
     TestConfig1 = load_hosts(TestConfig),
     io:format("all hosts loaded~n", []),
     TestConfig2 = mim_ct_ports:rewrite_ports(TestConfig1),
-    TestConfig3 = add_prefix(TestConfig2),
-    make_hosts(TestConfig3).
+    TestConfig3 = mim_ct_db:init_job(TestConfig2),
+    TestConfig4 = add_prefix(TestConfig3),
+    make_hosts(TestConfig4).
 
 load_hosts(TestConfig = #{hosts := Hosts}) ->
     Hosts2 = [{HostId, maps:to_list(load_host(HostId, maps:from_list(HostConfig), TestConfig))} || {HostId, HostConfig} <- Hosts],
@@ -147,3 +147,11 @@ add_prefix_to_opt(Opt, Prefix, TestConfig) ->
 
 add_prefix(Prefix, Value) when is_atom(Value) ->
     list_to_atom(Prefix ++ atom_to_list(Value)).
+
+add_job_numbers(JobConfigs) ->
+    add_job_numbers(JobConfigs, 1).
+
+add_job_numbers([Job|JobConfigs], N) ->
+    [Job#{job_number => N}|add_job_numbers(JobConfigs)];
+add_job_numbers([], _) ->
+    [].
