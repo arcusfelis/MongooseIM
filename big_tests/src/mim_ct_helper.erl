@@ -106,6 +106,7 @@ anaylyze_groups_runs(CTRunDir) ->
                 0 ->
                     ok;
                 Failed ->
+                    maybe_print_all_groups_state(CTRunDir),
                     {error, {total_failed, Failed}}
             end;
       {error, Error} ->
@@ -113,6 +114,16 @@ anaylyze_groups_runs(CTRunDir) ->
             ok
     end.
 
+maybe_print_all_groups_state(CTRunDir) ->
+    File = CTRunDir ++ "/all_groups.state",
+    case file:read_file(File) of
+        {ok, Bin} ->
+            mim_ct_helper:travis_fold("all_groups.state", "File " ++ File, fun() ->
+                    catch io:format("~ts:~n~ts~n", [File, Bin])
+                end);
+        _ ->
+            ok
+    end.
 
 format_result(Result) ->
     case Result of
