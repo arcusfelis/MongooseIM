@@ -46,7 +46,10 @@ assert_node_running(NodeConfig = #{node := Node, build_dir := BuildDir}) ->
     case net_adm:ping(Node) of
         pang ->
             print_logs(Node, BuildDir),
-            io:format("NodeConfig:~n~p~n", [NodeConfig]),
+
+            F = fun() -> io:format("~p~n", [NodeConfig]) end,
+            mim_ct_helper:travis_fold("NodeConfig", "NodeConfig for " ++ atom_to_list(Node), F),
+
             error({node_not_running, Node});
         pong ->
             NodeConfig
