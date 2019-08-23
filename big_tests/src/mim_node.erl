@@ -96,8 +96,25 @@ apply_template(NodeConfig = #{build_dir := BuildDir, repo_dir := RepoDir}) ->
     Templates = templates(RelDir),
     NodeConfig1 = NodeConfig#{output_dir => list_to_binary(RelDir)},
     [render_template(filename:absname(In, RepoDir), Out, NodeConfig1) || {In, Out} <- Templates],
+    validate_term_files(RelDir),
     NodeConfig1.
 
+validate_term_files(RelDir) ->
+    TermFiles = term_files(),
+    [validate_term_file(RelDir, TermFile) || TermFile <- TermFiles].
+
+validate_term_file(RelDir, TermFile) ->
+    FilePath = filename:absname(TermFile, RelDir),
+    case file:consult(FilePath) of
+        {ok, _} ->
+            ok;
+        Other ->
+            error({validate_term_file_failed, [
+                    {filename, FilePath},
+                    {reason, Other}]
+                  })
+                    
+    end.
 
 overlay_vars(NodeConfig = #{vars := VarsFile, repo_dir := RepoDir}) ->
     Vars = consult_map(filename:absname("rel/vars.config", RepoDir)),
@@ -139,6 +156,10 @@ simple_templates() ->
      {"rel/files/vm.dist.args",     "etc/vm.dist.args"},
      {"rel/files/mongooseim.cfg",   "etc/mongooseim.cfg"}
     ].
+
+term_files() ->
+    ["etc/app.config",
+     "etc/mongooseim.cfg"].
 
 erts_templates(RelDir) ->
     %% Usually one directory
