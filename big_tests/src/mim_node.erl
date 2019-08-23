@@ -21,7 +21,8 @@ make(NodeConfig = #{node := Node}) ->
     NodeConfig2 = apply_template(NodeConfig1),
     NodeConfig3 = stop(NodeConfig2),
     io:format("starting ~p~n", [Node]),
-    start(NodeConfig3).
+    NodeConfig4 = start(NodeConfig3),
+    assert_node_running(NodeConfig4).
 
 stop(NodeConfig = #{node := Node}) ->
     StopReturns = rpc:call(Node, init, stop, []),
@@ -38,6 +39,33 @@ wait_for_pang(Node) ->
             timer:sleep(100),
             wait_for_pang(Node)
     end.
+
+assert_node_running(NodeConfig = #{node := Node, build_dir := BuildDir}) ->
+    case net_adm:ping(Node) of
+        pang ->
+            print_logs(BuildDir),
+            io:format("NodeConfig:~n~p~n", [NodeConfig]),
+            error({node_not_running, Node});
+        pong ->
+            NodeConfig
+    end.
+
+print_logs(BuildDir) ->
+    LogDir = filename:join(BuildDir, "rel/mongooseim/log"),
+    {ok, LogFiles} = file:list_dir(LogDir),
+    LogFiles1 = lists:sort(LogFiles),
+    [print_log_file(filename:join(LogDir, LogFile)) || LogFile <- LogFiles1].
+
+print_log_file(LogFile) ->
+    F = fun() ->
+            case file:read_file(LogFile) of
+                {ok, Bin} ->
+                    catch io:format("~n~ts~n", [Bin]);
+                Error ->
+                    catch io:format("Failed to read file ~p~n", [Error])
+            end
+        end,
+    mim_ct_helper:travis_fold("Log " ++ LogFile, F).
 
 start(NodeConfig = #{build_dir := BuildDir, node := Node}) ->
     Ctl = filename:join(BuildDir, "rel/mongooseim/bin/mongooseimctl"),
