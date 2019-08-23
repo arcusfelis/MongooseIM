@@ -87,7 +87,7 @@ env:
     - PRESET=small_tests RUN_SMALL_TESTS=true SKIP_RELEASE=1 SKIP_BUILD_TESTS=1
     - PRESET=internal_mnesia DB=mnesia REL_CONFIG=with-all
     - PRESET=odbc_mssql_mnesia DB=mssql REL_CONFIG=with-odbc
-    - PRESET=ldap_mnesia DB=mnesia REL_CONFIG=with-none
+    - PRESET=ldap_mnesia DB=ldap REL_CONFIG=with-none
     - PRESET=elasticsearch_and_cassandra_mnesia DB="elasticsearch cassandra"
       REL_CONFIG="with-elasticsearch with-cassandra" TESTSPEC=mam.spec
       ELASTICSEARCH_VERSION=5.6.9 CASSANDRA_VERSION=3.9
