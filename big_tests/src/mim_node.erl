@@ -45,14 +45,14 @@ wait_for_pang(Node) ->
 assert_node_running(NodeConfig = #{node := Node, build_dir := BuildDir}) ->
     case net_adm:ping(Node) of
         pang ->
-            print_logs(BuildDir),
+            print_logs(Node, BuildDir),
             io:format("NodeConfig:~n~p~n", [NodeConfig]),
             error({node_not_running, Node});
         pong ->
             NodeConfig
     end.
 
-print_logs(BuildDir) ->
+print_logs(Node, BuildDir) ->
     LogDir = filename:join(BuildDir, "rel/mongooseim/log"),
     case file:list_dir(LogDir) of
         {ok, LogFiles} ->
@@ -62,7 +62,7 @@ print_logs(BuildDir) ->
             io:format("No logs in ~p - ~p~n", [LogDir, Other])
     end.
 
-print_log_file(LogFile) ->
+print_log_file(Node, LogFile) ->
     F = fun() ->
             case file:read_file(LogFile) of
                 {ok, Bin} ->
@@ -71,7 +71,7 @@ print_log_file(LogFile) ->
                     catch io:format("Failed to read file ~p~n", [Error])
             end
         end,
-    mim_ct_helper:travis_fold("Log " ++ LogFile, F).
+    mim_ct_helper:travis_fold("Log " ++ filename:basename(LogFile) ++ " from " ++ atom_to_list(Node), F).
 
 clean_logs(NodeConfig = #{build_dir := BuildDir}) ->
     LogDir = filename:join(BuildDir, "rel/mongooseim/log"),
