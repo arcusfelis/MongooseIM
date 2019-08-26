@@ -58,6 +58,7 @@ after_test(CtResults, #{before_start_dirs := CTRunDirsBeforeRun}) ->
         {ok, ok} ->
             ok;
         Other ->
+            [maybe_print_all_groups_state(CTRunDir) || CTRunDir <- NewCTRunDirs],
             {error, #{exit_status_by_groups => ExitStatusByGroups,
                       exit_status_by_cases => ExitStatusByTestCases}}
     end.
@@ -106,7 +107,6 @@ anaylyze_groups_runs(CTRunDir) ->
                 0 ->
                     ok;
                 Failed ->
-                    maybe_print_all_groups_state(CTRunDir),
                     {error, {total_failed, Failed}}
             end;
       {error, Error} ->
