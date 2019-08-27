@@ -5,6 +5,7 @@
 # - COVER_ENABLED
 # - STOP_NODES (default false)
 set -o pipefail
+shopt -s nullglob
 IFS=$'\n\t'
 
 DEFAULT_PRESET=internal_mnesia
@@ -159,6 +160,7 @@ run_tests() {
 
   maybe_pause_before_test
 
+  # Requires shopt -s nullglob
   SUMMARIES_DIRS_BEFORE=()
   for DIR in ${BASE}/big_tests/ct_report/ct_run*; do
     SUMMARIES_DIRS_BEFORE+=( "$DIR" )
