@@ -93,10 +93,11 @@ print_ct_skip(CTRunDir) ->
         {ok, <<>>} ->
             ok;
         {ok, Bin} ->
-            io:format("~n==========================~n~n", []),
-            io:format("print_ct_skip ~ts:~n~n~ts", [CTRunDir, Bin]),
-            io:format("~n==========================~n", []),
-            ok;
+            travis_fold("ct_skip_info", "print_ct_skip " ++ CTRunDir, fun() ->
+                    io:format("~n==========================~n~n", []),
+                    io:format("print_ct_skip ~ts:~n~n~ts", [CTRunDir, Bin]),
+                    io:format("~n==========================~n", [])
+                end);
         _ ->
             ok
     end.
