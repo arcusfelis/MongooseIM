@@ -52,6 +52,7 @@ after_test(CtResults, #{before_start_dirs := CTRunDirsBeforeRun}) ->
     CTRunDirsAfterRun = ct_run_dirs(),
     NewCTRunDirs = CTRunDirsAfterRun -- CTRunDirsBeforeRun,
     print_ct_summaries(NewCTRunDirs),
+    print_ct_skips(NewCTRunDirs),
     ExitStatusByGroups = exit_status_by_groups(NewCTRunDirs),
     ExitStatusByTestCases = process_results(Results),
     case {ExitStatusByGroups, ExitStatusByTestCases} of
@@ -77,6 +78,23 @@ print_ct_summary(CTRunDir) ->
         {ok, Bin} ->
             io:format("~n==========================~n~n", []),
             io:format("print_ct_summary ~ts:~n~n~ts", [CTRunDir, Bin]),
+            io:format("~n==========================~n", []),
+            ok;
+        _ ->
+            ok
+    end.
+
+print_ct_skips(CTRunDirs) ->
+    [print_ct_skip(CTRunDir) || CTRunDir <- CTRunDirs],
+    ok.
+
+print_ct_skip(CTRunDir) ->
+    case file:read_file(filename:join(CTRunDir, ct_skip_info)) of
+        {ok, <<>>} ->
+            ok;
+        {ok, Bin} ->
+            io:format("~n==========================~n~n", []),
+            io:format("print_ct_skip ~ts:~n~n~ts", [CTRunDir, Bin]),
             io:format("~n==========================~n", []),
             ok;
         _ ->

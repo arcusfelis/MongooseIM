@@ -13,7 +13,8 @@
 -export([post_end_per_suite/4,
          post_end_per_group/4,
          post_end_per_testcase/4]).
--record(state, { file, summary_file, truncated_counter_file, suite, limit }).
+-export([on_tc_skip/4]).
+-record(state, { file, summary_file, skip_file, truncated_counter_file, suite, limit }).
 
 %% @doc Return a unique id for this CTH.
 id(_Opts) ->
@@ -26,10 +27,12 @@ init(_Id, _Opts) ->
     File = filename:join(CtRunDir, "ct_markdown"),
     TrFile = filename:join(CtRunDir, "ct_markdown_truncated"),
     SummaryFile = filename:join(CtRunDir, "ct_summary"),
+    SkipFile = filename:join(CtRunDir, "ct_skip_info"),
     file:write_file(File, ""),
     file:write_file(SummaryFile, ""),
+    file:write_file(SkipFile, ""),
     file:delete(TrFile),
-    {ok, #state{ file = File, summary_file = SummaryFile, truncated_counter_file = TrFile, limit = 25 }}.
+    {ok, #state{ file = File, summary_file = SummaryFile, skip_file = SkipFile, truncated_counter_file = TrFile, limit = 25 }}.
 
 post_init_per_suite(SuiteName, Config, Return, State) ->
     State2 = handle_return(SuiteName, init_per_suite, Return, Config, State),
@@ -55,6 +58,11 @@ post_end_per_group(GroupName, Config, Return, State=#state{suite = SuiteName}) -
 post_end_per_testcase(TC, Config, Return, State=#state{suite = SuiteName}) ->
     State2 = handle_return(SuiteName, TC, Return, Config, State),
     {Return, State2}.
+
+on_tc_skip(SuiteName, TestName, Reason, State = #state{skip_file = SkipFile}) ->
+    Out = io_lib:format("~tp.~n", [#{suite => SuiteName, test => TestName, reason => Reason}]),
+    file:write_file(SkipFile, Out, [append]),
+    State.
 
 handle_return(SuiteName, Place, Return, Config, State) ->
     try handle_return_unsafe(SuiteName, Place, Return, Config, State)
