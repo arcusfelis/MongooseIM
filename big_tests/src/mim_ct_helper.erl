@@ -51,8 +51,8 @@ after_test(CtResults, #{before_start_dirs := CTRunDirsBeforeRun}) ->
     timer:sleep(50),
     CTRunDirsAfterRun = ct_run_dirs(),
     NewCTRunDirs = CTRunDirsAfterRun -- CTRunDirsBeforeRun,
-    print_ct_summaries(NewCTRunDirs),
     print_ct_skips(NewCTRunDirs),
+    print_ct_summaries(NewCTRunDirs),
     ExitStatusByGroups = exit_status_by_groups(NewCTRunDirs),
     ExitStatusByTestCases = process_results(Results),
     case {ExitStatusByGroups, ExitStatusByTestCases} of
