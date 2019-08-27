@@ -55,7 +55,9 @@ do_ct_run(RunConfig = #{test_spec := TestSpec, test_config := TestConfigFile, te
     CtOpts = [{spec, TestSpec},
               {userconfig, {ct_config_plain, [TestConfigFileOut2]}}, 
               {auto_compile, maps:get(auto_compile, RunConfig, true)}],
-    CtResult = ct:run_test(CtOpts),
+    {CtRunTime, CtResult} = timer:tc(fun() -> ct:run_test(CtOpts) end),
+    mim_ct_helper:report_progress("~nct_run for ~ts took ~ts~n",
+                                     [TestSpec, mim_ct_helper:microseconds_to_string(CtRunTime)]),
     {CtResult, TestConfig3}.
 
 write_terms(Filename, List) ->
