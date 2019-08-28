@@ -59,8 +59,8 @@ main(RawArgs) ->
 
 run(#opts{test = quick, cover = Cover, spec = Spec}) ->
     error(todo);
-run(#opts{test = full, spec = Spec, preset = [Preset|_], cover = Cover}) ->
-    Master = #{cover_enabled => true, cover_lib_dir => "_build/mim1/lib/mongooseim/ebin/",
+run(#opts{test = full, spec = Spec, preset = [Preset|_], cover = Cover}) when is_boolean(Cover) ->
+    Master = #{cover_enabled => Cover, cover_lib_dir => "_build/mim1/lib/mongooseim/ebin/",
                repo_dir => path_helper:repo_dir([]), auto_compile => auto_compile()},
     Job1 = #{test_spec => "default1.spec", test_config => "test.config", test_config_out => "_build/test1.config",
                          first_port => 6000, preset => Preset, slave_node => ct1, prefix => "ng1"},

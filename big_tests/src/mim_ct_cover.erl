@@ -51,6 +51,9 @@ analyze_cover(TestConfig = #{repo_dir := RepoDir, cover_enabled := true}) ->
                         cover:stop(cover:which_nodes())
                     end)
     end,
+    TestConfig;
+analyze_cover(TestConfig) ->
+    io:format("Skip analyze_cover~n", []),
     TestConfig.
 
 modules_to_analyze() ->
@@ -59,8 +62,11 @@ modules_to_analyze() ->
 add_cover_node_to_config(Node, TestConfig) ->
     TestConfig#{cover_node => Node}.
 
-add_cover_node_to_hosts(TestConfig = #{cover_node := CoverNode}) ->
-    add_opt_to_hosts(cover_node, CoverNode, TestConfig).
+add_cover_node_to_hosts(TestConfig = #{cover_enabled := true, cover_node := CoverNode}) ->
+    add_opt_to_hosts(cover_node, CoverNode, TestConfig);
+add_cover_node_to_hosts(TestConfig) ->
+    io:format("Skip add_cover_node_to_hosts~n", []),
+    TestConfig.
 
 add_opt_to_hosts(OptName, OptValue, TestConfig = #{hosts := Hosts}) ->
     Hosts2 = [{Name, [{OptName, OptValue}|Props]} || {Name, Props} <- Hosts],
