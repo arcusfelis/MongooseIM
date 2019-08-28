@@ -142,6 +142,6 @@ setup_ldap_container(LdapPort, LdapSecurePort, Prefix, RepoDir) ->
             "LDAP_SECURE_PORT" => integer_to_list(LdapSecurePort), 
             "DB_PREFIX" => "mim-ct1-" ++ Prefix},
     CmdOpts = #{env => Envs, cwd => RepoDir},
-    {done, _, Result} = mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], CmdOpts),
+    {done, 0, Result} = mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], CmdOpts),
     io:format("Setup ldap container ~p returns ~ts~n", [LdapPort, Result]),
     ok.
