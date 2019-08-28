@@ -59,4 +59,6 @@ for i in $(seq 0 ${TIMEOUT}); do
     sleep 1
 done
 echo -e "\nKilled by timeout"
+echo "Docker logs:"
+docker logs "$CONTAINER"
 exit 1
