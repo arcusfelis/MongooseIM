@@ -106,7 +106,18 @@ init_db(riak, _RepoDir) ->
     {skip, 0, "skip for master"};
 init_db(ldap, _RepoDir) ->
     {skip, 0, "skip for master"};
+init_db(redis, RepoDir) ->
+    case mim_ct_ports:is_port_free(6379) of
+        true ->
+            %% Redis is already running
+            do_init_db(redis, RepoDir);
+        false ->
+            {skip, 0, "redis is already running"}
+    end;
 init_db(DbType, RepoDir) ->
+    do_init_db(DbType, RepoDir).
+
+do_init_db(DbType, RepoDir) ->
     mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], #{env => #{"DB" => atom_to_list(DbType), "DB_PREFIX" => "mim-ct1"}, cwd => RepoDir}).
 
 setup_mssql_database(DbName, RepoDir) ->
@@ -142,6 +153,13 @@ setup_ldap_container(LdapPort, LdapSecurePort, Prefix, RepoDir) ->
             "LDAP_SECURE_PORT" => integer_to_list(LdapSecurePort), 
             "DB_PREFIX" => "mim-ct1-" ++ Prefix},
     CmdOpts = #{env => Envs, cwd => RepoDir},
-    {done, 0, Result} = mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], CmdOpts),
+    {done, Code, Result} = mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], CmdOpts),
+    case Code of
+        0 ->
+            ok;
+        _ ->
+            io:format("Bad exit code ~p~n~n~ts~n", [Code, Result]),
+            error(setup_ldap_container_failed)
+    end,
     io:format("Setup ldap container ~p returns ~ts~n", [LdapPort, Result]),
     ok.

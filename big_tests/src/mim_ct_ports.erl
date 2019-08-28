@@ -1,6 +1,8 @@
 -module(mim_ct_ports).
 -export([rewrite_ports/1]).
 
+-export([is_port_free/1]).
+
 rewrite_ports(TestConfig = #{hosts := Hosts, first_port := FirstPort}) ->
     io:format("rewrite_ports~n", []),
     UniquePorts = lists:usort(lists:flatmap(fun host_to_ports/1, Hosts)),
