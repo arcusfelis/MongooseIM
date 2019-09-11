@@ -30,16 +30,13 @@
 {suites, "tests", rest_SUITE}.
 {suites, "tests", rest_client_SUITE}.
 {suites, "tests", s2s_SUITE}.
-{suites, "tests", sasl_SUITE}.
 {suites, "tests", shared_roster_SUITE}.
 {suites, "tests", sic_SUITE}.
-{suites, "tests", sm_SUITE}.
 {suites, "tests", users_api_SUITE}.
 {suites, "tests", vcard_simple_SUITE}.
 {suites, "tests", vcard_SUITE}.
 {suites, "tests", websockets_SUITE}.
 {suites, "tests", xep_0352_csi_SUITE}.
-{suites, "tests", mod_global_distrib_SUITE}.
 {suites, "tests", mongoose_cassandra_SUITE}.
 {suites, "tests", mongoose_elasticsearch_SUITE}.
 {suites, "tests", sasl_external_SUITE}.

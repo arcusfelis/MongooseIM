@@ -71,10 +71,13 @@ run(#opts{test = full, spec = Spec, preset = [Preset|_], cover = Cover}) when is
     Job3 = #{test_spec => "default3.spec", test_config => "test.config", test_config_out => "_build/test3.config",
                          first_port => 8000, preset => Preset, slave_node => ct3, prefix => "ng3", username_suffix => <<"3j">>,
                          ejabberd_cookie => mim3_cookie},
+    Job4 = #{test_spec => "default4.spec", test_config => "test.config", test_config_out => "_build/test4.config",
+                         first_port => 9000, preset => Preset, slave_node => ct4, prefix => "ng4", username_suffix => <<"4j">>,
+                         ejabberd_cookie => mim4_cookie},
     Jobs = case Spec of
                'default.spec' ->
                    %% Three workers for the default spec
-                   [Job1, Job2, Job3];
+                   [Job1, Job2, Job3, Job4];
                _ ->
                    [Job1#{test_spec => atom_to_list(Spec)}]
            end,
