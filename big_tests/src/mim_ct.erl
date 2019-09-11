@@ -46,12 +46,12 @@ load_test_config(RunConfig = #{test_config := TestConfigFile}) ->
     %% RunConfig overrides TestConfig
     maps:merge(maps:from_list(TestConfig), RunConfig).
 
-do_ct_run(RunConfig = #{test_spec := TestSpec, test_config := TestConfigFile, test_config_out := TestConfigFileOut}) ->
+do_ct_run(RunConfig = #{test_spec := TestSpec, test_config_out := TestConfigFileOut}) ->
     mim_ct_preload:load_test_modules(TestSpec),
     TestConfig2 = mim_ct_cover:add_cover_node_to_hosts(RunConfig),
     TestConfig3 = init_hosts(TestConfig2),
     TestConfigFileOut2 = filename:absname(TestConfigFileOut, path_helper:test_dir([])),
-    ok = write_terms(TestConfigFileOut, mim_ct_config_ports:preprocess(maps:to_list(TestConfig3))),
+    ok = write_terms(TestConfigFileOut, mim_ct_config:preprocess(maps:to_list(TestConfig3))),
     CtOpts = [{spec, TestSpec},
               {userconfig, {ct_config_plain, [TestConfigFileOut2]}}, 
               {auto_compile, maps:get(auto_compile, RunConfig, true)}],
