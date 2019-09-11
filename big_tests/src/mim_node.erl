@@ -9,13 +9,22 @@
 %% - vars = "mim1.vars.config"
 %% - repo_dir = REPO_DIR, abs path
 load(NodeConfig, TestConfig) ->
-    NodeConfig1 = make_abs_paths(NodeConfig),
+    NodeConfig0 = maybe_set_cookie(NodeConfig, TestConfig),
+    NodeConfig1 = make_abs_paths(NodeConfig0),
     NodeConfig2 = overlay_vars(NodeConfig1),
     NodeConfig3 = apply_preset(NodeConfig2, TestConfig),
     apply_prefix(NodeConfig3).
 
+maybe_set_cookie(NodeConfig=#{ejabberd_cookie := Cookie}, TestConfig) ->
+    set_cookie(NodeConfig);
+maybe_set_cookie(NodeConfig, TestConfig=#{ejabberd_cookie := Cookie}) ->
+    set_cookie(NodeConfig#{ejabberd_cookie => Cookie});
+maybe_set_cookie(NodeConfig, _TestConfig) ->
+    NodeConfig.
+
 make(NodeConfig = #{node := Node}) ->
     io:format("making ~p~n", [Node]),
+    set_cookie(NodeConfig),
     NodeConfig1 = copy_release(NodeConfig),
     io:format("apply_template ~p~n", [Node]),
     NodeConfig2 = apply_template(NodeConfig1),
@@ -266,3 +275,13 @@ apply_prefix(NodeConfig = #{}) ->
     io:format("Ignore prefix", []),
     NodeConfig.
 
+set_cookie(NodeConfig = #{node := Node, ejabberd_cookie := Cookie}) ->
+    io:format("set_cookie node=~p cookie=~p~n", [Node, Cookie]),
+    erlang:set_cookie(Node, to_atom(Cookie)),
+    NodeConfig;
+set_cookie(NodeConfig) ->
+    NodeConfig.
+
+to_atom(X) when is_list(X) -> list_to_atom(X);
+to_atom(X) when is_binary(X) -> to_atom(binary_to_list(X));
+to_atom(X) when is_atom(X) -> X.
