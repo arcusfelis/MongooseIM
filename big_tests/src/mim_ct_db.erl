@@ -45,7 +45,7 @@ init_job_dbs([], TestConfig) ->
 init_job_db(mssql, TestConfig = #{prefix := Prefix, repo_dir := RepoDir}) ->
     DbName = Prefix ++ "_mim_db",
     setup_mssql_database(DbName, RepoDir),
-    TestConfig#{mssql_database => DbName};
+    set_host_option(mssql_database, DbName, TestConfig);
 init_job_db(mysql, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := RepoDir}) ->
     [DbPort] = get_ports(mysql_port, TestConfig),
     setup_mysql_container(DbPort, Prefix ++ "_mim_db_" ++ integer_to_list(DbPort), RepoDir),
@@ -64,12 +64,16 @@ init_job_db(ldap, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := R
     [LdapSecurePort] = get_ports(ldap_secure_port, TestConfig),
     setup_ldap_container(LdapPort, LdapSecurePort, Prefix ++ "_mim_db_" ++ integer_to_list(LdapPort), RepoDir),
     TestConfig;
-init_job_db(redis, TestConfig = #{job_number := JobNumber, hosts := Hosts}) ->
-    Hosts2 = [{HostId, lists:keystore(redis_database, 1, Host, {redis_database, JobNumber})} || {HostId, Host} <- Hosts],
-    TestConfig#{hosts => Hosts2};
+init_job_db(redis, TestConfig = #{job_number := JobNumber}) ->
+    set_host_option(redis_database, JobNumber, TestConfig);
 init_job_db(Db, _TestConfig) ->
     io:format("init_job_db: Do nothing for db ~p~n", [Db]),
     skip.
+
+%% Set option for all hosts
+set_host_option(OptName, OptValue, TestConfig = #{hosts := Hosts}) ->
+    Hosts2 = [{HostId, lists:keystore(OptName, 1, Host, {OptName, OptValue})} || {HostId, Host} <- Hosts],
+    TestConfig#{hosts => Hosts2}.
 
 get_ports(PortPropertyName, _TestConfig = #{hosts := Hosts}) when is_atom(PortPropertyName) ->
     %% We expect one or zero ports here
