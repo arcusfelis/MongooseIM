@@ -14,6 +14,7 @@
 {http_api_endpoint_port, ""}.
 {http_api_old_endpoint_port, ""}.
 {http_api_client_endpoint_port, ""}.
+{ejabberd_cookie, "ejabberd"}.
 
 {hosts, "[\"localhost\"]"}.
 {host_config, ""}.

@@ -64,11 +64,14 @@ run(#opts{test = full, spec = Spec, preset = [Preset|_], cover = Cover}) when is
     Master = #{cover_enabled => Cover, cover_lib_dir => "_build/mim1/lib/mongooseim/ebin/",
                repo_dir => path_helper:repo_dir([]), auto_compile => auto_compile()},
     Job1 = #{test_spec => "default1.spec", test_config => "test.config", test_config_out => "_build/test1.config",
-                         first_port => 6000, preset => Preset, slave_node => ct1, prefix => "ng1", username_suffix => <<"1j">>},
+                         first_port => 6000, preset => Preset, slave_node => ct1, prefix => "ng1", username_suffix => <<"1j">>,
+                         ejabberd_cookie => mim1_cookie},
     Job2 = #{test_spec => "default2.spec", test_config => "test.config", test_config_out => "_build/test2.config",
-                         first_port => 7000, preset => Preset, slave_node => ct2, prefix => "ng2", username_suffix => <<"2j">>},
+                         first_port => 7000, preset => Preset, slave_node => ct2, prefix => "ng2", username_suffix => <<"2j">>,
+                         ejabberd_cookie => mim2_cookie},
     Job3 = #{test_spec => "default3.spec", test_config => "test.config", test_config_out => "_build/test3.config",
-                         first_port => 8000, preset => Preset, slave_node => ct3, prefix => "ng3", username_suffix => <<"3j">>},
+                         first_port => 8000, preset => Preset, slave_node => ct3, prefix => "ng3", username_suffix => <<"3j">>,
+                         ejabberd_cookie => mim3_cookie},
     Jobs = case Spec of
                'default.spec' ->
                    %% Three workers for the default spec
