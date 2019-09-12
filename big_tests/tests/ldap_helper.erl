@@ -38,10 +38,12 @@ create_user({_User, Spec}) ->
     UserStr=binary_to_list(User),
     Base = get_ldap_base(Server),
     DN = "cn=" ++ UserStr ++ "," ++ binary_to_list(Base),
+    Prefix = ct:get_config({hosts, mim, ldap_prefix}),
     Attrs = [{"objectclass", ["inetOrgPerson"]},
              {"cn", [UserStr]},
              {"sn", [UserStr]},
              {"userPassword", [binary_to_list(Password)]},
+             {"ou", ["Users" ++ Prefix]},
              {"uid", [UserStr]}],
     call_ldap(Server, add, [DN, Attrs]).
 
