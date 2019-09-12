@@ -19,8 +19,6 @@
 {suites, "tests", sasl_SUITE}.
 {suites, "tests", mam_SUITE}.
 {suites, "tests", inbox_SUITE}.
-{suites, "tests", gdpr_SUITE}.
-{suites, "tests", mod_global_distrib_SUITE}.
 
 %% Default config reader is:
 %% {userconfig, {ct_config_plain, ["test.config"]}}.
