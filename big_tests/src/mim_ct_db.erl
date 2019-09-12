@@ -59,11 +59,9 @@ init_job_db(riak, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := R
     [RiakPbPort] = get_ports(riak_pb_port, TestConfig),
     setup_riak_container(RiakPort, RiakPbPort, Prefix ++ "_mim_db_" ++ integer_to_list(RiakPort), RepoDir),
     TestConfig;
-init_job_db(ldap, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := RepoDir}) ->
-    [LdapPort] = get_ports(ldap_port, TestConfig),
-    [LdapSecurePort] = get_ports(ldap_secure_port, TestConfig),
-    setup_ldap_container(LdapPort, LdapSecurePort, Prefix ++ "_mim_db_" ++ integer_to_list(LdapPort), RepoDir),
-    TestConfig;
+init_job_db(ldap, TestConfig = #{job_number := JobNumber}) ->
+    %% Use different ldap_base for each job
+    set_host_option(ldap_prefix, integer_to_list(JobNumber), TestConfig);
 init_job_db(redis, TestConfig = #{job_number := JobNumber}) ->
     set_host_option(redis_database, JobNumber, TestConfig);
 init_job_db(Db, _TestConfig) ->
@@ -108,8 +106,6 @@ init_db(pgsql, _RepoDir) ->
     {skip, 0, "skip for master"};
 init_db(riak, _RepoDir) ->
     {skip, 0, "skip for master"};
-init_db(ldap, _RepoDir) ->
-    {skip, 0, "skip for master"};
 init_db(redis, RepoDir) ->
     case mim_ct_ports:is_port_free(6379) of
         true ->
@@ -149,21 +145,4 @@ setup_riak_container(RiakPort, RiakPbPort, Prefix, RepoDir) ->
     CmdOpts = #{env => Envs, cwd => RepoDir},
     {done, _, Result} = mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], CmdOpts),
     io:format("Setup riak container ~p returns ~ts~n", [RiakPort, Result]),
-    ok.
-
-setup_ldap_container(LdapPort, LdapSecurePort, Prefix, RepoDir) ->
-    Envs = #{"DB" => "ldap", 
-            "LDAP_PORT" => integer_to_list(LdapPort),
-            "LDAP_SECURE_PORT" => integer_to_list(LdapSecurePort), 
-            "DB_PREFIX" => "mim-ct1-" ++ Prefix},
-    CmdOpts = #{env => Envs, cwd => RepoDir},
-    {done, Code, Result} = mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], CmdOpts),
-    case Code of
-        0 ->
-            ok;
-        _ ->
-            io:format("Bad exit code ~p~n~n~ts~n", [Code, Result]),
-            error(setup_ldap_container_failed)
-    end,
-    io:format("Setup ldap container ~p returns ~ts~n", [LdapPort, Result]),
     ok.
