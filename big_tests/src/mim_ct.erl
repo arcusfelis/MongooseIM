@@ -33,9 +33,11 @@ run(RunConfig) ->
     io:format("CtResult ~p~n", [CtResult]),
     {Result, [TestConfig]}.
 
-ct_run(RunConfig) ->
+ct_run(RunConfig = #{prefix := Prefix}) ->
     try
-        do_ct_run(RunConfig)
+        Fun = fun() -> do_ct_run(RunConfig) end,
+        FilenameOut = "_build/" ++ Prefix ++ "_out.txt",
+        mim_ct_helper:buffer_fold("ct_run." ++ Prefix, "ct_run " ++ Prefix, Fun, FilenameOut)
     catch Class:Reason ->
               Stacktrace = erlang:get_stacktrace(),
               { {error, {Class, Reason, Stacktrace}}, RunConfig }
