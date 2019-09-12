@@ -3,6 +3,7 @@
 -export([report_progress/2]).
 -export([microseconds_to_string/1]).
 -export([travis_fold/3]).
+-export([buffer_fold/4]).
 
 -export([before_start/0]).
 -export([after_test/2]).
@@ -40,7 +41,34 @@ travis_fold(Id, Description, Fun) ->
             Result
     end.
 
+%% Forward output into file, read and print it all at once after
+buffer_fold(Id, Description, Fun, FilenameOut) ->
+    case buffer_fold_enabled() of
+        false ->
+            Fun();
+        true ->
+            OldGroupLeader = get_group_leader(),
+            {ok, File} = file:open(FilenameOut, [write]),
+            group_leader(File, self()),
+            try
+                Fun()
+            after
+                group_leader(OldGroupLeader, self()),
+                file:close(File),
+                {ok, Bin} = file:read_file(FilenameOut),
+                travis_fold(Id, Description, fun() -> io:format("~ts", [Bin]) end)
+            end
+    end.
 
+get_group_leader() ->
+    {group_leader, GroupLeader} = erlang:process_info(self(), group_leader),
+    GroupLeader.
+
+buffer_fold_enabled() ->
+    not is_verbose().
+
+is_verbose() ->
+    "1" =:= os:getenv("VERBOSE").
 
 before_start() ->
     #{before_start_dirs => ct_run_dirs()}.
