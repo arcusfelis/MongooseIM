@@ -42,7 +42,6 @@ create_user({_User, Spec}) ->
              {"cn", [UserStr]},
              {"sn", [UserStr]},
              {"userPassword", [binary_to_list(Password)]},
-             {"ou", ["shared_group"]},
              {"uid", [UserStr]}],
     call_ldap(Server, add, [DN, Attrs]).
 
