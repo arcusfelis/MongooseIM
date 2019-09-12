@@ -156,6 +156,6 @@ add_job_numbers(JobConfigs) ->
     add_job_numbers(JobConfigs, 1).
 
 add_job_numbers([Job|JobConfigs], N) ->
-    [Job#{job_number => N}|add_job_numbers(JobConfigs)];
+    [Job#{job_number => N}|add_job_numbers(JobConfigs, N+1)];
 add_job_numbers([], _) ->
     [].
