@@ -30,6 +30,7 @@
 {suites, "tests", mod_ping_SUITE}.
 {suites, "tests", mod_time_SUITE}.
 {suites, "tests", mod_version_SUITE}.
+{suites, "tests", mod_global_distrib_SUITE}.
 
 %% Default config reader is:
 %% {userconfig, {ct_config_plain, ["test.config"]}}.
