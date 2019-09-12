@@ -45,7 +45,7 @@ init_job_dbs([], TestConfig) ->
 init_job_db(mssql, TestConfig = #{prefix := Prefix, repo_dir := RepoDir}) ->
     DbName = Prefix ++ "_mim_db",
     setup_mssql_database(DbName, RepoDir),
-    set_host_option(mssql_database, DbName, TestConfig);
+    set_option(mssql_database, DbName, TestConfig);
 init_job_db(mysql, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := RepoDir}) ->
     [DbPort] = get_ports(mysql_port, TestConfig),
     setup_mysql_container(DbPort, Prefix ++ "_mim_db_" ++ integer_to_list(DbPort), RepoDir),
@@ -61,17 +61,26 @@ init_job_db(riak, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := R
     TestConfig;
 init_job_db(ldap, TestConfig = #{job_number := JobNumber}) ->
     %% Use different ldap_base for each job
-    set_host_option(ldap_prefix, integer_to_list(JobNumber), TestConfig);
+    set_option(ldap_prefix, integer_to_list(JobNumber), TestConfig);
 init_job_db(redis, TestConfig = #{job_number := JobNumber}) ->
-    set_host_option(redis_database, JobNumber, TestConfig);
+    set_option(redis_database, JobNumber, TestConfig);
 init_job_db(Db, _TestConfig) ->
     io:format("init_job_db: Do nothing for db ~p~n", [Db]),
     skip.
+
+set_option(OptName, OptValue, TestConfig) ->
+    TestConfig2 = set_host_option(OptName, OptValue, TestConfig),
+    set_preset_option(OptName, OptValue, TestConfig2).
 
 %% Set option for all hosts
 set_host_option(OptName, OptValue, TestConfig = #{hosts := Hosts}) ->
     Hosts2 = [{HostId, lists:keystore(OptName, 1, Host, {OptName, OptValue})} || {HostId, Host} <- Hosts],
     TestConfig#{hosts => Hosts2}.
+
+%% Set option for all presets
+set_preset_option(OptName, OptValue, TestConfig = #{ejabberd_presets := Presets}) ->
+    Presets2 = [{PresetName, lists:keystore(OptName, 1, Preset, {OptName, OptValue})} || {PresetName, Preset} <- Presets],
+    TestConfig#{ejabberd_presets => Presets2}.
 
 get_ports(PortPropertyName, _TestConfig = #{hosts := Hosts}) when is_atom(PortPropertyName) ->
     %% We expect one or zero ports here
