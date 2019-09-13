@@ -8,7 +8,9 @@
 run_jobs(MasterConfig, JobConfigs) ->
     %% Read configs sequentially
     JobConfigs1 = [load_test_config(Job) || Job <- add_job_numbers(JobConfigs)],
-    {MasterConfig1, JobConfigs2} = mim_ct_db:init_master(MasterConfig, JobConfigs1),
+    InitDbFun = fun() -> mim_ct_db:init_master(MasterConfig, JobConfigs1) end,
+    {MasterConfig1, JobConfigs2} =
+        mim_ct_helper:buffer_fold("db.init_master", "Init Databases", InitDbFun, "_build/init_db_out.txt"),
     MasterConfig2 = mim_ct_cover:start_cover(MasterConfig1),
     HelperState = mim_ct_helper:before_start(),
     JobResults = mim_ct_parallel:parallel_map(fun(Job) -> do_job(MasterConfig2, Job) end, JobConfigs2),
