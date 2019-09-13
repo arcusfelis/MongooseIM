@@ -91,6 +91,7 @@ after_test(CtResults, #{before_start_dirs := CTRunDirsBeforeRun}) ->
         Other ->
             [print_stanza_logs(CTRunDir) || CTRunDir <- NewCTRunDirs],
             [maybe_print_all_groups_state(CTRunDir) || CTRunDir <- NewCTRunDirs],
+            concat_ct_markdown(NewCTRunDirs),
             {error, #{exit_status_by_groups => ExitStatusByGroups,
                       exit_status_by_cases => ExitStatusByTestCases}}
     end.
@@ -258,3 +259,28 @@ print_stanza_file(StanzaFile) ->
     Description = filename:basename(StanzaFile),
     Fun = fun() -> io:format("~ts", [Pretty]) end,
     travis_fold("stanza.log", Description, Fun).
+
+%% Merge ct_markdown files.
+%% We just simulate the old behaviour with one file.
+%% Later we can rewrite tools/travis-publish-github-comment.sh into erlang.
+concat_ct_markdown(NewCTRunDirs) ->
+    Results = [file:read_file(filename:join(CTRunDir, "ct_markdown")) || CTRunDir <- NewCTRunDirs],
+    Truncated = lists:sum([read_truncated_value(filename:join(CTRunDir, "ct_markdown_truncated")) || CTRunDir <- NewCTRunDirs]),
+    Data = [Bin || {ok, Bin} <- Results],
+    ok = file:write_file("/tmp/ct_markdown", Data),
+    file:delete("/tmp/ct_markdown_truncated"),
+    case Truncated of
+        0 ->
+            ok;
+        _ ->
+            ok = file:write_file("/tmp/ct_markdown_truncated", Data)
+    end,
+    ok.
+
+read_truncated_value(TrFile) ->
+    case file:read_file(TrFile) of
+        {ok, Bin} ->
+            binary_to_integer(Bin);
+        _ ->
+            0
+    end.
