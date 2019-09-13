@@ -81,12 +81,14 @@ load_hosts(TestConfig = #{hosts := Hosts}) ->
     Hosts2 = [{HostId, maps:to_list(load_host(HostId, maps:from_list(HostConfig), TestConfig))} || {HostId, HostConfig} <- Hosts],
     TestConfig#{hosts => Hosts2}.
 
-make_hosts(TestConfig = #{hosts := Hosts}) ->
+make_hosts(TestConfig = #{test_spec := TestSpec, hosts := Hosts}) ->
     %% Start nodes in parallel
     F = fun({HostId, HostConfig}) ->
             {HostId, maps:to_list(make_host(HostId, maps:from_list(HostConfig)))}
         end,
-    Results = mim_ct_parallel:parallel_map(F, Hosts),
+    {StartTime, Results} = timer:tc(fun() -> mim_ct_parallel:parallel_map(F, Hosts) end),
+    mim_ct_helper:report_progress("~nStarting hosts for ~ts took ~ts~n",
+                                     [TestSpec, mim_ct_helper:microseconds_to_string(StartTime)]),
     %% TODO report bad results
     [] = [BadResult || {error, BadResult} <- Results],
     Hosts2 = [GoodResult || {ok, GoodResult} <- Results],
