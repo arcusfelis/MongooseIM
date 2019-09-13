@@ -8,6 +8,8 @@
 -export([before_start/0]).
 -export([after_test/2]).
 
+-include_lib("exml/include/exml.hrl").
+
 report_time(Description, Fun) ->
     report_progress("~nExecuting ~ts~n", [Description]),
     Start = os:timestamp(),
@@ -87,6 +89,7 @@ after_test(CtResults, #{before_start_dirs := CTRunDirsBeforeRun}) ->
         {ok, ok} ->
             ok;
         Other ->
+            [print_stanza_logs(CTRunDir) || CTRunDir <- NewCTRunDirs],
             [maybe_print_all_groups_state(CTRunDir) || CTRunDir <- NewCTRunDirs],
             {error, #{exit_status_by_groups => ExitStatusByGroups,
                       exit_status_by_cases => ExitStatusByTestCases}}
@@ -240,3 +243,18 @@ add({X1, X2, X3, X4},
      X2 + Y2,
      X3 + Y3,
      X4 + Y4}.
+
+print_stanza_logs(CTRunDir) ->
+    StanzaFiles = filelib:wildcard(CTRunDir ++ "/*/*/log_private/*.xml"),
+    MaxFiles = 10,
+    StanzaFiles2 = lists:sublist(StanzaFiles, 1, MaxFiles),
+    [print_stanza_file(StanzaFile) || StanzaFile <- StanzaFiles2].
+
+print_stanza_file(StanzaFile) ->
+    {ok,Bin}  = file:read_file(StanzaFile),
+    {ok, HistoryElem} = exml:parse(Bin),
+    #xmlel{name = <<"history">>, children = StanzaElems} = HistoryElem,
+    Pretty = exml:to_pretty_iolist(StanzaElems),
+    Description = filename:basename(StanzaFile),
+    Fun = fun() -> io:format("~ts", [Pretty]) end,
+    travis_fold("stanza.log", Description, Fun).
