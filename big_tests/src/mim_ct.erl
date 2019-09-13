@@ -16,7 +16,7 @@ run_jobs(MasterConfig, JobConfigs) ->
     JobResults = mim_ct_parallel:parallel_map(fun(Job) -> do_job(MasterConfig2, Job) end, JobConfigs2),
     GoodResults = [GoodResult || {ok, GoodResult} <- JobResults],
     {CtResults, TestConfigs} = lists:unzip(GoodResults),
-    Result = mim_ct_helper:after_test(CtResults, HelperState),
+    Result = mim_ct_helper:after_test(CtResults, TestConfigs, HelperState),
     mim_ct_cover:analyze_cover(MasterConfig1),
     {Result, TestConfigs}.
 
@@ -30,7 +30,7 @@ run(RunConfig) ->
     RunConfig1 = mim_ct_cover:start_cover(RunConfig0),
     HelperState = mim_ct_helper:before_start(),
     {CtResult, TestConfig} = ct_run(RunConfig1),
-    Result = mim_ct_helper:after_test([CtResult], HelperState),
+    Result = mim_ct_helper:after_test([CtResult], [TestConfig], HelperState),
     mim_ct_cover:analyze_cover(RunConfig1),
     io:format("CtResult ~p~n", [CtResult]),
     {Result, [TestConfig]}.
