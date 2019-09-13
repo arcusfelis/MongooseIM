@@ -6,7 +6,7 @@
 -export([buffer_fold/4]).
 
 -export([before_start/0]).
--export([after_test/2]).
+-export([after_test/3]).
 
 -include_lib("exml/include/exml.hrl").
 
@@ -31,11 +31,14 @@ report_progress(Format, Args) ->
     Message = io_lib:format(Format, Args),
     file:write_file("/tmp/progress", Message, [append]).
 
+is_travis() ->
+    false =/= os:getenv("TRAVIS_JOB_ID").
+
 travis_fold(Id, Description, Fun) ->
-    case os:getenv("TRAVIS_JOB_ID") of
+    case is_travis() of
         false ->
             Fun();
-        _ ->
+        true ->
             io:format("travis_fold:start:~ts~n", [Id]),
             io:format("~ts~n", [Description]),
             Result = Fun(),
@@ -75,7 +78,7 @@ is_verbose() ->
 before_start() ->
     #{before_start_dirs => ct_run_dirs()}.
 
-after_test(CtResults, #{before_start_dirs := CTRunDirsBeforeRun}) ->
+after_test(CtResults, TestConfigs, #{before_start_dirs := CTRunDirsBeforeRun}) ->
     Results = [format_result(Res) || Res <- CtResults],
     %% Waiting for messages to be flushed
     timer:sleep(50),
@@ -89,6 +92,7 @@ after_test(CtResults, #{before_start_dirs := CTRunDirsBeforeRun}) ->
         {ok, ok} ->
             ok;
         Other ->
+            maybe_print_mim_logs(TestConfigs),
             [print_stanza_logs(CTRunDir) || CTRunDir <- NewCTRunDirs],
             [maybe_print_all_groups_state(CTRunDir) || CTRunDir <- NewCTRunDirs],
             concat_ct_markdown(NewCTRunDirs),
@@ -284,3 +288,15 @@ read_truncated_value(TrFile) ->
         _ ->
             0
     end.
+
+
+maybe_print_mim_logs(TestConfigs) ->
+    case is_travis() of
+        true ->
+            [mim_node:print_node_logs(Host) || Host <- all_hosts(TestConfigs)];
+        false ->
+            ok
+    end.
+
+all_hosts(TestConfigs) ->
+    [maps:from_list(Host) || #{hosts := Hosts} <- TestConfigs, {_, Host} <- Hosts].

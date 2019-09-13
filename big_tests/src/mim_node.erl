@@ -1,6 +1,7 @@
 -module(mim_node).
 -export([load/2]).
 -export([make/1]).
+-export([print_node_logs/1]).
 
 %% Sets variables without touching anything on disk
 %% Options:
@@ -63,6 +64,9 @@ assert_node_running(NodeConfig = #{node := Node, build_dir := BuildDir}) ->
         pong ->
             NodeConfig
     end.
+
+print_node_logs(#{node := Node, build_dir := BuildDir}) ->
+    print_logs(Node, BuildDir).
 
 print_logs(Node, BuildDir) ->
     LogDir = filename:join(BuildDir, "rel/mongooseim/log"),
