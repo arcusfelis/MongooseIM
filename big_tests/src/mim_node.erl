@@ -82,7 +82,7 @@ print_log_file(Node, LogFile) ->
     F = fun() ->
             case file:read_file(LogFile) of
                 {ok, Bin} ->
-                    catch io:format("~n~ts~n", [Bin]);
+                    catch io:format("~n~ts~n", [preprocess_log(Bin)]);
                 Error ->
                     catch io:format("Failed to read file ~p~n", [Error])
             end
@@ -289,3 +289,34 @@ set_cookie(NodeConfig) ->
 to_atom(X) when is_list(X) -> list_to_atom(X);
 to_atom(X) when is_binary(X) -> to_atom(binary_to_list(X));
 to_atom(X) when is_atom(X) -> X.
+
+
+preprocess_log(Log) ->
+    MaxLines  = 1000,
+    Lines = binary:split(Log, <<"\n">>, [global]),
+    Filtered = filter_lines(Lines),
+    BeforeFiltering = length(Lines),
+    AfterFiltering = length(Filtered),
+    FilteredCount = BeforeFiltering - AfterFiltering,
+    SubLines = lists:sublist(Filtered, 1, MaxLines),
+    Summary = iolist_to_binary(io_lib:format("TotalLines=~p, FilteredLines=~p",
+                                             [BeforeFiltering, FilteredCount])),
+    binary_join([Summary|SubLines], <<"\n">>).
+
+binary_join(L, Sep) ->
+    iolist_to_binary(join_s(L, Sep)).
+
+join_s([], _Sep) ->
+    [];
+join_s([H|T], Sep) ->
+    [H, [[Sep, X] || X <- T]].
+
+filter_lines(Lines) ->
+    [Line || Line <- Lines, pass_filtering(Line)].
+
+pass_filtering(Line) ->
+    not lists:any(fun(Bad) -> binary:match(Line, Bad) =/= nomatch end, filter_out_patterns()).
+
+filter_out_patterns() ->
+    [<<"issue=remove_user_failed">>,
+     <<"event=outgoing_global_distrib_socket_closed">>].
