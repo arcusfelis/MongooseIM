@@ -50,8 +50,7 @@
          forget_room/2,
          forget_room/3]).
 
-%% gdpr callbacks
--behaviour(gdpr).
+%% gdpr callback
 -export([get_personal_data/2]).
 
 %% private
@@ -120,22 +119,11 @@
 %% ----------------------------------------------------------------------
 %% API
 
--spec get_personal_data(jid:user(), jid:server()) ->
-    [{gdpr:data_group(), gdpr:schema(), gdpr:entries()}].
-get_personal_data(Username, Server) ->
+-spec get_personal_data(gdpr:personal_data(), jid:jid()) -> gdpr:personal_data().
+get_personal_data(Acc, #jid{ lserver = LServer } = JID) ->
     Schema = ["id", "message"],
-    Entries = lists:flatmap(
-        fun(B) ->
-            try B:get_mam_muc_gdpr_data(Username, Server) of
-                {ok, GdprData} ->
-                    GdprData;
-                _ -> []
-            catch
-                _:_ ->
-                    []
-            end
-        end, mongoose_lib:find_behaviour_implementations(ejabberd_gen_mam_archive)),
-    [{mam_muc, Schema, Entries}].
+    Entries = ejabberd_hooks:run_fold(get_mam_muc_gdpr_data, LServer, [], [JID]),
+    [{mam_muc, Schema, Entries} | Acc].
 
 -spec delete_archive(jid:server(), jid:user()) -> 'ok'.
 delete_archive(SubHost, RoomName) when is_binary(SubHost), is_binary(RoomName) ->
@@ -184,6 +172,7 @@ start(Host, Opts) ->
     ejabberd_hooks:add(filter_room_packet, MUCHost, ?MODULE,
                        filter_room_packet, 90),
     ejabberd_hooks:add(forget_room, MUCHost, ?MODULE, forget_room, 90),
+    ejabberd_hooks:add(get_personal_data, Host, ?MODULE, get_personal_data, 50),
     ok.
 
 -spec stop(Host :: jid:server()) -> any().
@@ -193,6 +182,7 @@ stop(Host) ->
     ?DEBUG("mod_mam stopping", []),
     ejabberd_hooks:delete(filter_room_packet, MUCHost, ?MODULE, filter_room_packet, 90),
     ejabberd_hooks:delete(forget_room, MUCHost, ?MODULE, forget_room, 90),
+    ejabberd_hooks:delete(get_personal_data, Host, ?MODULE, get_personal_data, 50),
     gen_iq_handler:remove_iq_handler(mod_muc_iq, MUCHost, ?NS_MAM_03),
     gen_iq_handler:remove_iq_handler(mod_muc_iq, MUCHost, ?NS_MAM_04),
     gen_iq_handler:remove_iq_handler(mod_muc_iq, MUCHost, ?NS_MAM_06),
@@ -644,9 +634,10 @@ report_issue(Reason, Stacktrace, Issue, #jid{lserver = LServer, luser = LUser}, 
     ?ERROR_MSG("issue=~p, server=~p, user=~p, reason=~p, iq=~p, stacktrace=~p",
                [Issue, LServer, LUser, Reason, IQ, Stacktrace]).
 
--spec is_archivable_message(Host :: ejabberd:lserver(), Dir :: incoming | outgoing,
+-spec is_archivable_message(MUCHost :: ejabberd:lserver(), Dir :: incoming | outgoing,
                             Packet :: exml:element()) -> boolean().
-is_archivable_message(Host, Dir, Packet) ->
+is_archivable_message(MUCHost, Dir, Packet) ->
+    {ok, Host} = mongoose_subhosts:get_host(MUCHost),
     {M, F} = mod_mam_params:is_archivable_message_fun(?MODULE, Host),
     ArchiveChatMarkers = mod_mam_params:archive_chat_markers(?MODULE, Host),
     erlang:apply(M, F, [?MODULE, Dir, Packet, ArchiveChatMarkers]).
