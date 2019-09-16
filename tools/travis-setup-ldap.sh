@@ -70,7 +70,7 @@ docker run -d \
     $(mount_ro_volume "$LDAP_CERT_DIR" /container/service/slapd/assets/certs/) \
     --health-cmd='ldapwhoami -x' \
     osixia/openldap:1.2.4 \
-    --copy-service
+    --copy-service --loglevel=debug
 
 echo "Waiting for ldap"
 n=0
