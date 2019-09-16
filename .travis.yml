@@ -96,6 +96,15 @@ env:
     - PRESET=dialyzer_only SKIP_RELEASE=1 SKIP_BUILD_TESTS=1 SKIP_COV=1 SKIP_REPORT_UPLOAD=1
       # In case you want to test with another ODBC driver, uncomment this
       # - PRESET=odbc_pgsql_mnesia DB=pgsql REL_CONFIG=with-odbc
+    - PRESET=internal_mnesia DB=mnesia REL_CONFIG=with-all TRY=2
+    - PRESET=odbc_mssql_mnesia DB=mssql REL_CONFIG=with-odbc TRY=2
+    - PRESET=ldap_mnesia DB=ldap REL_CONFIG=with-none TRY=2
+    - PRESET=internal_mnesia DB=mnesia REL_CONFIG=with-all TRY=3
+    - PRESET=odbc_mssql_mnesia DB=mssql REL_CONFIG=with-odbc TRY=3
+    - PRESET=ldap_mnesia DB=ldap REL_CONFIG=with-none TRY=3
+    - PRESET=internal_mnesia DB=mnesia REL_CONFIG=with-all TRY=4
+    - PRESET=odbc_mssql_mnesia DB=mssql REL_CONFIG=with-odbc TRY=4
+    - PRESET=ldap_mnesia DB=ldap REL_CONFIG=with-none TRY=4
 
 
 matrix:
@@ -119,6 +128,20 @@ matrix:
       env: PRESET=pkg pkg_PLATFORM=debian_stretch
            SKIP_COMPILE=1 SKIP_RELEASE=1 SKIP_BUILD_TESTS=1
            SKIP_COV=1 SKIP_REPORT_UPLOAD=1
+    - otp_release: 21.3
+      env: PRESET=pgsql_mnesia DB=pgsql REL_CONFIG="with-pgsql with-jingle-sip" TRY=2
+#          RUN_SMALL_TESTS=true
+    - otp_release: 21.3
+      env: PRESET=mysql_redis DB=mysql REL_CONFIG="with-mysql with-redis with-amqp_client" TRY=2
+    - otp_release: 21.3
+      env: PRESET=riak_mnesia DB=riak REL_CONFIG="with-riak with-jingle-sip" 
+    - otp_release: 21.3
+      env: PRESET=pgsql_mnesia DB=pgsql REL_CONFIG="with-pgsql with-jingle-sip" TRY=2
+#          RUN_SMALL_TESTS=true
+    - otp_release: 21.3
+      env: PRESET=mysql_redis DB=mysql REL_CONFIG="with-mysql with-redis with-amqp_client"
+    - otp_release: 21.3
+      env: PRESET=riak_mnesia DB=riak REL_CONFIG="with-riak with-jingle-sip"  TRY=2
 
 notifications:
     webhooks:
