@@ -4,15 +4,7 @@
 
 all() ->
     [is_mongooseim,
-     {group, healthcheck}].
-
-groups() ->
-    %% Wait for mongooseim starting accepting connections
-    [{healthcheck,  [{repeat_until_all_ok, 30}], healthcheck_cases()}].
-
-healthcheck_cases() ->
-    [alice_can_connect].
-
+     alice_can_connect].
 
 init_per_suite(Config) ->
     escalus:init_per_suite(Config).
@@ -32,12 +24,9 @@ is_mongooseim(Config) ->
     mongooseim = escalus_server:name(Config).
 
 alice_can_connect(Config) ->
+    mongoose_helper:wait_until(fun () -> catch try_connect(Config) end, ok, #{time_left => timer:seconds(30)}).
+
+try_connect(Config) ->
     AliceSpec = escalus_fresh:create_fresh_user(Config, alice),
-    try
-        {ok, _, _} = escalus_connection:start(AliceSpec)
-    catch Class:Reason ->
-              ct:pal("alice_can_connect failed, waiting", []),
-              Stacktrace = erlang:get_stacktrace(),
-              timer:sleep(100),
-              erlang:raise(Class, Reason, Stacktrace)
-    end.
+    {ok, _, _} = escalus_connection:start(AliceSpec),
+    ok.
