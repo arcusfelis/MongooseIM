@@ -19,8 +19,6 @@
 {suites, "tests", oauth_SUITE}.
 {suites, "tests", offline_SUITE}.
 {suites, "tests", presence_SUITE}.
-{suites, "tests", privacy_SUITE}.
-{suites, "tests", private_SUITE}.
 {suites, "tests", pubsub_SUITE}.
 {suites, "tests", push_SUITE}.
 {suites, "tests", push_http_SUITE}.
@@ -32,9 +30,6 @@
 {suites, "tests", shared_roster_SUITE}.
 {suites, "tests", sic_SUITE}.
 {suites, "tests", users_api_SUITE}.
-{suites, "tests", vcard_simple_SUITE}.
-{suites, "tests", vcard_SUITE}.
-{suites, "tests", websockets_SUITE}.
 {suites, "tests", xep_0352_csi_SUITE}.
 {suites, "tests", mongoose_cassandra_SUITE}.
 {suites, "tests", mongoose_elasticsearch_SUITE}.
