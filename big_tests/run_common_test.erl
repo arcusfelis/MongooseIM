@@ -77,7 +77,7 @@ run(#opts{test = full, spec = Spec, preset = [Preset|_], cover = Cover}) when is
                          ejabberd_cookie => mim4_cookie},
     Job5 = #{test_spec => "default5.spec", test_config => "test.config", test_config_out => "_build/test5.config",
                          first_port => 10000, preset => Preset, slave_node => ct5, prefix => "ng5", username_suffix => <<"5j">>,
-                         ejabberd_cookie => mim5_cookie, enabled_tests => [mim]},
+                         ejabberd_cookie => mim5_cookie, enabled_hosts => [mim]},
     Jobs = case Spec of
                'default.spec' ->
                    %% Three workers for the default spec
