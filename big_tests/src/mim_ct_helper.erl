@@ -96,6 +96,7 @@ after_test(CtResults, TestConfigs, #{before_start_dirs := CTRunDirsBeforeRun}) -
             [maybe_print_all_groups_state(CTRunDir) || CTRunDir <- NewCTRunDirs],
             concat_ct_markdown(NewCTRunDirs),
             FailedTestConfigs = failed_test_configs(Results, TestConfigs, NewCTRunDirs),
+            print_failed_test_configs(FailedTestConfigs),
             maybe_print_mim_logs(FailedTestConfigs),
             {error, #{exit_status_by_groups => ExitStatusByGroups,
                       exit_status_by_cases => ExitStatusByTestCases}}
@@ -146,7 +147,7 @@ print_ct_summaries(CTRunDirs) ->
     ok.
 
 print_ct_summary(CTRunDir) ->
-    case file:read_file(filename:join(CTRunDir, ct_summary)) of
+    case file:read_file(filename:join(CTRunDir, ct_summary_time)) of
         {ok, <<>>} ->
             ok;
         {ok, Bin} ->
@@ -327,6 +328,9 @@ read_truncated_value(TrFile) ->
             0
     end.
 
+print_failed_test_configs(FailedTestConfigs) ->
+    FailedTestSpecs = [TestSpec || #{test_spec := TestSpec} <- FailedTestConfigs],
+    io:format("FailedTestConfigs=~p~n", [FailedTestSpecs]).
 
 maybe_print_mim_logs(TestConfigs) ->
     case is_travis() of
