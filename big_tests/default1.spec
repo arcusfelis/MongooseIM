@@ -18,7 +18,6 @@
 {suites, "tests", muc_light_http_api_SUITE}.
 {suites, "tests", oauth_SUITE}.
 {suites, "tests", offline_SUITE}.
-{suites, "tests", pep_SUITE}.
 {suites, "tests", presence_SUITE}.
 {suites, "tests", privacy_SUITE}.
 {suites, "tests", private_SUITE}.
