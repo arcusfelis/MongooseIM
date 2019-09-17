@@ -16,5 +16,6 @@
 {suites, "tests", sm_SUITE}.
 {suites, "tests", sasl_SUITE}.
 {suites, "tests", mam_SUITE}.
+{suites, "tests", pubsub_SUITE}.
 
 {specs, join, ["base.spec"]}.
