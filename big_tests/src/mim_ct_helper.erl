@@ -92,13 +92,51 @@ after_test(CtResults, TestConfigs, #{before_start_dirs := CTRunDirsBeforeRun}) -
         {ok, ok} ->
             ok;
         Other ->
-            maybe_print_mim_logs(TestConfigs),
             [print_stanza_logs(CTRunDir) || CTRunDir <- NewCTRunDirs],
             [maybe_print_all_groups_state(CTRunDir) || CTRunDir <- NewCTRunDirs],
             concat_ct_markdown(NewCTRunDirs),
+            FailedTestConfigs = failed_test_configs(Results, TestConfigs, NewCTRunDirs),
+            maybe_print_mim_logs(FailedTestConfigs),
             {error, #{exit_status_by_groups => ExitStatusByGroups,
                       exit_status_by_cases => ExitStatusByTestCases}}
     end.
+
+failed_test_configs(Results, TestConfigs, NewCTRunDirs) ->
+    ExitCodes = exit_status_per_test(Results, TestConfigs, NewCTRunDirs),
+    Zip = lists:zip(ExitCodes, TestConfigs),
+    [TestConfig || { {error, _}, TestConfig } <- Zip].
+
+exit_status_per_test(Results, TestConfigs, NewCTRunDirs) ->
+    [exit_status_per_test1(Result, TestConfig, NewCTRunDirs)
+     || {Result, TestConfig} <- lists:zip(Results, TestConfigs)].
+
+exit_status_per_test1(Result, TestConfig, NewCTRunDirs) ->
+    ExitStatusByTestCases = process_results([Result]),
+    case find_ct_dir(Result, TestConfig, NewCTRunDirs) of
+        [] ->
+            io:format("exit_status_per_test1: no_ct_dir~n", []),
+            {error, no_ct_dir};
+        CtDirs ->
+            ExitStatusByGroups = exit_status_by_groups(CtDirs),
+            case {ExitStatusByGroups, ExitStatusByTestCases} of
+                {ok, ok} ->
+                    ok;
+                _ ->
+                    {error, #{exit_status_by_groups => ExitStatusByGroups,
+                              exit_status_by_cases => ExitStatusByTestCases}}
+            end
+    end.
+
+test_node(#{slave_node := Slave}) -> Slave;
+test_node(_) -> test.
+
+%% TODO write unique test_id into log dirs and use this in future
+find_ct_dir(Result, TestConfig, NewCTRunDirs) ->
+    TestNode = test_node(TestConfig),
+    JobCtRuns = filelib:wildcard("ct_report/ct_run." ++ atom_to_list(TestNode) ++ "*"),
+    OrdJobCtRuns = ordsets:from_list(JobCtRuns),
+    OrdNewCTRunDirs = ordsets:from_list(JobCtRuns),
+    ordsets:union(OrdJobCtRuns, OrdNewCTRunDirs).
 
 ct_run_dirs() ->
     filelib:wildcard("ct_report/ct_run*").
