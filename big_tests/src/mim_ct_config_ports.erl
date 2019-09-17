@@ -4,7 +4,8 @@
 preprocess(Config) ->
     Hosts = proplists:get_value(hosts, Config, []),
     Users = proplists:get_value(escalus_users, Config, []),
-    Users2 = replace_ports_in_user_specs(Users, Hosts),
+    Users1 = remove_users_from_disabled_hosts(Config, Users),
+    Users2 = replace_ports_in_user_specs(Users1, Hosts),
     Config2 = set_escalus_port(Config, Hosts),
     lists:keyreplace(escalus_users, 1, Config2, {escalus_users, Users2}).
 
@@ -45,3 +46,14 @@ get_host_port(Host, PortName, Hosts) ->
             end
     end.
 
+remove_users_from_disabled_hosts(Config, Users) ->
+    DisabledHosts = proplists:get_value(disabled_hosts, Config, []),
+    [{User, Spec} || {User, Spec} <- Users, not is_disabled_user(User, Spec, DisabledHosts)].
+
+is_disabled_user(_User, Spec, DisabledHosts) ->
+    case proplists:get_value(host_port, Spec) of
+        {Host, _PortName} ->
+            lists:member(Host, DisabledHosts);
+        undefined ->
+            false
+    end.

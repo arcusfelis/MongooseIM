@@ -72,7 +72,8 @@ write_terms(Filename, List) ->
     file:write_file(Filename, Text).
 
 init_hosts(TestConfig) ->
-    TestConfig1 = load_hosts(TestConfig),
+    TestConfig0 = maybe_disable_hosts(TestConfig),
+    TestConfig1 = load_hosts(TestConfig0),
     io:format("all hosts loaded~n", []),
     TestConfig2 = mim_ct_ports:rewrite_ports(TestConfig1),
     TestConfig3 = mim_ct_db:init_job(TestConfig2),
@@ -168,3 +169,14 @@ add_job_numbers([], _) ->
 
 job_numbers(TestConfigs) ->
     [N || #{job_number := N} <- TestConfigs].
+
+
+maybe_disable_hosts(TestConfig = #{enabled_hosts := EnabledHosts, hosts := Hosts}) ->
+    Hosts2 = [H || H = {Id, _} <- Hosts, lists:member(Id, EnabledHosts)],
+    DisabledHosts = [Id || {Id, _} <- Hosts, not lists:member(Id, EnabledHosts)],
+    TestConfig#{hosts => Hosts2, disabled_hosts => DisabledHosts};
+maybe_disable_hosts(TestConfig = #{disabled_hosts := DisabledHosts, hosts := Hosts}) ->
+    Hosts2 = [H || H = {Id, _} <- Hosts, not lists:member(Id, DisabledHosts)],
+    TestConfig#{hosts => Hosts2};
+maybe_disable_hosts(TestConfig) ->
+    TestConfig.
