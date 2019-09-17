@@ -13,10 +13,11 @@ run_jobs(MasterConfig, JobConfigs) ->
         mim_ct_helper:buffer_fold("db.init_master", "Init Databases", InitDbFun, "_build/init_db_out.txt"),
     MasterConfig2 = mim_ct_cover:start_cover(MasterConfig1),
     HelperState = mim_ct_helper:before_start(),
+    io:format("Jobs started ~p~n", [job_numbers(JobConfigs2)]),
     JobResults = mim_ct_parallel:parallel_map(fun(Job) -> do_job(MasterConfig2, Job) end, JobConfigs2),
     GoodResults = [GoodResult || {ok, GoodResult} <- JobResults],
     {CtResults, TestConfigs} = lists:unzip(GoodResults),
-    io:format("TestConfigs ~p", [TestConfigs]),
+    io:format("Jobs completed ~p~n", [job_numbers(TestConfigs)]),
     Result = mim_ct_helper:after_test(CtResults, TestConfigs, HelperState),
     mim_ct_cover:analyze_cover(MasterConfig1),
     {Result, TestConfigs}.
@@ -164,3 +165,6 @@ add_job_numbers([Job|JobConfigs], N) ->
     [Job#{job_number => N}|add_job_numbers(JobConfigs, N+1)];
 add_job_numbers([], _) ->
     [].
+
+job_numbers(TestConfigs) ->
+    [N || #{job_number := N} <- TestConfigs].
