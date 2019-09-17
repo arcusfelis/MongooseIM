@@ -24,5 +24,10 @@
 {suites, "tests", mod_time_SUITE}.
 {suites, "tests", mod_version_SUITE}.
 {suites, "tests", pep_SUITE}.
+{suites, "tests", privacy_SUITE}.
+{suites, "tests", private_SUITE}.
+{suites, "tests", vcard_simple_SUITE}.
+{suites, "tests", vcard_SUITE}.
+{suites, "tests", websockets_SUITE}.
 
 {specs, join, ["base.spec"]}.
