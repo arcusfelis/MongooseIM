@@ -292,15 +292,15 @@ to_atom(X) when is_atom(X) -> X.
 
 
 preprocess_log(Log) ->
-    MaxLines  = 1000,
+    MaxLines  = 500,
     Lines = binary:split(Log, <<"\n">>, [global]),
     Filtered = filter_lines(Lines),
     BeforeFiltering = length(Lines),
     AfterFiltering = length(Filtered),
-    FilteredCount = BeforeFiltering - AfterFiltering,
+    SkippedCount = BeforeFiltering - AfterFiltering,
     SubLines = lists:sublist(Filtered, 1, MaxLines),
-    Summary = iolist_to_binary(io_lib:format("TotalLines=~p, FilteredLines=~p",
-                                             [BeforeFiltering, FilteredCount])),
+    Summary = iolist_to_binary(io_lib:format("TotalLines=~p, SkippedLines=~p",
+                                             [BeforeFiltering, SkippedCount])),
     binary_join([Summary|SubLines], <<"\n">>).
 
 binary_join(L, Sep) ->
@@ -319,4 +319,5 @@ pass_filtering(Line) ->
 
 filter_out_patterns() ->
     [<<"issue=remove_user_failed">>,
-     <<"event=outgoing_global_distrib_socket_closed">>].
+     <<"event=outgoing_global_distrib_socket_closed">>,
+     <<"event=cannot_delete_personal_data">>].
