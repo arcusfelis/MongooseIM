@@ -87,7 +87,7 @@ print_log_file(Node, LogFile) ->
                     catch io:format("Failed to read file ~p~n", [Error])
             end
         end,
-    mim_ct_helper:travis_fold("Log", "Log " ++ filename:basename(LogFile) ++ " from " ++ atom_to_list(Node), F).
+    mim_ct_helper:travis_fold("Log", "Log from " ++ atom_to_list(Node) ++ " " ++ filename:basename(LogFile), F).
 
 clean_logs(NodeConfig = #{build_dir := BuildDir}) ->
     LogDir = filename:join(BuildDir, "rel/mongooseim/log"),
