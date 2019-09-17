@@ -79,7 +79,8 @@ run(#opts{test = full, spec = Spec, preset = [Preset|_], cover = Cover}) when is
                    %% Three workers for the default spec
                    [Job1, Job2, Job3, Job4];
                _ ->
-                   [Job1#{test_spec => atom_to_list(Spec)}]
+                   CtJob = Job1#{test_spec => atom_to_list(Spec)},
+                   [maps:merge(CtJob, configure_hosts())]
            end,
     Result = mim_ct:run_jobs(Master, Jobs),
     case Result of
@@ -151,3 +152,14 @@ auto_compile() ->
             true
     end.
 
+configure_hosts() ->
+    case os:getenv("TEST_HOSTS") of
+        false ->
+            #{};
+        Str ->
+            #{enabled_hosts => parse_atoms(Str)}
+    end.
+
+parse_atoms(Str) ->
+    Strings = string:tokens(Str, " "),
+    [list_to_atom(S) || S <- Strings].
