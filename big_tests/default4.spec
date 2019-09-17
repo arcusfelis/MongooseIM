@@ -11,13 +11,10 @@
 %% do not remove below SUITE if testing mongoose
 {suites, "tests", mongoose_sanity_checks_SUITE}.
 
-{suites, "tests", rdbms_SUITE}.
 {suites, "tests", connect_SUITE}.
 {suites, "tests", login_SUITE}.
-{suites, "tests", accounts_SUITE}.
 {suites, "tests", sm_SUITE}.
 {suites, "tests", sasl_SUITE}.
 {suites, "tests", mam_SUITE}.
-{suites, "tests", inbox_SUITE}.
 
 {specs, join, ["base.spec"]}.
