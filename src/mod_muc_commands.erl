@@ -115,10 +115,10 @@ create_instant_room(Host, Name, Owner, Nick) ->
     UserRoomJID = jid:make(Name, MUCHost, Nick),
     BareRoomJID = jid:make(Name, MUCHost, <<"">>),
     %% Send presence to create a room.
-    ejabberd_router:route(OwnerJID, UserRoomJID,
+    PresResult = ejabberd_router:route(OwnerJID, UserRoomJID,
                           presence(OwnerJID, UserRoomJID)),
     %% Send IQ set to unlock the room.
-    ejabberd_router:route(OwnerJID, BareRoomJID,
+    IqResult = ejabberd_router:route(OwnerJID, BareRoomJID,
                           declination(OwnerJID, BareRoomJID)),
     case mod_muc_room:can_access_room(BareRoomJID, OwnerJID) of
         {ok, true} ->
@@ -126,6 +126,8 @@ create_instant_room(Host, Name, Owner, Nick) ->
         {ok, false} ->
             {error, room_remains_locked};
         {error, not_found} = E ->
+            ?ERROR_MSG("PresResult=~100p", [PresResult]),
+            ?ERROR_MSG("IqResult=~100p", [IqResult]),
             E
     end.
 
