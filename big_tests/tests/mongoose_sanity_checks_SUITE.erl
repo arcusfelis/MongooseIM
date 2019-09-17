@@ -18,6 +18,7 @@ init_per_suite(Config) ->
     escalus:init_per_suite(Config).
 
 end_per_suite(Config) ->
+    escalus_fresh:clean(),
     escalus:end_per_suite(Config).
 
 init_per_testcase(CaseName, Config) ->
@@ -32,4 +33,11 @@ is_mongooseim(Config) ->
 
 alice_can_connect(Config) ->
     AliceSpec = escalus_fresh:create_fresh_user(Config, alice),
-    {ok, _, _} = escalus_connection:start(AliceSpec).
+    try
+        {ok, _, _} = escalus_connection:start(AliceSpec)
+    catch Class:Reason ->
+              ct:pal("alice_can_connect failed, waiting", []),
+              Stacktrace = erlang:get_stacktrace(),
+              timer:sleep(100),
+              erlang:raise(Class, Reason, Stacktrace)
+    end.
