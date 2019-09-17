@@ -23,9 +23,6 @@
 {suites, "tests", mod_event_pusher_rabbit_SUITE}.
 {suites, "tests", mod_http_notification_SUITE}.
 {suites, "tests", mod_http_upload_SUITE}.
-{suites, "tests", mod_ping_SUITE}.
-{suites, "tests", mod_time_SUITE}.
-{suites, "tests", mod_version_SUITE}.
 {suites, "tests", mod_global_distrib_SUITE}.
 
 {specs, join, ["base.spec"]}.

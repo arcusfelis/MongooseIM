@@ -20,5 +20,9 @@
 {suites, "tests", carboncopy_SUITE}.
 {suites, "tests", disco_and_caps_SUITE}.
 {suites, "tests", inbox_SUITE}.
+{suites, "tests", mod_ping_SUITE}.
+{suites, "tests", mod_time_SUITE}.
+{suites, "tests", mod_version_SUITE}.
+{suites, "tests", pep_SUITE}.
 
 {specs, join, ["base.spec"]}.
