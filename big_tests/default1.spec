@@ -19,7 +19,6 @@
 {suites, "tests", oauth_SUITE}.
 {suites, "tests", offline_SUITE}.
 {suites, "tests", presence_SUITE}.
-{suites, "tests", pubsub_SUITE}.
 {suites, "tests", push_SUITE}.
 {suites, "tests", push_http_SUITE}.
 {suites, "tests", push_integration_SUITE}.
