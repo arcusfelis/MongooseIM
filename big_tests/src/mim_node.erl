@@ -66,7 +66,10 @@ assert_node_running(NodeConfig = #{node := Node, build_dir := BuildDir}) ->
     end.
 
 print_node_logs(#{node := Node, build_dir := BuildDir}) ->
-    print_logs(Node, BuildDir).
+    print_logs(Node, BuildDir);
+print_node_logs(NodeConfig) ->
+    io:format("Skip print_node_logs for ~p~n", [NodeConfig]),
+    ok.
 
 print_logs(Node, BuildDir) ->
     LogDir = filename:join(BuildDir, "rel/mongooseim/log"),
