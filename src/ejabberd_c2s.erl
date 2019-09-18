@@ -1023,6 +1023,8 @@ handle_info(replaced, _StateName, StateData) ->
     Lang = StateData#state.lang,
     StreamConflict = mongoose_xmpp_errors:stream_conflict(Lang, <<"Replaced by new connection">>),
     maybe_send_element_from_server_jid_safe(StateData, StreamConflict),
+    %% Keep it for debugging
+    ?ERROR_MSG("issue=session_replaced state_data=~p", [StateData]),
     maybe_send_trailer_safe(StateData),
     {stop, normal, StateData#state{authenticated = replaced}};
 handle_info(new_offline_messages, session_established,
