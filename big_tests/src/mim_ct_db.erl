@@ -47,18 +47,18 @@ init_job_db(mssql, TestConfig = #{prefix := Prefix, repo_dir := RepoDir}) ->
     DbName = Prefix ++ "_mim_db",
     setup_mssql_database(DbName, RepoDir),
     set_option(mssql_database, DbName, TestConfig);
-init_job_db(mysql, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := RepoDir}) ->
+init_job_db(mysql, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := RepoDir, job_number := JobNumber}) ->
     [DbPort] = get_ports(mysql_port, TestConfig),
-    setup_mysql_container(DbPort, Prefix ++ "_mim_db_" ++ integer_to_list(DbPort), RepoDir),
+    setup_mysql_container(DbPort, Prefix ++ "_mim_db_" ++ integer_to_list(JobNumber), RepoDir),
     TestConfig;
-init_job_db(pgsql, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := RepoDir}) ->
+init_job_db(pgsql, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := RepoDir, job_number := JobNumber}) ->
     [DbPort] = get_ports(pgsql_port, TestConfig),
-    setup_pgsql_container(DbPort, Prefix ++ "_mim_db_" ++ integer_to_list(DbPort), RepoDir),
+    setup_pgsql_container(DbPort, Prefix ++ "_mim_db_" ++ integer_to_list(JobNumber), RepoDir),
     TestConfig;
-init_job_db(riak, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := RepoDir}) ->
+init_job_db(riak, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := RepoDir, job_number := JobNumber}) ->
     [RiakPort] = get_ports(riak_port, TestConfig),
     [RiakPbPort] = get_ports(riak_pb_port, TestConfig),
-    setup_riak_container(RiakPort, RiakPbPort, Prefix ++ "_mim_db_" ++ integer_to_list(RiakPort), RepoDir, TestConfig);
+    setup_riak_container(RiakPort, RiakPbPort, Prefix ++ "_mim_db_" ++ integer_to_list(JobNumber), RepoDir, TestConfig);
 init_job_db(ldap, TestConfig = #{job_number := JobNumber}) ->
     %% Use different ldap_base for each job
     set_option(ldap_prefix, integer_to_list(JobNumber), TestConfig);
@@ -179,15 +179,17 @@ print_container_logs(Container) ->
 print_riak_logs_from_disk(RepoDir, RiakContainer) ->
     LogDirDest = db_log_dir(RepoDir, RiakContainer),
     ok = filelib:ensure_dir(filename:join(LogDirDest, "ok")),
+    %% Copies to "LogDirDest/riak" directory
     {done, _, Result} = mim_ct_sh:run(["docker", "cp", RiakContainer ++ ":/var/log/riak/", LogDirDest], #{}),
     io:format("docker cp returns ~ts~n", [Result]),
-    Logs = list_files(LogDirDest),
+    Logs = list_files(filename:join(LogDirDest, "riak")),
     [print_log_file(RiakContainer, LogFile) || LogFile <- Logs],
     ok.
 
 list_files(Dir) ->
     {ok, Files} = file:list_dir(Dir),
-    [File || File <- Files, filelib:is_file(File)].
+    FullNames = [filename:join(Dir, File) || File <- Files],
+    [File || File <- FullNames, filelib:is_file(File)].
 
 db_log_dir(RepoDir, Container) ->
     filename:join([RepoDir, "big_tests", "_build", "logs-" ++ Container ++ "-" ++ format_time()]).
