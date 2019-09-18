@@ -92,8 +92,14 @@ make_hosts(TestConfig = #{test_spec := TestSpec, hosts := Hosts}) ->
     {StartTime, Results} = timer:tc(fun() -> mim_ct_parallel:parallel_map(F, Hosts) end),
     mim_ct_helper:report_progress("~nStarting hosts for ~ts took ~ts~n",
                                      [TestSpec, mim_ct_helper:microseconds_to_string(StartTime)]),
-    %% TODO report bad results
-    [] = [BadResult || {error, BadResult} <- Results],
+    BadResults = [{BadResult, Host} || {{error, BadResult}, Host} <- lists:zip(Results, Hosts)],
+    case BadResults of
+        [] ->
+            ok;
+        _ ->
+            mim_ct_db:print_job_logs(TestConfig),
+            error({failed_to_init_hosts, BadResults})
+    end,
     Hosts2 = [GoodResult || {ok, GoodResult} <- Results],
     TestConfig#{hosts => Hosts2}.
 
