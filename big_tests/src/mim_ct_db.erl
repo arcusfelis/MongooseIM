@@ -165,11 +165,17 @@ print_job_logs_for_dbs(Dbs, TestConfig) ->
     ok.
 
 print_job_logs_for_db(riak, TestConfig = #{riak_container_name := RiakContainer, repo_dir := RepoDir}) ->
+    print_container_inspect(RiakContainer),
     print_container_logs(RiakContainer),
     print_riak_logs_from_disk(RepoDir, RiakContainer),
     ok;
 print_job_logs_for_db(_Db, _TestConfig) ->
     ok.
+
+print_container_inspect(Container) ->
+    {done, _, Result} = mim_ct_sh:run(["docker", "inspect", Container], #{}),
+    F = fun() -> catch io:format("~n~ts~n", [Result]) end,
+    mim_ct_helper:travis_fold("DbInspect", "Inspect from " ++ Container, F).
 
 print_container_logs(Container) ->
     {done, _, Result} = mim_ct_sh:run(["docker", "logs", Container], #{}),
