@@ -10,7 +10,8 @@ init_per_suite(Config) ->
     escalus:init_per_suite(Config).
 
 end_per_suite(Config) ->
-    escalus_fresh:clean(),
+    %% There would be something that we can't remove in some cases
+    catch escalus_fresh:clean(),
     escalus:end_per_suite(Config).
 
 init_per_testcase(CaseName, Config) ->
