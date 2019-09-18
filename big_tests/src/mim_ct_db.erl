@@ -1,6 +1,7 @@
 -module(mim_ct_db).
 -export([init_master/2]).
 -export([init_job/1]).
+-export([print_job_logs/1]).
 
 init_master(MasterConfig = #{repo_dir := RepoDir}, JobConfigs) ->
     MasterDbs = get_databases(MasterConfig, JobConfigs),
@@ -57,8 +58,7 @@ init_job_db(pgsql, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := 
 init_job_db(riak, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := RepoDir}) ->
     [RiakPort] = get_ports(riak_port, TestConfig),
     [RiakPbPort] = get_ports(riak_pb_port, TestConfig),
-    setup_riak_container(RiakPort, RiakPbPort, Prefix ++ "_mim_db_" ++ integer_to_list(RiakPort), RepoDir),
-    TestConfig;
+    setup_riak_container(RiakPort, RiakPbPort, Prefix ++ "_mim_db_" ++ integer_to_list(RiakPort), RepoDir, TestConfig);
 init_job_db(ldap, TestConfig = #{job_number := JobNumber}) ->
     %% Use different ldap_base for each job
     set_option(ldap_prefix, integer_to_list(JobNumber), TestConfig);
@@ -146,7 +146,7 @@ setup_pgsql_container(DbPort, Prefix, RepoDir) ->
     io:format("Setup pgsql container ~p returns ~ts~n", [DbPort, Result]),
     ok.
 
-setup_riak_container(RiakPort, RiakPbPort, Prefix, RepoDir) ->
+setup_riak_container(RiakPort, RiakPbPort, Prefix, RepoDir, TestConfig) ->
     Envs = #{"DB" => "riak", 
             "RIAK_PORT" => integer_to_list(RiakPort),
             "RIAK_PB_PORT" => integer_to_list(RiakPbPort), 
@@ -154,4 +154,55 @@ setup_riak_container(RiakPort, RiakPbPort, Prefix, RepoDir) ->
     CmdOpts = #{env => Envs, cwd => RepoDir},
     {done, _, Result} = mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], CmdOpts),
     io:format("Setup riak container ~p returns ~ts~n", [RiakPort, Result]),
+    TestConfig#{riak_container_name => "mim-ct1-" ++ Prefix ++ "-riak"}.
+
+print_job_logs(TestConfig = #{preset := Preset}) ->
+    Dbs = preset_to_databases(Preset, TestConfig),
+    print_job_logs_for_dbs(Dbs, TestConfig).
+
+print_job_logs_for_dbs(Dbs, TestConfig) ->
+    [print_job_logs_for_db(Db, TestConfig) || Db <- Dbs],
     ok.
+
+print_job_logs_for_db(riak, TestConfig = #{riak_container_name := RiakContainer, repo_dir := RepoDir}) ->
+    print_container_logs(RiakContainer),
+    print_riak_logs_from_disk(RepoDir, RiakContainer),
+    ok;
+print_job_logs_for_db(_Db, _TestConfig) ->
+    ok.
+
+print_container_logs(Container) ->
+    {done, _, Result} = mim_ct_sh:run(["docker", "logs", Container], #{}),
+    F = fun() -> catch io:format("~n~ts~n", [Result]) end,
+    mim_ct_helper:travis_fold("DbLog", "Log from " ++ Container, F).
+
+print_riak_logs_from_disk(RepoDir, RiakContainer) ->
+    LogDirDest = db_log_dir(RepoDir, RiakContainer),
+    ok = filelib:ensure_dir(filename:join(LogDirDest, "ok")),
+    {done, _, Result} = mim_ct_sh:run(["docker", "cp", RiakContainer ++ ":/var/log/riak/", LogDirDest], #{}),
+    io:format("docker cp returns ~ts~n", [Result]),
+    Logs = list_files(LogDirDest),
+    [print_log_file(RiakContainer, LogFile) || LogFile <- Logs],
+    ok.
+
+list_files(Dir) ->
+    {ok, Files} = file:list_dir(Dir),
+    [File || File <- Files, filelib:is_file(File)].
+
+db_log_dir(RepoDir, Container) ->
+    filename:join([RepoDir, "big_tests", "_build", "logs-" ++ Container ++ "-" ++ format_time()]).
+
+print_log_file(Container, LogFile) ->
+    F = fun() ->
+            case file:read_file(LogFile) of
+                {ok, Bin} ->
+                    catch io:format("~n~ts~n", [Bin]);
+                Error ->
+                    catch io:format("Failed to read file ~p~n", [Error])
+            end
+        end,
+    mim_ct_helper:travis_fold("DbLog", "Log from " ++ Container ++ " " ++ filename:basename(LogFile), F).
+
+format_time() ->
+    {{Year, Month, Day}, {Hour, Minute, Second}} = calendar:now_to_datetime(erlang:now()),
+    lists:flatten(io_lib:format("~4..0w-~2..0w-~2..0wT~2..0w:~2..0w:~2..0w",[Year,Month,Day,Hour,Minute,Second])).
