@@ -34,7 +34,8 @@ make(NodeConfig = #{node := Node}) ->
     NodeConfig4 = clean_logs(NodeConfig3),
     io:format("starting ~p~n", [Node]),
     NodeConfig5 = start(NodeConfig4),
-    assert_node_running(NodeConfig5).
+    NodeConfig6 = assert_node_running(NodeConfig5),
+    assert_can_register_users(NodeConfig6).
 
 stop(NodeConfig = #{node := Node}) ->
     StopReturns = rpc:call(Node, init, stop, []),
@@ -51,6 +52,24 @@ wait_for_pang(Node) ->
             timer:sleep(100),
             wait_for_pang(Node)
     end.
+
+assert_can_register_users(NodeConfig = #{node := Node}) ->
+    Fun = fun() ->
+            Host = hd(rpc:call(Node, ejabberd_config, get_global_option, [hosts])),
+            Result = exist_is_ok(rpc:call(Node, ejabberd_auth, try_register, [<<"ct_user">>, Host, <<"ct_password123">>])),
+            rpc:call(Node, ejabberd_auth, remove_user, [<<"ct_user">>, Host]),
+            Result
+          end,
+    Opts = #{time_left => timer:seconds(10),
+             sleep_time => 1000,
+             name => assert_can_register_users_timeout},
+    mongoose_helper:wait_until(Fun, ok, Opts),
+    NodeConfig.
+
+exist_is_ok({error, exist}) ->
+    ok;
+exist_is_ok(Result) ->
+    Result.
 
 assert_node_running(NodeConfig = #{node := Node, build_dir := BuildDir}) ->
     case net_adm:ping(Node) of
