@@ -23,7 +23,7 @@ id(_Opts) ->
 %% @doc Always called before any other callback function. Use this to initiate
 %% any common state.
 init(_Id, _Opts) ->
-    {ok, #state{ limit = 200 }}.
+    {ok, #state{ limit = 50 }}.
 
 post_init_per_suite(SuiteName, Config, Return, State) ->
     State2 = handle_return(Return, Config, State),
