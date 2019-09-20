@@ -43,7 +43,7 @@ groups() ->
     ct_helper:repeat_all_until_all_ok(G).
 
 suite() ->
-    [{require, {hosts, mim, ldap_prefix}}] ++
+    [{require, {hosts, mim, ldap_suffix}}] ++
     require_rpc_nodes([mim]) ++ escalus:suite().
 
 %%--------------------------------------------------------------------
@@ -167,9 +167,9 @@ get_auth_method() ->
     rpc(mim(), ejabberd_config, get_local_option, [{auth_method, XMPPDomain}]).
 
 get_ldap_args() ->
-    Prefix = ct:get_config({hosts, mim, ldap_prefix}),
+    Suffix = ct:get_config({hosts, mim, ldap_suffix}),
     [
-     {ldap_base, "ou=Users" ++ Prefix ++ ",dc=esl,dc=com"},
+     {ldap_base, "ou=Users" ++ Suffix ++ ",dc=esl,dc=com"},
      {ldap_groupattr, "ou"},
      {ldap_memberattr, "cn"},{ldap_userdesc, "cn"},
      {ldap_filter, "(objectClass=inetOrgPerson)"},
