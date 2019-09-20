@@ -55,6 +55,8 @@ groups() ->
            test_pm_with_disconnection_on_other_server,
            test_pm_with_graceful_reconnection_to_different_server,
            test_pm_with_ungraceful_reconnection_to_different_server,
+           test_pm_with_ungraceful_reconnection_to_different_server_with_asia_refreshes_first,
+           test_pm_with_ungraceful_reconnection_to_different_server_with_europe_refreshes_first,
            test_global_disco,
            test_component_unregister,
            test_update_senders_host,
@@ -96,7 +98,8 @@ groups() ->
            test_pm_between_users_at_different_locations
           ]}
         ],
-    ct_helper:repeat_all_until_all_ok(G).
+%   ct_helper:repeat_all_until_all_ok(G).
+    G.
 
 suite() ->
     [{require, europe_node1, {hosts, mim, node}},
@@ -153,6 +156,10 @@ init_per_group(advertised_endpoints, Config) ->
     init_per_group(advertised_endpoints_generic,
                [{add_advertised_endpoints,
                  [{asia_node, advertised_endpoints()}]} | Config]);
+init_per_group(mod_global_distrib, Config) ->
+    %% Disable mod_global_distrib_mapping_redis refresher
+    RedisExtraConfig = [{refresh_after, 3600}],
+    init_per_group(mod_global_distrib_generic, [{redis_extra_config, RedisExtraConfig} | Config]);
 init_per_group(_, Config0) ->
     Config2 =
         lists:foldl(
@@ -229,9 +236,37 @@ init_per_testcase(CaseName, Config)
     hide_node(europe_node2, Config),
     muc_helper:load_muc(<<"muc.localhost">>),
     escalus:init_per_testcase(CaseName, Config);
+init_per_testcase(CN, Config) when CN == test_pm_with_graceful_reconnection_to_different_server;
+                                   CN == test_pm_with_ungraceful_reconnection_to_different_server;
+                                   CN == test_pm_with_ungraceful_reconnection_to_different_server_with_asia_refreshes_first;
+                                   CN == test_pm_with_ungraceful_reconnection_to_different_server_with_europe_refreshes_first ->
+    escalus:init_per_testcase(CN, init_user_eve(Config));
 init_per_testcase(CaseName, Config) ->
     escalus:init_per_testcase(CaseName, Config).
 
+init_user_eve(Config) ->
+    %% Register Eve in reg cluster
+    EveSpec = escalus_fresh:create_fresh_user(Config, eve),
+    MimPort = ct:get_config({hosts, mim, c2s_port}),
+    EveSpec2 = lists:keystore(port, 1, EveSpec, {port, MimPort}),
+    %% Register Eve in mim cluster
+    escalus:create_users(Config, [{eve, EveSpec2}]),
+    [{evespec_reg, EveSpec}, {evespec_mim, EveSpec2} | Config].
+
+end_per_testcase(CN, Config) when CN == test_pm_with_graceful_reconnection_to_different_server;
+                                  CN == test_pm_with_ungraceful_reconnection_to_different_server;
+                                  CN == test_pm_with_ungraceful_reconnection_to_different_server_with_asia_refreshes_first;
+                                  CN == test_pm_with_ungraceful_reconnection_to_different_server_with_europe_refreshes_first ->
+    MimEveSpec = ?config(evespec_mim, Config),
+    %% Clean Eve from reg cluster
+    escalus_fresh:clean(),
+    %% Clean Eve from mim cluster
+    %% For shared databases (i.e. mysql, pgsql...),
+    %% removing from one cluster would remove from all clusters.
+    %% For mnesia auth backend we need to call removal from each cluster.
+    %% That's why there is a catch here.
+    catch escalus_users:delete_users(Config, [{mim_eve, MimEveSpec}]),
+    generic_end_per_testcase(CN, Config);
 end_per_testcase(CaseName, Config)
   when CaseName == test_muc_conversation_on_one_host; CaseName == test_global_disco;
        CaseName == test_muc_conversation_history ->
@@ -402,42 +437,55 @@ test_muc_conversation_history(Config0) ->
               RoomAddr = muc_helper:room_address(RoomJid),
 
               escalus:send(Alice, muc_helper:stanza_muc_enter_room(RoomJid, AliceUsername)),
-              escalus:wait_for_stanza(Alice),
+              %% We don't care about presences from Alice, escalus would filter them out
+              wait_for_subject(Alice),
 
-              lists:foreach(fun(I) ->
-                                    Msg = <<"test-", (integer_to_binary(I))/binary>>,
-                                    escalus:send(Alice, escalus_stanza:groupchat_to(RoomAddr, Msg))
-                            end, lists:seq(1, 3)),
+              send_n_muc_messages(Alice, RoomAddr, 3),
+
               %% Ensure that the messages are received by the room
               %% before trying to login Eve.
               %% Otherwise, Eve would receive some messages from history and
               %% some as regular groupchat messages.
-              escalus:wait_for_stanzas(Alice, 3),
+              receive_n_muc_messages(Alice, 3),
 
               EveUsername = escalus_utils:get_username(Eve),
               escalus:send(Eve, muc_helper:stanza_muc_enter_room(RoomJid, EveUsername)),
 
-              AlicePresence = escalus:wait_for_stanza(Eve),
-              escalus:assert(is_presence, AlicePresence),
-              ?assertEqual(muc_helper:room_address(RoomJid, AliceUsername),
-                           exml_query:attr(AlicePresence, <<"from">>)),
+              wait_for_muc_presence(Eve, RoomJid, AliceUsername),
+              wait_for_muc_presence(Eve, RoomJid, EveUsername),
 
-              MyRoomPresence = escalus:wait_for_stanza(Eve),
-              escalus:assert(is_presence, MyRoomPresence),
-              ?assertEqual(muc_helper:room_address(RoomJid, EveUsername),
-                           exml_query:attr(MyRoomPresence, <<"from">>)),
-
-              lists:foreach(fun(J) ->
-                                    Msg = <<"test-", (integer_to_binary(J))/binary>>,
-                                    Stanza = escalus:wait_for_stanza(Eve),
-                                    escalus:assert(is_groupchat_message, [Msg], Stanza)
-                            end, lists:seq(1, 3)),
-
-              Subject = escalus:wait_for_stanza(Eve),
-              escalus:assert(is_groupchat_message, Subject),
-              ?assertNotEqual(undefined, exml_query:subelement(Subject, <<"subject">>))
+              %% XEP-0045: After sending the presence broadcast (and only after doing so),
+              %% the service MAY then send discussion history, the room subject,
+              %% live messages, presence updates, and other in-room traffic.
+              receive_n_muc_messages(Eve, 3),
+              wait_for_subject(Eve)
       end),
     muc_helper:destroy_room(Config).
+
+wait_for_muc_presence(User, RoomJid, FromNickname) ->
+    Presence = escalus:wait_for_stanza(User),
+    escalus:assert(is_presence, Presence),
+    escalus:assert(is_stanza_from, [muc_helper:room_address(RoomJid, FromNickname)], Presence),
+    ok.
+
+wait_for_subject(User) ->
+    Subject = escalus:wait_for_stanza(User),
+    escalus:assert(is_groupchat_message, Subject),
+    ?assertNotEqual(undefined, exml_query:subelement(Subject, <<"subject">>)),
+    ok.
+
+send_n_muc_messages(User, RoomAddr, N) ->
+    lists:foreach(fun(I) ->
+                          Msg = <<"test-", (integer_to_binary(I))/binary>>,
+                          escalus:send(User, escalus_stanza:groupchat_to(RoomAddr, Msg))
+                  end, lists:seq(1, N)).
+
+receive_n_muc_messages(User, N) ->
+    lists:foreach(fun(J) ->
+                          Msg = <<"test-", (integer_to_binary(J))/binary>>,
+                          Stanza = escalus:wait_for_stanza(User),
+                          escalus:assert(is_groupchat_message, [Msg], Stanza)
+                            end, lists:seq(1, N)).
 
 test_component_on_one_host(Config) ->
     ComponentConfig = [{server, <<"localhost">>}, {host, <<"localhost">>}, {password, <<"secret">>},
@@ -550,20 +598,23 @@ test_pm_with_disconnection_on_other_server(Config) ->
       end).
 
 test_pm_with_graceful_reconnection_to_different_server(Config) ->
-    EveSpec = escalus_fresh:freshen_spec(Config, eve),
-    escalus:create_users(Config, [{eve, [{port, 5222} | EveSpec]}]),
+    EveSpec = ?config(evespec_reg, Config),
+    EveSpec2 = ?config(evespec_mim, Config),
     escalus:fresh_story(
       Config, [{alice, 1}],
       fun(Alice) ->
               Eve = connect_from_spec(EveSpec, Config),
 
               escalus_client:send(Eve, escalus_stanza:chat_to(Alice, <<"Hi from Asia!">>)),
-              escalus_connection:stop(Eve),
+
+              %% Stop connection and wait for process to die
+              EveNode = ct:get_config({hosts, reg, node}),
+              mongoose_helper:logout_user(Config, Eve, EveNode),
 
               FromEve = escalus_client:wait_for_stanza(Alice),
 
               escalus_client:send(Alice, chat_with_seqnum(Eve, <<"Hi from Europe1!">>)),
-              NewEve = connect_from_spec([{port, 5222} | EveSpec], Config),
+              NewEve = connect_from_spec(EveSpec2, Config),
 
               escalus_client:send(Alice, chat_with_seqnum(Eve, <<"Hi again from Europe1!">>)),
               escalus_client:send(NewEve, escalus_stanza:chat_to(Alice, <<"Hi again from Asia!">>)),
@@ -578,48 +629,93 @@ test_pm_with_graceful_reconnection_to_different_server(Config) ->
               escalus:assert(is_chat_message, [<<"Hi from Asia!">>], FromEve),
               escalus:assert(is_chat_message, [<<"Hi again from Europe1!">>], AgainFromAlice),
               escalus:assert(is_chat_message, [<<"Hi again from Asia!">>], AgainFromEve)
-      end),
-    escalus_users:delete_users(Config, [{eve, [{port, 5222} | EveSpec]}]).
+          end).
 
-test_pm_with_ungraceful_reconnection_to_different_server(Config0) ->
-%% This tests the feature which has not been implemented (yet?) by mod_global_distrib
-%% It is susceptible to a race condition, however it is very unlikely to occur
+%% Refresh logic can cause two possible behaviours.
+%% We test both behaviours here (plus no refresh case)
 %% See PR #2392
+test_pm_with_ungraceful_reconnection_to_different_server(Config) ->
+    %% No refresh
+    BeforeResume = fun() -> ok end,
+    AfterCheck = fun(Alice, NewEve) ->
+            user_receives(NewEve, [<<"Hi from Europe1!">>, <<"Hi again from Europe1!">>]),
+            user_receives(Alice, [<<"Hi from Europe!">>])
+         end,
+    do_test_pm_with_ungraceful_reconnection_to_different_server(Config, BeforeResume, AfterCheck).
+
+test_pm_with_ungraceful_reconnection_to_different_server_with_asia_refreshes_first(Config) ->
+    %% Same as no refresh
+    BeforeResume = fun() -> refresh_hosts([reg, mim]) end,
+    AfterCheck = fun(Alice, NewEve) ->
+            user_receives(NewEve, [<<"Hi from Europe1!">>, <<"Hi again from Europe1!">>]),
+            user_receives(Alice, [<<"Hi from Europe!">>])
+         end,
+    do_test_pm_with_ungraceful_reconnection_to_different_server(Config, BeforeResume, AfterCheck).
+
+test_pm_with_ungraceful_reconnection_to_different_server_with_europe_refreshes_first(Config) ->
+    %% Asia node overrides Europe value with the older ones,
+    %% so we loose some messages during rerouting :(
+    BeforeResume = fun() -> refresh_hosts([mim, reg]) end,
+    AfterCheck = fun(Alice, NewEve) ->
+            user_receives(NewEve, [<<"Hi again from Europe1!">>]),
+            user_receives(Alice, [<<"Hi from Europe!">>])
+         end,
+    do_test_pm_with_ungraceful_reconnection_to_different_server(Config, BeforeResume, AfterCheck).
+
+%% Reconnect Eve from asia (reg cluster) to europe (mim)
+do_test_pm_with_ungraceful_reconnection_to_different_server(Config0, BeforeResume, AfterCheck) ->
     Config = escalus_users:update_userspec(Config0, eve, stream_management, true),
-    EveSpec = escalus_fresh:create_fresh_user(Config, eve),
-    EveSpec2 = lists:keystore(port, 1, EveSpec, {port, 5222}),
-    escalus:create_users(Config, [{eve, EveSpec2}]),
+    EveSpec = ?config(evespec_reg, Config),
+    EveSpec2 = ?config(evespec_mim, Config),
     escalus:fresh_story(
       Config, [{alice, 1}],
       fun(Alice) ->
-              StepsWithSM = [start_stream, stream_features, maybe_use_ssl,
-                             authenticate, bind, session, stream_resumption],
-
-              {ok, Eve0, _} = escalus_connection:start(EveSpec, StepsWithSM),
-              Eve = Eve0#client{jid = common_helper:get_bjid(EveSpec)},
+              {ok, Eve, _} = escalus_connection:start(EveSpec, connect_steps_with_sm()),
               escalus_story:send_initial_presence(Eve),
               escalus_client:wait_for_stanza(Eve),
 
+              %% Stop connection and wait for process to die
+              EveNode = ct:get_config({hosts, reg, node}),
+              C2sPid = mongoose_helper:get_session_pid(Eve, EveNode),
+              ok = rpc(asia_node, sys, suspend, [C2sPid]),
+
+              escalus_client:send(Alice, chat_with_seqnum(bare_client(Eve), <<"Hi from Europe1!">>)),
+
+              %% Wait for route message to be queued in c2s message queue
+              mongoose_helper:wait_for_route_message_count(C2sPid, 1),
+
+              %% Time to do bad nasty things with our socket, so once our process wakes up,
+              %% it SHOULD detect a dead socket
               escalus_connection:kill(Eve),
 
-              escalus_client:send(Alice, chat_with_seqnum(Eve, <<"Hi from Europe1!">>)),
-
+              %% Connect another one, we hope the message would be rerouted
               NewEve = connect_from_spec(EveSpec2, Config),
 
-              escalus_client:send(Alice, chat_with_seqnum(Eve, <<"Hi again from Europe1!">>)),
-              escalus_client:send(NewEve, escalus_stanza:chat_to(Alice, <<"Hi from Asia!">>)),
+              %% We receive presence BEFORE session is registered in ejabberd_sm.
+              %% So, to ensure that we processed do_open_session completely, let's send a "ping".
+              %% by calling the c2s process.
+              %% That call would only return, when all messages in erlang message queue
+              %% are processed.
+              EveNode2 = ct:get_config({hosts, mim, node}),
+              mongoose_helper:wait_until(fun() -> is_pid(mongoose_helper:get_session_pid(NewEve, EveNode2)) end, true,
+                                         #{name => wait_for_session}),
+              C2sPid2 = mongoose_helper:get_session_pid(NewEve, EveNode2),
+              rpc:call(node(C2sPid2), ejabberd_c2s, get_info, [C2sPid2]),
 
-              FirstFromAlice = escalus_client:wait_for_stanza(NewEve, timer:seconds(10)),
-              SecondFromAlice = escalus_client:wait_for_stanza(NewEve, timer:seconds(10)),
-              AgainFromEve = escalus_client:wait_for_stanza(Alice),
+              BeforeResume(),
 
-              [FromAlice, AgainFromAlice] = order_by_seqnum([FirstFromAlice, SecondFromAlice]),
+              %% Trigger rerouting
+              ok = rpc(asia_node, sys, resume, [C2sPid]),
+              C2sPid ! resume_timeout,
 
-              escalus:assert(is_chat_message, [<<"Hi from Europe1!">>], FromAlice),
-              escalus:assert(is_chat_message, [<<"Hi again from Europe1!">>], AgainFromAlice),
-              escalus:assert(is_chat_message, [<<"Hi from Asia!">>], AgainFromEve)
-      end).
+              %% Let C2sPid to process the message and reroute (and die finally, poor little thing)
+              mongoose_helper:wait_for_pid_to_die(C2sPid),
 
+              escalus_client:send(Alice, chat_with_seqnum(bare_client(Eve), <<"Hi again from Europe1!">>)),
+              escalus_client:send(NewEve, escalus_stanza:chat_to(Alice, <<"Hi from Europe!">>)),
+
+              AfterCheck(Alice, NewEve)
+          end).
 
 test_global_disco(Config) ->
     escalus:fresh_story(
@@ -909,9 +1005,8 @@ refresh_node(NodeName, Config) ->
 
 connect_from_spec(UserSpec, Config) ->
     {ok, User} = escalus_client:start(Config, UserSpec, <<"res1">>),
-    escalus_story:send_initial_presence(User),
-    escalus:wait_for_stanza(User),
     escalus_connection:set_filter_predicate(User, fun(S) -> not escalus_pred:is_presence(S) end),
+    escalus_story:send_initial_presence(User),
     User.
 
 chat_with_seqnum(To, Text) ->
@@ -1094,3 +1189,30 @@ refresh_mappings(NodeName, Config) ->
 trigger_rebalance(NodeName, DestinationDomain) ->
     rpc(NodeName, mod_global_distrib_server_mgr, force_refresh, [DestinationDomain]),
     timer:sleep(1000).
+
+user_receives(User, Bodies) ->
+    ExpectedLength = length(Bodies),
+    Messages = escalus_client:wait_for_stanzas(User, ExpectedLength),
+    SortedMessages = order_by_seqnum(Messages),
+    case length(Messages) of
+        ExpectedLength ->
+            Checks = [escalus_pred:is_chat_message(Body, Stanza) || {Body, Stanza} <- lists:zip(Bodies, SortedMessages)],
+            case lists:all(fun(Check) -> Check end, Checks) of
+                true ->
+                    ok;
+                false ->
+                    ct:fail({user_receives_failed, {wanted, Bodies}, {received, SortedMessages}, {check, Checks}})
+            end;
+        _ ->
+            ct:fail({user_receives_not_enough, {wanted, Bodies}, {received, SortedMessages}})
+    end.
+
+refresh_hosts(Hosts) ->
+   [rpc:call(ct:get_config({hosts, Host, node}), mod_global_distrib_mapping_redis, refresh, []) || Host <- Hosts].
+
+connect_steps_with_sm() ->
+    [start_stream, stream_features, maybe_use_ssl,
+     authenticate, bind, session, stream_resumption].
+
+bare_client(Client) ->
+    Client#client{jid = escalus_utils:get_short_jid(Client)}.

@@ -15,13 +15,16 @@
 -include("mongoose.hrl").
 -include("mongoose_logger.hrl").
 
--behaviour(gdpr).
-
 -export([get_personal_data/2]).
 
 -export([start/2, stop/1, deps/2]).
--export([process_iq/4, user_send_packet/4, filter_packet/1,
-         inbox_unread_count/2, remove_user/2, remove_user/3]).
+-export([process_iq/4,
+         process_iq_conversation/4,
+         user_send_packet/4,
+         filter_packet/1,
+         inbox_unread_count/2,
+         remove_user/3
+        ]).
 -export([clear_inbox/2]).
 
 -callback init(Host, Opts) -> ok when
@@ -87,11 +90,8 @@
 %% gdpr callbacks
 %%--------------------------------------------------------------------
 
--spec get_personal_data(jid:username(), jid:server()) ->
-    [{gdpr:data_group(), gdpr:schema(), gdpr:entries()}].
-get_personal_data(Username, Server) ->
-    LUser = jid:nodeprep(Username),
-    LServer = jid:nameprep(Server),
+-spec get_personal_data(gdpr:personal_data(), jid:jid()) -> gdpr:personal_data().
+get_personal_data(Acc, #jid{ luser = LUser, lserver = LServer }) ->
     Schema = ["jid", "content", "unread_count", "timestamp"],
     InboxParams = #{
         start => {0,0,0},
@@ -99,23 +99,10 @@ get_personal_data(Username, Server) ->
         order => asc,
         hidden_read => false
        },
-      Entries = lists:flatmap(fun(B) ->
-                          try B:get_inbox(LUser, LServer, InboxParams) of
-                              Entries when is_list(Entries) -> Entries;
-                              _ -> []
-                          catch
-                              C:R ->
-                                  log_get_personal_data_warning(B, C, R, erlang:get_stacktrace()),
-                                  []
-                          end
-                  end, mongoose_lib:find_behaviour_implementations(mod_inbox)),
+    Entries = mod_inbox_backend:get_inbox(LUser, LServer, InboxParams),
     ProcessedEntries = [{ RemJID, Content, UnreadCount, jlib:now_to_utc_string(Timestamp) } ||
                         { RemJID, Content, UnreadCount, Timestamp } <- Entries],
-    [{inbox, Schema, ProcessedEntries}].
-
-log_get_personal_data_warning(Backend, Class, Reason, StackTrace) ->
-    ?WARNING_MSG("event=cannot_retrieve_personal_data,backend=~p,class=~p,reason=~p,stacktrace=~p",
-                 [Backend, Class, Reason, StackTrace]).
+    [{inbox, Schema, ProcessedEntries} | Acc].
 
 %%--------------------------------------------------------------------
 %% inbox callbacks
@@ -141,7 +128,10 @@ start(Host, Opts) ->
     lists:member(muc, MucTypes) andalso mod_inbox_muc:start(Host),
     ejabberd_hooks:add(hooks(Host)),
     store_bin_reset_markers(Host, FullOpts),
-    gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_ESL_INBOX, ?MODULE, process_iq, IQDisc).
+    gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_ESL_INBOX,
+                                  ?MODULE, process_iq, IQDisc),
+    gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_ESL_INBOX_CONVERSATION,
+                                  ?MODULE, process_iq_conversation, IQDisc).
 
 
 -spec stop(Host :: jid:server()) -> ok.
@@ -174,6 +164,32 @@ process_iq(From, _To, Acc, #iq{type = set, id = QueryId, sub_el = QueryEl} = IQ)
             Res = IQ#iq{type = result, sub_el = [build_result_iq(List)]},
             {Acc, Res}
     end.
+
+-spec process_iq_conversation(From :: jid:jid(),
+                              To :: jid:jid(),
+                              Acc :: mongoose_acc:t(),
+                              IQ :: jlib:iq()) ->
+    {stop, mongoose_acc:t()} | {mongoose_acc:t(), jlib:iq()}.
+process_iq_conversation(From, _To, Acc,
+                        #iq{type = set,
+                            xmlns = ?NS_ESL_INBOX_CONVERSATION,
+                            sub_el = #xmlel{name = <<"reset">>} = ResetStanza} = IQ) ->
+    maybe_process_reset_stanza(From, Acc, IQ, ResetStanza).
+
+maybe_process_reset_stanza(From, Acc, IQ, ResetStanza) ->
+    case reset_stanza_extract_interlocutor_jid(ResetStanza) of
+        {error, Msg} ->
+            {Acc, IQ#iq{type = error, sub_el = [mongoose_xmpp_errors:bad_request(<<"en">>, Msg)]}};
+        InterlocutorJID ->
+            process_reset_stanza(From, Acc, IQ, ResetStanza, InterlocutorJID)
+    end.
+
+process_reset_stanza(From, Acc, IQ, _ResetStanza, InterlocutorJID) ->
+    ok = mod_inbox_utils:reset_unread_count_to_zero(From, InterlocutorJID),
+    {Acc, IQ#iq{type = result,
+                sub_el = [#xmlel{name = <<"reset">>,
+                                 attrs = [{<<"xmlns">>, ?NS_ESL_INBOX_CONVERSATION}],
+                                 children = []}]}}.
 
 -spec forward_messages(List :: list(inbox_res()),
                        QueryId :: id(),
@@ -229,23 +245,10 @@ filter_packet({From, To, Acc, Packet}) ->
     {From, To, Acc, Packet}.
 
 remove_user(Acc, User, Server) ->
-    remove_user(User, Server),
-    Acc.
-
-remove_user(User, Server) ->
     LUser = jid:nodeprep(User),
-    LServer = jid:nodeprep(Server),
-    lists:foreach(fun(B) ->
-        try
-            B:clear_inbox(LUser, LServer)
-        catch
-            E:R ->
-                Stack = erlang:get_stacktrace(),
-                ?WARNING_MSG("issue=remove_user_failed "
-                "reason=~p:~p "
-                "stacktrace=~1000p ", [E, R, Stack]),
-                ok
-        end end, mongoose_lib:find_behaviour_implementations(mod_inbox)).
+    LServer = jid:nameprep(Server),
+    mod_inbox_backend:clear_inbox(LUser, LServer),
+    Acc.
 
 -spec maybe_process_message(Host :: host(),
                             From :: jid:jid(),
@@ -253,14 +256,21 @@ remove_user(User, Server) ->
                             Msg :: exml:element(),
                             Dir :: outgoing | incoming) -> ok | {ok, integer()}.
 maybe_process_message(Host, From, To, Msg, Dir) ->
-    AcceptableMessage = should_be_stored_in_inbox(Msg),
-    case AcceptableMessage of
+    case should_be_stored_in_inbox(Msg) andalso inbox_owner_exists(From, To, Dir) of
         true ->
             Type = get_message_type(Msg),
             maybe_process_acceptable_message(Host, From, To, Msg, Dir, Type);
         false ->
             ok
     end.
+
+-spec inbox_owner_exists(From :: jid:jid(),
+                         To :: jid:jid(),
+                         Dir :: outgoing | incoming) -> boolean().
+inbox_owner_exists(From, _To, outgoing) ->
+    ejabberd_users:does_user_exist(From#jid.luser, From#jid.lserver);
+inbox_owner_exists(_From, To, incoming) ->
+    ejabberd_users:does_user_exist(To#jid.luser, To#jid.lserver).
 
 maybe_process_acceptable_message(Host, From, To, Msg, Dir, one2one) ->
             process_message(Host, From, To, Msg, Dir, one2one);
@@ -396,7 +406,8 @@ hooks(Host) ->
      {remove_user, Host, ?MODULE, remove_user, 50},
      {user_send_packet, Host, ?MODULE, user_send_packet, 70},
      {filter_local_packet, Host, ?MODULE, filter_packet, 90},
-     {inbox_unread_count, Host, ?MODULE, inbox_unread_count, 80}
+     {inbox_unread_count, Host, ?MODULE, inbox_unread_count, 80},
+     {get_personal_data, Host, ?MODULE, get_personal_data, 50}
     ].
 
 get_groupchat_types(Host) ->
@@ -484,6 +495,19 @@ get_message_type(Msg) ->
             groupchat;
         _ ->
             one2one
+    end.
+
+reset_stanza_extract_interlocutor_jid(ResetStanza) ->
+    case exml_query:attr(ResetStanza, <<"jid">>) of
+        undefined ->
+            {error, invalid_field_value(<<"jid">>, <<"No Interlocutor JID provided">>)};
+        Value ->
+            case jid:from_binary(Value) of
+                error ->
+                    ?ERROR_MSG("event=invalid_inbox_form_field,field=jid,value=~s", [Value]),
+                    {error, invalid_field_value(<<"jid">>, Value)};
+                JID -> JID
+            end
     end.
 
 -spec clear_inbox(Username :: jid:luser(), Server :: host()) -> inbox_write_res().
