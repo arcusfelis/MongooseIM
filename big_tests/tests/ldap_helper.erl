@@ -38,7 +38,7 @@ create_user({_User, Spec}) ->
     UserStr=binary_to_list(User),
     Base = get_ldap_base(Server),
     DN = "cn=" ++ UserStr ++ "," ++ binary_to_list(Base),
-    Prefix = ct:get_config({hosts, mim, ldap_prefix}),
+    Prefix = ct:get_config({hosts, mim, ldap_suffix}),
     Attrs = [{"objectclass", ["inetOrgPerson"]},
              {"cn", [UserStr]},
              {"sn", [UserStr]},

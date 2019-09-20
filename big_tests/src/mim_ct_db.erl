@@ -61,7 +61,7 @@ init_job_db(riak, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := R
     setup_riak_container(RiakPort, RiakPbPort, Prefix ++ "_mim_db_" ++ integer_to_list(JobNumber), RepoDir, TestConfig);
 init_job_db(ldap, TestConfig = #{job_number := JobNumber}) ->
     %% Use different ldap_base for each job
-    set_option(ldap_prefix, integer_to_list(JobNumber), TestConfig);
+    set_option(ldap_suffix, integer_to_list(JobNumber), TestConfig);
 init_job_db(redis, TestConfig = #{job_number := JobNumber}) ->
     set_option(redis_database, JobNumber, TestConfig);
 init_job_db(Db, _TestConfig) ->
