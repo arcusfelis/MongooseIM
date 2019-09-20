@@ -98,7 +98,8 @@ groups() ->
            test_pm_between_users_at_different_locations
           ]}
         ],
-    ct_helper:repeat_all_until_all_ok(G).
+%   ct_helper:repeat_all_until_all_ok(G).
+    G.
 
 suite() ->
     [{require, europe_node1, {hosts, mim, node}},
