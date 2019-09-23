@@ -60,7 +60,8 @@ clustering_two_tests() ->
      leave_but_no_cluster,
      join_twice,
      leave_using_rpc,
-     leave_twice].
+     leave_twice,
+     join_twice_in_parallel].
 
 clustering_three_tests() ->
     [cluster_of_three,
@@ -149,7 +150,8 @@ end_per_testcase(CaseName, Config) when CaseName == join_successful_prompt
                                    orelse CaseName == join_successful_force
                                    orelse CaseName == leave_unsuccessful_prompt
                                    orelse CaseName == leave_unsuccessful_force
-                                   orelse CaseName == join_twice ->
+                                   orelse CaseName == join_twice
+                                   orelse CaseName == join_twice_in_parallel ->
     Node2 = mim2(),
     remove_node_from_cluster(Node2, Config),
     escalus:end_per_testcase(CaseName, Config);
@@ -288,6 +290,23 @@ join_twice(Config) ->
     distributed_helper:verify_result(Node2, add),
     ?eq(0, OpCode1),
     ?ne(0, OpCode2).
+
+%% Check, that global transaction allows to run only one cluster operation at the time
+join_twice_in_parallel(Config) ->
+    %% given
+    Node1 = mim(),
+    Node2 = mim2(),
+    Timeout = timer:seconds(60),
+    %% when
+    proc_lib:spawn_link(fun() ->
+        ok = rpc(Node2, mongoose_cluster, join, [Node2], Timeout)
+        end),
+    proc_lib:spawn_link(fun() ->
+        ok = rpc(Node2, mongoose_cluster, join, [Node2], Timeout)
+        end),
+    %% then
+    distributed_helper:verify_result(Node2, add),
+    ok.
 
 leave_using_rpc(Config) ->
     %% given
