@@ -342,4 +342,5 @@ pass_filtering(Line) ->
 filter_out_patterns() ->
     [<<"issue=remove_user_failed">>,
      <<"event=outgoing_global_distrib_socket_closed">>,
-     <<"event=cannot_delete_personal_data">>].
+     <<"event=cannot_delete_personal_data">>,
+     <<"event=incoming_global_distrib_socket_closed">>].
