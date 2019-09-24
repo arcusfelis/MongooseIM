@@ -13,7 +13,7 @@ test/tests/.#
 test/tests/#
 test/ct_report
 **/.rebar
-*.swp
+*.sw*
 *~
 contrib/extract_translations/extract_translations.beam
 src/*.beam
