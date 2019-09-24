@@ -4,16 +4,20 @@
 -export([is_port_free/1]).
 
 rewrite_ports(TestConfig = #{hosts := Hosts, first_port := FirstPort}) ->
+    F = fun() -> do_rewrite_ports(TestConfig, Hosts, FirstPort) end,
+    mim_ct_helper:travis_fold("rewrite_ports", "Rewrite ports", F);
+rewrite_ports(TestConfig = #{}) ->
+    io:format("rewrite_ports skipped~n", []),
+    TestConfig.
+
+do_rewrite_ports(TestConfig, Hosts, FirstPort) ->
     io:format("rewrite_ports~n", []),
     UniquePorts = lists:usort(lists:flatmap(fun host_to_ports/1, Hosts)),
     NewPorts = make_ports(FirstPort, length(UniquePorts)),
     Mapping = maps:from_list(lists:zip(UniquePorts, NewPorts)),
     io:format("Mapping ~p~n", [Mapping]),
     Hosts2 = apply_mapping_for_hosts(Hosts, Mapping),
-    TestConfig#{hosts => Hosts2};
-rewrite_ports(TestConfig = #{}) ->
-    io:format("rewrite_ports skipped~n", []),
-    TestConfig.
+    TestConfig#{hosts => Hosts2}.
 
 host_to_ports({_HostId, HostConfig}) ->
     PortValues = [V || {K,V} <- HostConfig, is_port_option(K, V)],
