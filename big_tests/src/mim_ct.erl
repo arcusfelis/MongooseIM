@@ -85,6 +85,10 @@ load_hosts(TestConfig = #{hosts := Hosts}) ->
     TestConfig#{hosts => Hosts2}.
 
 make_hosts(TestConfig = #{test_spec := TestSpec, hosts := Hosts}) ->
+    F = fun() -> do_make_hosts(TestConfig, TestSpec, Hosts) end,
+    mim_ct_helper:travis_fold("make_hosts", "Start MongooseIM nodes", F).
+
+do_make_hosts(TestConfig, TestSpec, Hosts) ->
     %% Start nodes in parallel
     F = fun({HostId, HostConfig}) ->
             {HostId, maps:to_list(make_host(HostId, maps:from_list(HostConfig)))}
