@@ -40,6 +40,7 @@
 
 start(normal, _Args) ->
     init_log(),
+    ?WARNING_MSG("event=mongooseim_starting", []),
     mongoose_fips:notify(),
     write_pid_file(),
     update_status_file(starting),
@@ -77,6 +78,7 @@ start(normal, _Args) ->
     ejabberd_admin:start(),
     update_status_file(started),
     ?INFO_MSG("ejabberd ~s is started in the node ~p", [?MONGOOSE_VERSION, node()]),
+    ?WARNING_MSG("event=mongooseim_started", []),
     Sup;
 start(_, _) ->
     {error, badarg}.
@@ -85,6 +87,7 @@ start(_, _) ->
 %% This function is called when an application is about to be stopped,
 %% before shutting down the processes of the application.
 prep_stop(State) ->
+    ?WARNING_MSG("event=mongooseim_stopping", []),
     mongoose_deprecations:stop(),
     ejabberd_listener:stop_listeners(),
     stop_modules(),
@@ -102,6 +105,7 @@ stop(_State) ->
     ?INFO_MSG("ejabberd ~s is stopped in the node ~p", [?MONGOOSE_VERSION, node()]),
     delete_pid_file(),
     update_status_file(stopped),
+    ?WARNING_MSG("event=mongooseim_stopped", []),
     %%ejabberd_debug:stop(),
     ok.
 
