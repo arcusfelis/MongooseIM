@@ -66,7 +66,12 @@ start(Node, Domain, Mod, Args) ->
     case escalus_rpc:call(Node, gen_mod, start_module, [Domain, Mod, Args], 5000, Cookie) of
         {badrpc, Reason} ->
             ct:fail("Cannot start module ~p reason ~p", [Mod, Reason]);
-        R -> R
+        {ok,_} = R -> R;
+        R ->
+            %% Just log for debugging, but do not crash
+            ct:pal("gen_mod:start_module(~p, ~p, ~p) returns ~p from ~p",
+                   [Domain, Mod, Args, R, Node]),
+            R
     end.
 
 restart(Domain, Mod, Args) ->
