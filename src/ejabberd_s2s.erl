@@ -289,11 +289,16 @@ do_route(From, To, Acc, Packet) ->
                 <<"result">> -> done;
                 _ ->
                     {Acc1, Err} = jlib:make_error_reply(
-                            Acc, Packet, mongoose_xmpp_errors:service_unavailable()),
+                            Acc, Packet, make_service_unavailable_error(To)),
                     ejabberd_router:route(To, From, Acc1, Err)
             end,
             done
     end.
+
+make_service_unavailable_error(_To = #jid{lserver = LServer}) ->
+    Lang = <<"en">>,
+    Text = <<"s2s connection to ", LServer/binary, " not found">>,
+    mongoose_xmpp_errors:service_unavailable(Lang, Text).
 
 -spec find_connection(From :: jid:jid(),
                       To :: jid:jid()) -> {'aborted', _} | {'atomic', _}.
