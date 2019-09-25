@@ -60,7 +60,7 @@ assert_can_register_users(NodeConfig = #{node := Node}) ->
             rpc:call(Node, ejabberd_auth, remove_user, [<<"ct_user">>, Host]),
             Result
           end,
-    Opts = #{time_left => timer:seconds(10),
+    Opts = #{time_left => timer:seconds(60),
              sleep_time => 1000,
              name => assert_can_register_users_timeout},
     try
