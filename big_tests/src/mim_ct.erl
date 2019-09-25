@@ -52,19 +52,26 @@ load_test_config(RunConfig = #{test_config := TestConfigFile}) ->
     %% RunConfig overrides TestConfig
     maps:merge(maps:from_list(TestConfig), RunConfig).
 
-do_ct_run(RunConfig = #{test_spec := TestSpec, test_config_out := TestConfigFileOut}) ->
+do_ct_run(RunConfig = #{test_spec := TestSpec}) ->
     mim_ct_preload:load_test_modules(TestSpec),
     TestConfig2 = mim_ct_cover:add_cover_node_to_hosts(RunConfig),
     TestConfig3 = init_hosts(TestConfig2),
+    do_ct_run_if_hosts_are_fine(TestConfig3).
+
+do_ct_run_if_hosts_are_fine(TestConfig = #{error := Error}) ->
+    io:format("do_ct_run_if_hosts_are_fine:handle_error ~p, don't even try to run CT", [Error]),
+    CtResult = {error, {do_ct_run_if_hosts_are_fine_failed, Error}},
+    {CtResult, TestConfig};
+do_ct_run_if_hosts_are_fine(TestConfig = #{test_spec := TestSpec, test_config_out := TestConfigFileOut}) ->
     TestConfigFileOut2 = filename:absname(TestConfigFileOut, path_helper:test_dir([])),
-    ok = write_terms(TestConfigFileOut, mim_ct_config:preprocess(maps:to_list(TestConfig3))),
+    ok = write_terms(TestConfigFileOut, mim_ct_config:preprocess(maps:to_list(TestConfig))),
     CtOpts = [{spec, TestSpec},
               {userconfig, {ct_config_plain, [TestConfigFileOut2]}}, 
-              {auto_compile, maps:get(auto_compile, RunConfig, true)}],
+              {auto_compile, maps:get(auto_compile, TestConfig, true)}],
     {CtRunTime, CtResult} = timer:tc(fun() -> ct:run_test(CtOpts) end),
     mim_ct_helper:report_progress("~nct_run for ~ts took ~ts~n",
                                      [TestSpec, mim_ct_helper:microseconds_to_string(CtRunTime)]),
-    {CtResult, TestConfig3}.
+    {CtResult, TestConfig}.
 
 write_terms(Filename, List) ->
     Format = fun(Term) -> io_lib:format("~tp.~n", [Term]) end,
@@ -96,16 +103,26 @@ do_make_hosts(TestConfig, TestSpec, Hosts) ->
     {StartTime, Results} = timer:tc(fun() -> mim_ct_parallel:parallel_map(F, Hosts) end),
     mim_ct_helper:report_progress("~nStarting hosts for ~ts took ~ts~n",
                                      [TestSpec, mim_ct_helper:microseconds_to_string(StartTime)]),
-    BadResults = [{BadResult, Host} || {{error, BadResult}, Host} <- lists:zip(Results, Hosts)],
-    case BadResults of
+    Hosts2 = [handle_make_host_result(Result, Host) || {Result, Host} <- lists:zip(Results, Hosts)],
+    mark_job_failed_if_host_failed(TestConfig#{hosts => Hosts2}).
+
+handle_make_host_result({ok, {HostId, HostConfig}}, {HostId, _InitialHostConfig}) ->
+    {HostId, HostConfig};
+handle_make_host_result({error, Error}, {HostId, InitialHostConfig}) ->
+    io:format("make_host_failed_hard reason=~p, host_id=~p~n", [Error, HostId]),
+    {HostId, [{error, {make_host_failed_hard, Error}}|InitialHostConfig]}.
+
+mark_job_failed_if_host_failed(TestConfig) ->
+    case get_failed_hosts(TestConfig) of
         [] ->
-            ok;
-        _ ->
-            mim_ct_db:print_job_logs(TestConfig),
-            error({failed_to_init_hosts, BadResults})
-    end,
-    Hosts2 = [GoodResult || {ok, GoodResult} <- Results],
-    TestConfig#{hosts => Hosts2}.
+            TestConfig; %% all hosts are fine
+        FailedHosts ->
+            TestConfig#{error => {make_host_failed_for, FailedHosts}}
+    end.
+
+get_failed_hosts(TestConfig=#{hosts := Hosts}) ->
+    [HostId || {HostId, Host} <- Hosts, lists:keymember(error, 1, Host)].
+
 
 load_host(HostId, HostConfig, TestConfig = #{repo_dir := RepoDir, prefix := Prefix}) ->
     HostConfig1 = HostConfig#{repo_dir => RepoDir, build_dir => "_build/" ++ Prefix ++ atom_to_list(HostId), prototype_dir => "_build/mim1", prefix => Prefix},

@@ -63,8 +63,12 @@ assert_can_register_users(NodeConfig = #{node := Node}) ->
     Opts = #{time_left => timer:seconds(10),
              sleep_time => 1000,
              name => assert_can_register_users_timeout},
-    mongoose_helper:wait_until(Fun, ok, Opts),
-    NodeConfig.
+    try
+        mongoose_helper:wait_until(Fun, ok, Opts),
+        NodeConfig
+    catch Class:Reason ->
+        mark_as_failed(NodeConfig, assert_can_register_users, #{wait_until_returns => {Class, Reason}})
+    end.
 
 exist_is_ok({error, exist}) ->
     ok;
@@ -74,12 +78,7 @@ exist_is_ok(Result) ->
 assert_node_running(NodeConfig = #{node := Node, build_dir := BuildDir}) ->
     case net_adm:ping(Node) of
         pang ->
-            print_logs(Node, BuildDir),
-
-            F = fun() -> io:format("~p~n", [NodeConfig]) end,
-            mim_ct_helper:travis_fold("NodeConfig", "NodeConfig for " ++ atom_to_list(Node), F),
-
-            error({node_not_running, Node});
+            mark_as_failed(NodeConfig, assert_node_running);
         pong ->
             NodeConfig
     end.
@@ -345,3 +344,9 @@ filter_out_patterns() ->
      <<"event=cannot_delete_personal_data">>,
      <<"event=incoming_global_distrib_socket_closed">>,
      <<"Supervisor received unexpected message: {'ETS-TRANSFER'">>].
+
+mark_as_failed(NodeConfig, Reason, Extra) ->
+    NodeConfig#{error => Reason, error_extra => Extra}.
+
+mark_as_failed(NodeConfig, Reason) ->
+    NodeConfig#{error => Reason}.
