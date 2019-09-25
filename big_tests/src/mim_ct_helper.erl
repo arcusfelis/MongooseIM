@@ -98,6 +98,7 @@ after_test(CtResults, TestConfigs, #{before_start_dirs := CTRunDirsBeforeRun}) -
             FailedTestConfigs = failed_test_configs(Results, TestConfigs, NewCTRunDirs),
             print_failed_test_configs(FailedTestConfigs),
             maybe_print_mim_logs(FailedTestConfigs),
+            [mim_ct_db:print_job_logs(TestConfig) || TestConfig <- FailedTestConfigs],
             {error, #{exit_status_by_groups => ExitStatusByGroups,
                       exit_status_by_cases => ExitStatusByTestCases}}
     end.
