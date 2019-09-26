@@ -89,6 +89,12 @@ env:
     - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all
     - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=2
     - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=3
+    - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=4
+    - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=5
+    - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=6
+    - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=7
+    - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=8
+    - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=9
     - PRESET=odbc_mssql_mnesia DB=mssql REL_CONFIG=with-odbc
     - PRESET=ldap_mnesia DB=ldap REL_CONFIG=with-none
     - PRESET=elasticsearch_and_cassandra_mnesia DB="elasticsearch cassandra"
