@@ -194,7 +194,7 @@ elif [ "$db" = 'riak' ]; then
     docker start $NAME
     echo "Waiting for docker healthcheck"
     echo ""
-    tools/wait_for_healthcheck.sh $NAME
+    TIMEOUT=180 tools/wait_for_healthcheck.sh $NAME
     echo "Waiting for a listener to appear"
     tools/wait_for_service.sh $NAME 8098
     # Setup schema and indexes
