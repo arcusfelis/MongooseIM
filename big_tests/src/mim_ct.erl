@@ -56,13 +56,17 @@ do_ct_run(RunConfig = #{test_spec := TestSpec}) ->
     mim_ct_preload:load_test_modules(TestSpec),
     TestConfig2 = mim_ct_cover:add_cover_node_to_hosts(RunConfig),
     TestConfig3 = init_hosts(TestConfig2),
-    do_ct_run_if_hosts_are_fine(TestConfig3).
+    do_ct_run_if_no_errors(TestConfig3).
 
-do_ct_run_if_hosts_are_fine(TestConfig = #{error := Error}) ->
-    io:format("do_ct_run_if_hosts_are_fine:handle_error ~p, don't even try to run CT", [Error]),
-    CtResult = {error, {do_ct_run_if_hosts_are_fine_failed, Error}},
+do_ct_run_if_no_errors(TestConfig) ->
+    do_ct_run_if_no_errors(TestConfig, mim_ct_error:has_errors(TestConfig)).
+
+do_ct_run_if_no_errors(TestConfig, true) ->
+    ShortErrors = mim_ct_error:get_short_errors(TestConfig),
+    io:format("Don't even try to run CT, short_errors=~p~n", [ShortErrors]),
+    CtResult = {error, {skip_ct_run, ShortErrors}},
     {CtResult, TestConfig};
-do_ct_run_if_hosts_are_fine(TestConfig = #{test_spec := TestSpec, test_config_out := TestConfigFileOut}) ->
+do_ct_run_if_no_errors(TestConfig = #{test_spec := TestSpec, test_config_out := TestConfigFileOut}, false) ->
     TestConfigFileOut2 = filename:absname(TestConfigFileOut, path_helper:test_dir([])),
     ok = write_terms(TestConfigFileOut, mim_ct_config:preprocess(maps:to_list(TestConfig))),
     CtOpts = [{spec, TestSpec},
@@ -112,17 +116,23 @@ handle_make_host_result({error, Error}, {HostId, InitialHostConfig}) ->
     io:format("make_host_failed_hard reason=~p, host_id=~p~n", [Error, HostId]),
     {HostId, [{error, {make_host_failed_hard, Error}}|InitialHostConfig]}.
 
-mark_job_failed_if_host_failed(TestConfig) ->
+mark_job_failed_if_host_failed(TestConfig = #{test_spec := TestSpec}) ->
     case get_failed_hosts(TestConfig) of
         [] ->
             TestConfig; %% all hosts are fine
         FailedHosts ->
-            TestConfig#{error => {make_host_failed_for, FailedHosts}}
+            Extra = #{issue => make_host_failed,
+                      failed_hosts => FailedHosts,
+                      test_spec => TestSpec,
+                      reasons => get_failed_hosts_errors(TestConfig)},
+            mim_ct_error:add_error(make_host_failed, Extra, TestConfig)
     end.
 
 get_failed_hosts(TestConfig=#{hosts := Hosts}) ->
     [HostId || {HostId, Host} <- Hosts, lists:keymember(error, 1, Host)].
 
+get_failed_hosts_errors(TestConfig=#{hosts := Hosts}) ->
+    [{HostId, proplists:get_value(error, Host)} || {HostId, Host} <- Hosts, lists:keymember(error, 1, Host)].
 
 load_host(HostId, HostConfig, TestConfig = #{repo_dir := RepoDir, prefix := Prefix}) ->
     HostConfig1 = HostConfig#{repo_dir => RepoDir, build_dir => "_build/" ++ Prefix ++ atom_to_list(HostId), prototype_dir => "_build/mim1", prefix => Prefix},

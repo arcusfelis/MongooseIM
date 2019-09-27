@@ -92,10 +92,11 @@ after_test(CtResults, TestConfigs, #{before_start_dirs := CTRunDirsBeforeRun}) -
         {ok, ok} ->
             ok;
         Other ->
+            FailedTestConfigs = failed_test_configs(Results, TestConfigs, NewCTRunDirs),
+            [mim_ct_error:print_errors(TestConfig) || TestConfig <- FailedTestConfigs],
             [print_stanza_logs(CTRunDir) || CTRunDir <- NewCTRunDirs],
             [maybe_print_all_groups_state(CTRunDir) || CTRunDir <- NewCTRunDirs],
             concat_ct_markdown(NewCTRunDirs),
-            FailedTestConfigs = failed_test_configs(Results, TestConfigs, NewCTRunDirs),
             print_failed_test_configs(FailedTestConfigs),
             maybe_print_mim_logs(FailedTestConfigs),
             [mim_ct_db:print_job_logs(TestConfig) || TestConfig <- FailedTestConfigs],
