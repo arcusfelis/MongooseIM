@@ -152,9 +152,14 @@ setup_riak_container(RiakPort, RiakPbPort, Prefix, RepoDir, TestConfig) ->
             "RIAK_PB_PORT" => integer_to_list(RiakPbPort), 
             "DB_PREFIX" => "mim-ct1-" ++ Prefix},
     CmdOpts = #{env => Envs, cwd => RepoDir},
-    {done, _, Result} = mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], CmdOpts),
+    {done, ExitCode, Result} = mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], CmdOpts),
     io:format("Setup riak container ~p returns ~ts~n", [RiakPort, Result]),
-    TestConfig#{riak_container_name => "mim-ct1-" ++ Prefix ++ "-riak"}.
+    handle_exit_code(riak, ExitCode, TestConfig#{riak_container_name => "mim-ct1-" ++ Prefix ++ "-riak"}).
+
+handle_exit_code(_DbType, _ExitCode=0, TestConfig) ->
+    TestConfig;
+handle_exit_code(DbType, ExitCode, TestConfig) ->
+    mim_ct_error:add_error(riak_failed_to_start, #{exit_code => ExitCode}, TestConfig).
 
 print_job_logs(TestConfig = #{preset := Preset}) ->
     Dbs = preset_to_databases(Preset, TestConfig),
