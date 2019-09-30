@@ -135,7 +135,7 @@ get_failed_hosts_errors(TestConfig=#{hosts := Hosts}) ->
     [{HostId, proplists:get_value(error, Host)} || {HostId, Host} <- Hosts, lists:keymember(error, 1, Host)].
 
 load_host(HostId, HostConfig, TestConfig = #{repo_dir := RepoDir, prefix := Prefix}) ->
-    HostConfig1 = HostConfig#{repo_dir => RepoDir, build_dir => "_build/" ++ Prefix ++ atom_to_list(HostId), prototype_dir => "_build/mim1", prefix => Prefix},
+    HostConfig1 = HostConfig#{repo_dir => RepoDir, build_dir => "_build/" ++ Prefix ++ atom_to_list(HostId), prototype_dir => "_build/mim1", prefix => Prefix, host_id => HostId},
     Result = mim_node:load(maybe_add_preset(HostConfig1, TestConfig), TestConfig),
     io:format("~p loaded~n", [HostId]),
     Result.

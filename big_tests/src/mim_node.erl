@@ -53,11 +53,12 @@ wait_for_pang(Node) ->
             wait_for_pang(Node)
     end.
 
-assert_can_register_users(NodeConfig = #{node := Node}) ->
+assert_can_register_users(NodeConfig = #{node := Node, host_id := HostId}) ->
     Fun = fun() ->
+            UserName = <<"ct_user_from_", (atom_to_binary(HostId, utf8))/binary>>,
             Host = hd(rpc:call(Node, ejabberd_config, get_global_option, [hosts])),
-            Result = exist_is_ok(rpc:call(Node, ejabberd_auth, try_register, [<<"ct_user">>, Host, <<"ct_password123">>])),
-            rpc:call(Node, ejabberd_auth, remove_user, [<<"ct_user">>, Host]),
+            Result = exist_is_ok(rpc:call(Node, ejabberd_auth, try_register, [UserName, Host, <<"ct_password123">>])),
+            rpc:call(Node, ejabberd_auth, remove_user, [UserName, Host]),
             Result
           end,
     Opts = #{time_left => timer:seconds(60),
