@@ -249,14 +249,19 @@ connect_to_riak(RepoDir, RiakPbPort, Times, Errors) ->
     end.
 
 try_connect_to_riak(RepoDir, RiakPbPort) ->
+    %% Try 10 connections
+    Pids = [new_riak_connection(RepoDir, RiakPbPort) || _ <- lists:seq(1, 10)],
+    [wait_for_riak_connected(Pid) || Pid <- Pids],
+    [riakc_pb_socket:stop(Pid) || Pid <- Pids],
+    io:format("wait_for_riak_connected:done~n", []),
+    ok.
+
+new_riak_connection(RepoDir, RiakPbPort) ->
     CaCert = filename:join([RepoDir, "tools", "ssl", "ca", "cacert.pem"]),
     RiakOpts = [keepalive,auto_reconnect,{credentials,"ejabberd","mongooseim_secret"},{cacertfile, CaCert},
                 {ssl_opts,[{ciphers,["AES256-SHA","DHE-RSA-AES128-SHA256"]},{server_name_indication,disable}]}],
     {ok, Pid} = riakc_pb_socket:start("127.0.0.1", RiakPbPort, RiakOpts),
-    wait_for_riak_connected(Pid),
-    riakc_pb_socket:stop(Pid),
-    io:format("wait_for_riak_connected:done", []),
-    ok.
+    Pid.
 
 wait_for_riak_connected(Pid) ->
     Fun = fun() -> riakc_pb_socket:is_connected(Pid) end,
