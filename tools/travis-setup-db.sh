@@ -185,6 +185,8 @@ elif [ "$db" = 'riak' ]; then
     $SED -i "s/^search = \(.*\)/search = on/" "$TEMP_RIAK_CONF"
     # Solr is sloow on travis
     $SED -i "s/^search.solr.start_timeout = \(.*\)/search.solr.start_timeout = 2m/" "$TEMP_RIAK_CONF"
+    # debug level for logs
+    $SED -i "s/^log.console.level = \(.*\)/log.console.level = debug/" "$TEMP_RIAK_CONF"
     # Enable ssl by appending settings from riak.conf.ssl
     cat "${DB_CONF_DIR}/riak.conf.ssl" >> "$TEMP_RIAK_CONF"
     # Import config back into container
