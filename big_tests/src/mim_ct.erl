@@ -61,9 +61,9 @@ do_ct_run(RunConfig = #{test_spec := TestSpec}) ->
 do_ct_run_if_no_errors(TestConfig) ->
     do_ct_run_if_no_errors(TestConfig, mim_ct_error:has_errors(TestConfig)).
 
-do_ct_run_if_no_errors(TestConfig, true) ->
+do_ct_run_if_no_errors(TestConfig = #{test_spec := TestSpec}, true) ->
     ShortErrors = mim_ct_error:get_short_errors(TestConfig),
-    io:format("Don't even try to run CT, short_errors=~p~n", [ShortErrors]),
+    mim_ct_helper:report_progress("Don't even try to run CT for ~p, short_errors=~1000p~n", [TestSpec, ShortErrors]),
     CtResult = {error, {skip_ct_run, ShortErrors}},
     {CtResult, TestConfig};
 do_ct_run_if_no_errors(TestConfig = #{test_spec := TestSpec, test_config_out := TestConfigFileOut}, false) ->
