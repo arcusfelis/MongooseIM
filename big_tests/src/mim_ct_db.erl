@@ -58,7 +58,9 @@ init_job_db(pgsql, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := 
 init_job_db(riak, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := RepoDir, job_number := JobNumber}) ->
     [RiakPort] = get_ports(riak_port, TestConfig),
     [RiakPbPort] = get_ports(riak_pb_port, TestConfig),
-    setup_riak_container(RiakPort, RiakPbPort, Prefix ++ "_mim_db_" ++ integer_to_list(JobNumber), RepoDir, TestConfig);
+    Prefix2 = Prefix ++ "_mim_db_" ++ integer_to_list(JobNumber),
+    TestConfig2 = setup_riak_container(RiakPort, RiakPbPort, Prefix2, RepoDir, TestConfig),
+    wait_for_riak(RiakPbPort, TestConfig2);
 init_job_db(ldap, TestConfig = #{job_number := JobNumber}) ->
     %% Use different ldap_base for each job
     set_option(ldap_suffix, integer_to_list(JobNumber), TestConfig);
@@ -219,3 +221,46 @@ print_log_file(Container, LogFile) ->
 format_time() ->
     {{Year, Month, Day}, {Hour, Minute, Second}} = calendar:now_to_datetime(erlang:now()),
     lists:flatten(io_lib:format("~4..0w-~2..0w-~2..0wT~2..0w:~2..0w:~2..0w",[Year,Month,Day,Hour,Minute,Second])).
+
+wait_for_riak(RiakPbPort, TestConfig = #{repo_dir := RepoDir}) ->
+    load_riak_driver(RepoDir),
+    case connect_to_riak(RepoDir, RiakPbPort, 5, []) of
+        ok ->
+             TestConfig;
+        {error, Reason} ->
+             io:format("riak_connect_failed~n", []),
+             mim_ct_error:add_error(riak_connect_failed, #{reason => Reason}, TestConfig)
+    end.
+
+load_riak_driver(RepoDir) ->
+    Dirs = filelib:wildcard(filename:absname("_build/default/lib/*/ebin", RepoDir)),
+    code:add_paths(Dirs),
+    application:ensure_all_started(ssl),
+    application:ensure_all_started(riakc).
+
+connect_to_riak(RepoDir, RiakPbPort, 0, Errors) ->
+    {error, Errors};
+connect_to_riak(RepoDir, RiakPbPort, Times, Errors) ->
+    try
+        try_connect_to_riak(RepoDir, RiakPbPort)
+    catch Class:Reason ->
+        io:format("try_connect_to_riak failed ~p~n", [Reason]),
+        connect_to_riak(RepoDir, RiakPbPort, Times - 1, [{Class, Reason}|Errors])
+    end.
+
+try_connect_to_riak(RepoDir, RiakPbPort) ->
+    CaCert = filename:join([RepoDir, "tools", "ssl", "ca", "cacert.pem"]),
+    RiakOpts = [keepalive,auto_reconnect,{credentials,"ejabberd","mongooseim_secret"},{cacertfile, CaCert},
+                {ssl_opts,[{ciphers,["AES256-SHA","DHE-RSA-AES128-SHA256"]},{server_name_indication,disable}]}],
+    {ok, Pid} = riakc_pb_socket:start("127.0.0.1", RiakPbPort, RiakOpts),
+    wait_for_riak_connected(Pid),
+    riakc_pb_socket:stop(Pid),
+    io:format("wait_for_riak_connected:done", []),
+    ok.
+
+wait_for_riak_connected(Pid) ->
+    Fun = fun() -> riakc_pb_socket:is_connected(Pid) end,
+    Opts = #{time_left => timer:seconds(10),
+             sleep_time => 1000,
+             name => wait_for_riak_connected_timeout},
+    mongoose_helper:wait_until(Fun, true, Opts).
