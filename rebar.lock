@@ -134,7 +134,7 @@
   1},
  {<<"riakc">>,
   {git,"https://github.com/arcusfelis/riak-erlang-client.git",
-       {ref,"45f732d45c18cc7939ab48115191c41ffc731fb4"}},
+       {ref,"72d8198eac15b00564991d905fe1080f3888b012"}},
   0},
  {<<"semver">>,
   {git,"https://github.com/nebularis/semver.git",
