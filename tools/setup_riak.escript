@@ -8,7 +8,9 @@ main(_) ->
     file:set_cwd(filename:dirname(escript:script_name())),
     Cookie = riak,
     io:format("~nsetup_riak START~n", []),
-    {ok, _} = net_kernel:start([node_name(setup_riak)]),
+    MyPid = os:getpid(),
+    MyName = list_to_atom("setup_riak" ++ MyPid),
+    {ok, _} = net_kernel:start([node_name(MyName)]),
     erlang:set_cookie(node(), Cookie),
     RiakNode = node_name(riak),
     case net_adm:ping(RiakNode) of
