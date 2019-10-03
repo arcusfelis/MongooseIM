@@ -56,11 +56,8 @@ init_job_db(pgsql, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := 
     setup_pgsql_container(DbPort, Prefix ++ "_mim_db_" ++ integer_to_list(JobNumber), RepoDir),
     TestConfig;
 init_job_db(riak, TestConfig = #{prefix := Prefix, hosts := Hosts, repo_dir := RepoDir, job_number := JobNumber}) ->
-    [RiakPort] = get_ports(riak_port, TestConfig),
-    [RiakPbPort] = get_ports(riak_pb_port, TestConfig),
-    Prefix2 = Prefix ++ "_mim_db_" ++ integer_to_list(JobNumber),
-    TestConfig2 = setup_riak_container(RiakPort, RiakPbPort, Prefix2, RepoDir, TestConfig),
-    wait_for_riak(RiakPbPort, TestConfig2);
+    TestConfig2 = setup_riak_prefix(Prefix, RepoDir, TestConfig),
+    set_option(riak_prefix, Prefix, TestConfig2);
 init_job_db(ldap, TestConfig = #{job_number := JobNumber}) ->
     %% Use different ldap_base for each job
     set_option(ldap_suffix, integer_to_list(JobNumber), TestConfig);
@@ -115,8 +112,6 @@ init_db(mysql, _RepoDir) ->
     {skip, 0, "skip for master"};
 init_db(pgsql, _RepoDir) ->
     {skip, 0, "skip for master"};
-init_db(riak, _RepoDir) ->
-    {skip, 0, "skip for master"};
 init_db(redis, RepoDir) ->
     case mim_ct_ports:is_port_free(6379) of
         true ->
@@ -134,6 +129,13 @@ do_init_db(DbType, RepoDir) ->
 setup_mssql_database(DbName, RepoDir) ->
     mim_ct_sh:run([filename:join([RepoDir, "tools", "setup-mssql-database.sh"])], #{env => #{"DB_NAME" => DbName, "DB_PREFIX" => "mim-ct1"}, cwd => RepoDir}).
 
+setup_riak_prefix(Prefix, RepoDir, TestConfig) ->
+    RiakContainer = "mim-ct1-riak",
+    % docker exec -e SCRIPT_CMD="setup_prefix" -e RIAK_PREFIX="mim2" $NAME riak escript /setup_riak.escript
+    {_,_,Result} = Return = mim_ct_sh:run(["docker", "exec", "-e", "SCRIPT_CMD=setup_prefix", "-e", "RIAK_PREFIX=" ++ Prefix, RiakContainer, "riak", "escript", "/setup_riak.escript"], #{}),
+    io:format("setup_riak_prefix returns~n~ts~n", [Result]),
+    handle_cmd_result(setup_riak_prefix, Return, TestConfig).
+
 setup_mysql_container(DbPort, Prefix, RepoDir) ->
     Envs = #{"DB" => "mysql", "MYSQL_PORT" => integer_to_list(DbPort), "DB_PREFIX" => "mim-ct1-" ++ Prefix},
     CmdOpts = #{env => Envs, cwd => RepoDir},
@@ -148,15 +150,15 @@ setup_pgsql_container(DbPort, Prefix, RepoDir) ->
     io:format("Setup pgsql container ~p returns ~ts~n", [DbPort, Result]),
     ok.
 
-setup_riak_container(RiakPort, RiakPbPort, Prefix, RepoDir, TestConfig) ->
-    Envs = #{"DB" => "riak", 
-            "RIAK_PORT" => integer_to_list(RiakPort),
-            "RIAK_PB_PORT" => integer_to_list(RiakPbPort), 
-            "DB_PREFIX" => "mim-ct1-" ++ Prefix},
-    CmdOpts = #{env => Envs, cwd => RepoDir},
-    {done, ExitCode, Result} = mim_ct_sh:run([filename:join([RepoDir, "tools", "travis-setup-db.sh"])], CmdOpts),
-    io:format("Setup riak container ~p returns ~ts~n", [RiakPort, Result]),
-    handle_exit_code(riak, ExitCode, TestConfig#{riak_container_name => "mim-ct1-" ++ Prefix ++ "-riak"}).
+handle_cmd_result(CmdName, {done, 0, Result} = Return, TestConfig) ->
+    save_return(CmdName, Return, TestConfig);
+handle_cmd_result(CmdName, Return, TestConfig) ->
+    TestConfig2 = save_return(CmdName, Return, TestConfig),
+    mim_ct_error:add_error(handle_cmd_result_failed, #{command => CmdName, return => Return}, TestConfig2).
+
+save_return(CmdName, Return, TestConfig) ->
+    Old = maps:get(cmd_returns, TestConfig, []),
+    TestConfig#{cmd_returns => [{CmdName, Return} | Old]}.
 
 handle_exit_code(_DbType, _ExitCode=0, TestConfig) ->
     TestConfig;
@@ -171,7 +173,7 @@ print_job_logs_for_dbs(Dbs, TestConfig) ->
     [print_job_logs_for_db(Db, TestConfig) || Db <- Dbs],
     ok.
 
-print_job_logs_for_db(riak, TestConfig = #{riak_container_name := RiakContainer, repo_dir := RepoDir}) ->
+print_job_logs_for_db(fixme_riak, TestConfig = #{riak_container_name := RiakContainer, repo_dir := RepoDir}) ->
     print_container_inspect(RiakContainer),
     print_container_logs(RiakContainer),
     print_riak_logs_from_disk(RepoDir, RiakContainer),
