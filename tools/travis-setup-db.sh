@@ -189,7 +189,7 @@ elif [ "$db" = 'riak' ]; then
     # Solr is sloow on travis
     $SED -i "s/^search.solr.start_timeout = \(.*\)/search.solr.start_timeout = 2m/" "$TEMP_RIAK_CONF"
     # debug level for logs
-    $SED -i "s/^log.console.level = \(.*\)/log.console.level = debug/" "$TEMP_RIAK_CONF"
+#   $SED -i "s/^log.console.level = \(.*\)/log.console.level = debug/" "$TEMP_RIAK_CONF"
     echo "listener.https.internal = 127.0.0.1:8096" >> "$TEMP_RIAK_CONF"
     # Enable ssl by appending settings from riak.conf.ssl
     cat "${DB_CONF_DIR}/riak.conf.ssl" >> "$TEMP_RIAK_CONF"
