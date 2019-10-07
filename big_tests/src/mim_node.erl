@@ -124,7 +124,9 @@ clean_logs(NodeConfig = #{build_dir := BuildDir}) ->
 
 start(NodeConfig = #{build_dir := BuildDir, node := Node}) ->
     Ctl = filename:join(BuildDir, "rel/mongooseim/bin/mongooseimctl"),
-    StartResult = erlsh:run([Ctl, "start"]),
+    Envs = mim_ct_cover:add_start_envs(NodeConfig, #{}),
+    CmdOpts = #{env => Envs},
+    StartResult = mim_ct_sh:run([Ctl, "start"], CmdOpts),
     io:format("waiting for ~p~n", [Node]),
     StartedResult = erlsh:run([Ctl, "started"]),
     {_, _, StatusResult} = erlsh:run([Ctl, "status"]),
