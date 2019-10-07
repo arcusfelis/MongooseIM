@@ -281,7 +281,12 @@ maybe_init_cover() ->
         false ->
             ok;
         CoverNode ->
-            init_cover(list_to_atom(CoverNode))
+            case is_cover_loaded() of
+                true ->
+                    io:format("skip starting cover, already started~n", []);
+                false ->
+                    init_cover(list_to_atom(CoverNode))
+            end
     end.
 
 init_cover(CoverNode) ->
@@ -297,3 +302,6 @@ maybe_set_cover_cookie(CoverNode) ->
         Cookie ->
             erlang:set_cookie(CoverNode, list_to_atom(Cookie))
     end.
+
+is_cover_loaded() ->
+    is_pid(whereis(cover_server)).
