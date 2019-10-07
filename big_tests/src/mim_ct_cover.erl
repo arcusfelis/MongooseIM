@@ -30,11 +30,13 @@ start_cover(TestConfig = #{}) ->
 analyze_cover(TestConfig = #{repo_dir := RepoDir, cover_enabled := true}) ->
     %% Import small tests cover
     Files = filelib:wildcard(RepoDir ++ "/_build/**/cover/*.coverdata"),
-    io:format("Files: ~p", [Files]),
+    io:format("Files: ~p~n", [Files]),
     mim_ct_helper:report_time("Import cover data into run_common_test node", fun() ->
             [cover:import(File) || File <- Files]
         end),
-    mim_ct_helper:report_time("Export merged cover data", fun() ->
+    Nodes = cover:which_nodes(),
+    io:format("Cover Nodes: ~p~n", [Nodes]),
+    mim_ct_helper:report_time("Export merged cover data from " ++ integer_to_list(length(Nodes)) ++ " nodes", fun() ->
             cover:export("/tmp/mongoose_combined.coverdata")
         end),
     case os:getenv("TRAVIS_JOB_ID") of
