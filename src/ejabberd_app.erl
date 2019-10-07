@@ -39,6 +39,7 @@
 %%%
 
 start(normal, _Args) ->
+    maybe_init_cover(),
     init_log(),
     ?WARNING_MSG("event=mongooseim_starting", []),
     mongoose_fips:notify(),
@@ -273,3 +274,26 @@ wait_for_session_drain([], [], _Times) ->
 wait_for_session_drain([], ActiveHosts, Times) ->
     timer:sleep(500),
     wait_for_session_drain(lists:reverse(ActiveHosts), [], Times - 1).
+
+
+maybe_init_cover() ->
+    case os:getenv("COVER_NODE") of
+        false ->
+            ok;
+        CoverNode ->
+            init_cover(list_to_atom(CoverNode))
+    end.
+
+init_cover(CoverNode) ->
+    maybe_set_cover_cookie(CoverNode),
+    {Time, Result} = timer:tc(rpc, call, [CoverNode, cover, start, [node()]]),
+    io:format("cover:start took ~p milliseconds and returned ~1000p", [Time div 1000, Result]),
+    ok.
+
+maybe_set_cover_cookie(CoverNode) ->
+    case os:getenv("COVER_COOKIE") of
+        false ->
+            ok;
+        Cookie ->
+            erlang:set_cookie(CoverNode, list_to_atom(Cookie))
+    end.
