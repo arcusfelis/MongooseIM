@@ -250,6 +250,7 @@ end_per_group_generic(Config) ->
 init_per_testcase(CaseName, Config)
   when CaseName == test_muc_conversation_on_one_host; CaseName == test_global_disco;
        CaseName == test_muc_conversation_history ->
+    refresh_hosts([mim, mim2, reg]),
     %% There is no helper to load MUC on node2
     %% For now it's easier to hide node2
     %% TODO: Do it right at some point!
