@@ -161,6 +161,10 @@ store_session_info(FsmRef, User, Server, Resource, KV) ->
 %%          {stop, StopReason}
 %%----------------------------------------------------------------------
 init([{SockMod, Socket}, Opts]) ->
+    IP = peerip(SockMod, Socket),
+    ?DEBUG("event=new_c2s_client from_address=~p", [IP]),
+    put('$c2s_peer_name', IP),
+    put('$c2s_init_time', os:timestamp()),
     Access = case lists:keyfind(access, 1, Opts) of
                  {_, A} -> A;
                  _ -> all
@@ -203,7 +207,6 @@ init([{SockMod, Socket}, Opts]) ->
                  end, Opts),
     TLSOpts = verify_opts(Verify) ++ TLSOpts1,
     [ssl_crl_cache:insert({file, CRL}) || CRL <- proplists:get_value(crlfiles, Opts, [])],
-    IP = peerip(SockMod, Socket),
     %% Check if IP is blacklisted:
     case is_ip_blacklisted(IP) of
         true ->
