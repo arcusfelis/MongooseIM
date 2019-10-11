@@ -788,6 +788,7 @@ refresh_nodes(Config) ->
     {ok, undefined} = redis_query(europe_node1, [<<"HGET">>, NodesKey, NodeBin]).
 
 test_in_order_messages_on_multiple_connections(Config) ->
+    rpc(asia_node, mongoose_metrics_probe_queues, sample, []),
     escalus:fresh_story(
       Config, [{alice, 1}, {eve, 1}],
       fun(Alice, Eve) ->
@@ -807,6 +808,7 @@ test_in_order_messages_on_multiple_connections(Config) ->
       end).
 
 test_in_order_messages_on_multiple_connections_with_bounce(Config) ->
+    rpc(asia_node, mongoose_metrics_probe_queues, sample, []),
     escalus:fresh_story(
       Config, [{alice, 1}, {eve, 1}],
       fun(Alice, Eve) ->
@@ -826,6 +828,7 @@ test_in_order_messages_on_multiple_connections_with_bounce(Config) ->
       end).
 
 test_messages_bounced_in_order(Config) ->
+    rpc(asia_node, mongoose_metrics_probe_queues, sample, []),
     escalus:fresh_story(
       Config, [{alice, 1}, {eve, 1}],
       fun(Alice, Eve) ->
