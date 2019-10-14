@@ -298,11 +298,18 @@ print_stanza_logs(CTRunDir) ->
 
 print_stanza_file(StanzaFile) ->
     {ok,Bin}  = file:read_file(StanzaFile),
-    {ok, HistoryElem} = exml:parse(Bin),
+    ParsingResult = exml:parse(Bin),
+    print_stanza_file(StanzaFile, Bin, ParsingResult).
+
+print_stanza_file(StanzaFile, _Bin, {ok, HistoryElem}) ->
     #xmlel{name = <<"history">>, children = StanzaElems} = HistoryElem,
     Pretty = exml:to_pretty_iolist(StanzaElems),
     Description = filename:basename(StanzaFile),
     Fun = fun() -> io:format("~ts", [Pretty]) end,
+    travis_fold("stanza.log", Description, Fun);
+print_stanza_file(StanzaFile, Bin, Error) ->
+    Description = filename:basename(StanzaFile) ++ " - failed",
+    Fun = fun() -> io:format("Bin = ~p~nError = ~p~n", [Bin, Error]) end,
     travis_fold("stanza.log", Description, Fun).
 
 %% Merge ct_markdown files.
