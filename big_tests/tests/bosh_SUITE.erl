@@ -159,7 +159,9 @@ create_and_terminate_session(Config) ->
     Conn = escalus_connection:connect(CarolSpec),
 
     %% Assert there are no BOSH sessions on the server.
-    [] = get_bosh_sessions(),
+    %% Use wait_until, because there can be something not yet terminated from previous tests
+    %% (can it be connections that unregister users?)
+    mongoose_helper:wait_until(fun() -> get_bosh_sessions() end, []),
 
     Domain = ct:get_config({hosts, mim, domain}),
     Body = escalus_bosh:session_creation_body(get_bosh_rid(Conn), Domain),
