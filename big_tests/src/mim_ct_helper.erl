@@ -305,12 +305,15 @@ print_stanza_file(StanzaFile, _Bin, {ok, HistoryElem}) ->
     #xmlel{name = <<"history">>, children = StanzaElems} = HistoryElem,
     Pretty = exml:to_pretty_iolist(StanzaElems),
     Description = filename:basename(StanzaFile),
-    Fun = fun() -> io:format("~ts", [Pretty]) end,
+    Fun = fun() -> io:format("~ts", [reindent(iolist_to_binary(Pretty))]) end,
     travis_fold("stanza.log", Description, Fun);
 print_stanza_file(StanzaFile, Bin, Error) ->
     Description = filename:basename(StanzaFile) ++ " - failed",
     Fun = fun() -> io:format("Bin = ~p~nError = ~p~n", [Bin, Error]) end,
     travis_fold("stanza.log", Description, Fun).
+
+reindent(Bin) ->
+    binary:replace(Bin, <<$\t>>, <<"  ">>, [global]).
 
 %% Merge ct_markdown files.
 %% We just simulate the old behaviour with one file.
