@@ -1333,7 +1333,9 @@ custom_loglevels() ->
     %% to debug bound connection issues
      {mod_global_distrib, debug},
     %% to know all new connections pids
-     {mod_global_distrib_connection, debug}].
+     {mod_global_distrib_connection, debug},
+    %% to debug start_stream
+     {mongoose_tcp_listener, info}].
 
 test_hosts() -> [mim, mim2, reg].
 
