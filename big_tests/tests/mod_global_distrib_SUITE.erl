@@ -144,7 +144,7 @@ init_per_group(multi_connection, Config) ->
                    %% Disable unused feature to avoid interferance
                    {disabled_gc_interval, 10000},
                    {connections_per_endpoint, 100}],
-    init_per_group_generic([{extra_config, ExtraConfig} | Config]);
+    init_per_group_generic([{extra_config, ExtraConfig} | patch_start_stream_timeout(Config)]);
 init_per_group(invalidation, Config) ->
     Config1 = init_per_group(invalidation_generic, Config),
     NodeBin = <<"fake_node@localhost">>,
@@ -1355,3 +1355,16 @@ restore_modules(NodeName, VirtHost, Config) ->
         Other ->
             ct:fail({replace_modules_failed, NodeName, VirtHost, Other})
     end.
+
+patch_start_stream_timeout(Config) ->
+    %% Override default 1 second with 10 seconds
+    %% Because reg mongoose node is pretty overloaded with multi_connection testing
+    set_user_option(wait_for_stream_timeout, 10000, Config).
+
+set_user_option(Option, Value, Config) ->
+    Users = escalus_config:get_config(escalus_users, Config, []),
+    Users2 = [{Name, set_option(Option, Value, Props)} || {Name, Props} <- Users],
+    lists:keystore(escalus_users, 1, Config, {escalus_users, Users2}).
+
+set_option(Option, Value, Props) ->
+    lists:keystore(Option, 1, Props, {Option, Value}).
