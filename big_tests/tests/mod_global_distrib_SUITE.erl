@@ -140,6 +140,8 @@ init_per_group(start_checks, Config) ->
     Config;
 init_per_group(multi_connection, Config) ->
     ExtraConfig = [{resend_after_ms, 20000},
+                   %% Disable unused feature to avoid interferance
+                   {disabled_gc_interval, 10000},
                    {connections_per_endpoint, 100}],
     init_per_group_generic([{extra_config, ExtraConfig} | Config]);
 init_per_group(invalidation, Config) ->
@@ -1335,7 +1337,9 @@ custom_loglevels() ->
     %% to know all new connections pids
      {mod_global_distrib_connection, debug},
     %% to debug start_stream
-     {mongoose_tcp_listener, info}].
+     {mongoose_tcp_listener, info},
+    %% to check if gc or refresh is triggered
+     {mod_global_distrib_server_mgr, info}].
 
 test_hosts() -> [mim, mim2, reg].
 
