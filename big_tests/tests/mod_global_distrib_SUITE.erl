@@ -796,8 +796,6 @@ refresh_nodes(Config) ->
     {ok, undefined} = redis_query(europe_node1, [<<"HGET">>, NodesKey, NodeBin]).
 
 test_in_order_messages_on_multiple_connections(Config) ->
-    rpc(asia_node, sys, get_state, [exometer_report]),
-    rpc(asia_node, supervisor, which_children, [ejabberd_c2s_sup]),
     escalus:fresh_story(
       Config, [{alice, 1}, {eve, 1}],
       fun(Alice, Eve) ->
@@ -817,8 +815,6 @@ test_in_order_messages_on_multiple_connections(Config) ->
       end).
 
 test_in_order_messages_on_multiple_connections_with_bounce(Config) ->
-    rpc(asia_node, sys, get_state, [exometer_report]),
-    rpc(asia_node, supervisor, which_children, [ejabberd_c2s_sup]),
     escalus:fresh_story(
       Config, [{alice, 1}, {eve, 1}],
       fun(Alice, Eve) ->
@@ -838,8 +834,6 @@ test_in_order_messages_on_multiple_connections_with_bounce(Config) ->
       end).
 
 test_messages_bounced_in_order(Config) ->
-    rpc(asia_node, sys, get_state, [exometer_report]),
-    rpc(asia_node, supervisor, which_children, [ejabberd_c2s_sup]),
     escalus:fresh_story(
       Config, [{alice, 1}, {eve, 1}],
       fun(Alice, Eve) ->
@@ -1341,7 +1335,8 @@ custom_loglevels() ->
     %% to check if gc or refresh is triggered
      {mod_global_distrib_server_mgr, info},
    %% To debug incoming connections
-     {mod_global_distrib_receiver, info}].
+     {mod_global_distrib_receiver, info},
+     {ejabberd_c2s, debug}].
 
 test_hosts() -> [mim, mim2, reg].
 
