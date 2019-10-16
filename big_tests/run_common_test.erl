@@ -61,30 +61,9 @@ run(#opts{test = quick, cover = Cover, spec = Spec}) ->
     error(todo);
 run(#opts{test = full, spec = Spec, preset = [Preset|_], cover = Cover}) when is_boolean(Cover) ->
     Master = #{cover_enabled => Cover, cover_lib_dir => "_build/mim1/lib/mongooseim/ebin/",
+               preset => Preset,
                repo_dir => path_helper:repo_dir([]), auto_compile => auto_compile()},
-    Job1 = #{test_spec => "default1.spec", test_config => "test.config", test_config_out => "_build/test1.config",
-                         first_port => 5100, preset => Preset, slave_node => ct1, prefix => "ng1", username_suffix => <<"1j">>,
-                         ejabberd_cookie => mim1_cookie, enabled_hosts => [mim, mim2, mim3, fed]},
-    Job2 = #{test_spec => "default2.spec", test_config => "test.config", test_config_out => "_build/test2.config",
-                         first_port => 5200, preset => Preset, slave_node => ct2, prefix => "ng2", username_suffix => <<"2j">>,
-                         ejabberd_cookie => mim2_cookie, enabled_hosts => [mim, mim2, reg]},
-    Job3 = #{test_spec => "default3.spec", test_config => "test.config", test_config_out => "_build/test3.config",
-                         first_port => 5300, preset => Preset, slave_node => ct3, prefix => "ng3", username_suffix => <<"3j">>,
-                         ejabberd_cookie => mim3_cookie, enabled_hosts => [mim, mim2, mim3, fed]},
-    Job4 = #{test_spec => "default4.spec", test_config => "test.config", test_config_out => "_build/test4.config",
-                         first_port => 5400, preset => Preset, slave_node => ct4, prefix => "ng4", username_suffix => <<"4j">>,
-                         ejabberd_cookie => mim4_cookie, enabled_hosts => [mim, mim2, mim3]},
-    Job5 = #{test_spec => "default5.spec", test_config => "test.config", test_config_out => "_build/test5.config",
-                         first_port => 5500, preset => Preset, slave_node => ct5, prefix => "ng5", username_suffix => <<"5j">>,
-                         ejabberd_cookie => mim5_cookie, enabled_hosts => [mim]},
-    Jobs = case Spec of
-               'default.spec' ->
-                   %% Three workers for the default spec
-                   [Job1, Job2, Job3, Job4, Job5];
-               _ ->
-                   CtJob = Job1#{test_spec => atom_to_list(Spec)},
-                   [maps:merge(CtJob, configure_hosts())]
-           end,
+    Jobs = spec_to_jobs(Spec),
     Result = mim_ct:run_jobs(Master, Jobs),
     case Result of
     {ok, _} ->
@@ -166,3 +145,14 @@ configure_hosts() ->
 parse_atoms(Str) ->
     Strings = string:tokens(Str, " "),
     [list_to_atom(S) || S <- Strings].
+
+spec_to_jobs(Spec) ->
+    StringSpec = atom_to_list(Spec),
+    case filename:extension(StringSpec) of
+        ".jobs" ->
+            {ok, Jobs} = file:consult(Spec),
+            Jobs;
+        ".spec" ->
+            {ok, [Job]} = file:consult("single.jobs"),
+            [Job#{test_spec => atom_to_list(Spec)}]
+    end.
