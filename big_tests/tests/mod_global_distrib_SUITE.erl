@@ -1329,14 +1329,12 @@ custom_loglevels() ->
     %% to debug bound connection issues
      {mod_global_distrib, debug},
     %% to know all new connections pids
-     {mod_global_distrib_connection, debug},
-    %% to debug start_stream
-     {mongoose_tcp_listener, info},
+%    {mod_global_distrib_connection, debug},
     %% to check if gc or refresh is triggered
-     {mod_global_distrib_server_mgr, info},
+     {mod_global_distrib_server_mgr, info}
    %% To debug incoming connections
-     {mod_global_distrib_receiver, info},
-     {ejabberd_c2s, debug}].
+%    {mod_global_distrib_receiver, info}
+    ].
 
 test_hosts() -> [mim, mim2, reg].
 
