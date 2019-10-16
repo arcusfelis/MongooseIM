@@ -21,10 +21,10 @@ stop(_, _) ->
 wpool_spec(WpoolOptsIn, ConnOpts) ->
     {_, RiakAddr} = mongoose_wpool_riak:get_riak_opt(address, ConnOpts),
     {_, RiakPort} = mongoose_wpool_riak:get_riak_opt(port, ConnOpts),
-    SecurityOptsKeys = [credentials, cacertfile, ssl_opts],
-    SecurityOpts = [get_riak_opt(OptKey, ConnOpts) || OptKey <- SecurityOptsKeys],
-    RiakPBOpts = [auto_reconnect, keepalive],
-    WorkerArgs = maybe_add_additional_opts(RiakPBOpts, SecurityOpts),
+    ExtraOptsKeys = [credentials, cacertfile, ssl_opts, connect_timeout],
+    ExtraOpts = [get_riak_opt(OptKey, ConnOpts) || OptKey <- ExtraOptsKeys],
+    RiakPBOpts = [keepalive],
+    WorkerArgs = maybe_add_additional_opts(RiakPBOpts, ExtraOpts),
     Worker = {riakc_pb_socket, [RiakAddr, RiakPort, WorkerArgs]},
     [{worker, Worker} | WpoolOptsIn].
 

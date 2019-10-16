@@ -62,6 +62,7 @@ all_tests() ->
      search_wildcard].
 
 suite() ->
+    [{require, {hosts, mim, ldap_suffix}}] ++
     require_rpc_nodes([mim]) ++ escalus:suite().
 
 %%--------------------------------------------------------------------
@@ -451,6 +452,7 @@ get_FN(Config) ->
     end.
 
 configure_ldap_vcards(Config) ->
+    Suffix = ct:get_config({hosts, mim, ldap_suffix}),
     Domain = ct:get_config({hosts, mim, domain}),
     CurrentConfigs = rpc(mim(), gen_mod, loaded_modules_with_opts, [Domain]),
     {mod_vcard, CurrentVcardConfig} = lists:keyfind(mod_vcard, 1, CurrentConfigs),
@@ -458,7 +460,7 @@ configure_ldap_vcards(Config) ->
     Cfg = [{backend,ldap}, {host, "vjud.@HOST@"},
            {ldap_uids, [{<<"uid">>}]}, %% equivalent to {<<"uid">>, <<"%u">>}
            {ldap_filter,"(objectClass=inetOrgPerson)"},
-           {ldap_base,"ou=Users,dc=esl,dc=com"},
+           {ldap_base,"ou=Users" ++ Suffix ++ ",dc=esl,dc=com"},
            {ldap_search_fields, [{"Full Name","cn"},{"User","uid"}]},
            {ldap_vcard_map,[{"FN","%s",["cn"]}]}],
     dynamic_modules:start(Domain, mod_vcard, Cfg),

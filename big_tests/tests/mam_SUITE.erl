@@ -761,7 +761,7 @@ init_modules(rdbms_simple, C, Config) ->
     init_module(host(), mod_mam_rdbms_user, [pm]),
     Config;
 init_modules(riak_timed_yz_buckets, C, Config) ->
-    init_module(host(), mod_mam_riak_timed_arch_yz, [pm, muc]),
+    init_module(host(), mod_mam_riak_timed_arch_yz, [pm, muc] ++ riak_extra_opts(Config)),
     init_module(host(), mod_mam_mnesia_prefs, [pm, muc,
                                                {archive_key, mam_archive_key_server_user}]),
     init_module(host(), mod_mam, addin_mam_options(C, Config)),
@@ -2977,3 +2977,8 @@ when_pm_message_is_sent(Sender, Receiver, Body) ->
 
 then_pm_message_is_received(Receiver, Body) ->
     escalus:assert(is_chat_message, [Body], escalus:wait_for_stanza(Receiver)).
+
+riak_extra_opts(Config) ->
+    Prefix = iolist_to_binary(ct:get_config({hosts, mim, riak_prefix})),
+    [{search_index, <<Prefix/binary, "mam">>},
+     {bucket_type, <<Prefix/binary, "mam_yz">>}].

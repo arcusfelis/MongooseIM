@@ -173,6 +173,9 @@ elif [ "$db" = 'riak' ]; then
         $(mount_ro_volume "${SSLDIR}/mongooseim/key.pem" "/etc/riak/key.pem") \
         $(mount_ro_volume "${SSLDIR}/ca/cacert.pem" "/etc/riak/ca/cacertfile.pem") \
         $(mount_ro_volume "$TOOLS/setup_riak.escript" "/setup_riak.escript") \
+        $(mount_ro_volume "$TOOLS/mam_search_schema.xml" "/mam_search_schema.xml") \
+        $(mount_ro_volume "$TOOLS/vcard_search_schema.xml" "/vcard_search_schema.xml") \
+        $(mount_ro_volume "$TOOLS/setup_riak.escript" "/setup_riak.escript") \
         $(data_on_volume -v ${SQL_DATA_DIR}:/var/lib/riak) \
         --health-cmd='riak-admin status' \
         "michalwski/docker-riak:1.0.6" \
@@ -185,6 +188,9 @@ elif [ "$db" = 'riak' ]; then
     $SED -i "s/^search = \(.*\)/search = on/" "$TEMP_RIAK_CONF"
     # Solr is sloow on travis
     $SED -i "s/^search.solr.start_timeout = \(.*\)/search.solr.start_timeout = 2m/" "$TEMP_RIAK_CONF"
+    # debug level for logs
+#   $SED -i "s/^log.console.level = \(.*\)/log.console.level = debug/" "$TEMP_RIAK_CONF"
+    echo "listener.https.internal = 127.0.0.1:8096" >> "$TEMP_RIAK_CONF"
     # Enable ssl by appending settings from riak.conf.ssl
     cat "${DB_CONF_DIR}/riak.conf.ssl" >> "$TEMP_RIAK_CONF"
     # Import config back into container
@@ -194,13 +200,16 @@ elif [ "$db" = 'riak' ]; then
     docker start $NAME
     echo "Waiting for docker healthcheck"
     echo ""
-    tools/wait_for_healthcheck.sh $NAME
+    TIMEOUT=180 tools/wait_for_healthcheck.sh $NAME
     echo "Waiting for a listener to appear"
     tools/wait_for_service.sh $NAME 8098
-    # Setup schema and indexes
-    RIAK_SECURITY=disabled SETUP_BUCKET_TYPES=false ./tools/setup_riak
-    # Setup access and bucket types
+    # Setup index schemas and indexes
+    # Setup auth
+    # Setup bucket types
+    # Uses default prefix
     time docker exec $NAME riak escript /setup_riak.escript
+    # If you want to create a copy of indexes and data types with another prefix, use:
+#   time docker exec -e SCRIPT_CMD="setup_prefix" -e RIAK_PREFIX="mim2" $NAME riak escript /setup_riak.escript
     tools/wait_for_service.sh $NAME 8087
     # Use this command to read Riak's logs if something goes wrong
     # docker exec -t $NAME bash -c 'tail -f /var/log/riak/*'

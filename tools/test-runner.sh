@@ -268,10 +268,6 @@ DBS_ARRAY=(
 
 DEV_NODES_ARRAY=(
     mim1
-    mim2
-    mim3
-    fed1
-    reg1
 )
 
 TEST_HOSTS_ARRAY=(
@@ -631,7 +627,5 @@ echo ""
 ./tools/travis-build-tests.sh
 
 ./tools/test_runner/selected-tests-to-test-spec.sh "${SELECTED_TESTS[@]}"
-
-./tools/travis-setup-db.sh
 
 ./tools/travis-test.sh

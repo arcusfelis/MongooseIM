@@ -54,6 +54,7 @@ terminate(#{total_ok := OK, total_eventually_ok_tests := TotalEventuallyOK,
                              {total_eventually_ok_tests, TotalEventuallyOK},
                              {total_failed, TotalFailed}]),
     ok = file:write_file("all_groups.summary", Content),
+    ok = file:write_file("all_groups.state", io_lib:format("~tp.", [State])),
     State.
 
 %% @doc If the group property repeat_until_all_ok is enabled,

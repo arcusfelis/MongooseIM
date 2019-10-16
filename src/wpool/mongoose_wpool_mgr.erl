@@ -70,7 +70,7 @@ start_link(Type) ->
 
 start(Type, Host, Tag, PoolOpts, ConnOpts) ->
     ok = ensure_started(Type),
-    gen_server:call(name(Type), {start_pool, Host, Tag, PoolOpts, ConnOpts}).
+    gen_server:call(name(Type), {start_pool, Host, Tag, PoolOpts, ConnOpts}, timer:seconds(180)).
 
 stop(Type, Host, Tag) ->
     gen_server:call(name(Type), {stop_pool, Host, Tag}).

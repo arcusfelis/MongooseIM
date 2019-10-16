@@ -513,7 +513,7 @@ pop_offline_messages(User, Server) ->
     end.
 
 pop_messages(LUser, LServer) ->
-    case gen_server:call(srv_name(LServer), {pop_offline_messages, LUser, LServer}) of
+    case gen_server:call(srv_name(LServer), {pop_offline_messages, LUser, LServer}, timer:seconds(15)) of
         {ok, RsAll} ->
             TimeStamp = os:timestamp(),
             Rs = skip_expired_messages(TimeStamp, lists:keysort(#offline_msg.timestamp, RsAll)),
