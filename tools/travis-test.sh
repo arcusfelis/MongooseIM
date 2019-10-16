@@ -105,7 +105,7 @@ run_test_preset() {
   tools/print-dots.sh monitor $$
   cd ${BASE}/big_tests
   local MAKE_RESULT=0
-  TESTSPEC=${TESTSPEC:-default.spec}
+  TESTSPEC=${TESTSPEC:-parallel.jobs}
   if [ "$COVER_ENABLED" = "true" ]; then
     make cover_test_preset TESTSPEC=$TESTSPEC PRESET=$PRESET
     MAKE_RESULT=$?
