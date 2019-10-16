@@ -393,6 +393,12 @@ case $key in
         done
     ;;
 
+    --test-spec)
+        shift # past argument
+        TESTSPEC=$1
+        shift # past argument
+    ;;
+
     --one-node)
         shift # past argument
         unset TEST_HOSTS
@@ -599,7 +605,7 @@ if [[ -f "auto_small_tests.spec" ]]; then
 else
     export REBAR_CT_EXTRA_ARGS=""
 fi
-export TESTSPEC="auto_big_tests.spec"
+export TESTSPEC="${TESTSPEC-auto_big_tests.spec}"
 export START_NODES="$START_NODES"
 export STOP_NODES="$STOP_NODES"
 export PAUSE_BEFORE_BIG_TESTS="$PAUSE_BEFORE_BIG_TESTS"
