@@ -369,10 +369,10 @@ initiate_jingle_session(Alice, Bob) ->
 send_initiate_and_wait_for_first_iq_set(Alice, Bob) ->
     InviteStanza = escalus_stanza:to(jingle_initiate(), Bob),
     escalus:send(Alice, InviteStanza),
-    SessionInitiateResult = escalus:wait_for_stanza(Alice, timer:seconds(5)),
-    escalus:assert(is_iq_result, SessionInitiateResult),
-    RingingStanza = escalus:wait_for_stanza(Alice, timer:seconds(5)),
-    escalus:assert(is_iq_set, RingingStanza),
+    %% There is no defined order of the incoming stanzas
+    Stanzas = escalus:wait_for_stanzas(Alice, 2, timer:seconds(10)),
+    escalus:assert_many([is_iq_result, is_iq_set], Stanzas),
+    [RingingStanza] = [S || S <- Stanzas, escalus_pred:is_iq_set(S)],
     {InviteStanza, RingingStanza}.
 
 terminate_jingle_session(Terminator, Other, InviteStanza) ->
