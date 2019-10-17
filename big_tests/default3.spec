@@ -13,7 +13,6 @@
 
 {suites, "tests", ejabberdctl_SUITE}.
 {suites, "tests", cluster_commands_SUITE}.
-{suites, "tests", conf_reload_SUITE}.
 {suites, "tests", metrics_api_SUITE}.
 {suites, "tests", metrics_c2s_SUITE}.
 {suites, "tests", metrics_roster_SUITE}.
