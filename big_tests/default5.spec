@@ -12,6 +12,7 @@
 {suites, "tests", mongoose_sanity_checks_SUITE}.
 
 {suites, "tests", rdbms_SUITE}.
+{suites, "tests", offline_SUITE}.
 {suites, "tests", race_conditions_SUITE}.
 {suites, "tests", accounts_SUITE}.
 {suites, "tests", adhoc_SUITE}.
@@ -29,5 +30,7 @@
 {suites, "tests", vcard_simple_SUITE}.
 {suites, "tests", vcard_SUITE}.
 {suites, "tests", websockets_SUITE}.
+{suites, "tests", rest_SUITE}.
+{suites, "tests", conf_reload_SUITE}.
 
 {specs, join, ["base.spec"]}.
