@@ -155,5 +155,7 @@ spec_to_jobs(Spec) ->
             Jobs;
         ".spec" ->
             {ok, [Job]} = file:consult("single.jobs"),
-            [Job#{test_spec => atom_to_list(Spec)}]
+            Job1 = Job#{test_spec => atom_to_list(Spec)},
+            Job2 = maps:merge(Job1, configure_hosts()),
+            [Job2]
     end.
