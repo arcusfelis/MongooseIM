@@ -226,7 +226,9 @@ format_result(Result) ->
         {error, Reason} ->
             {error, Reason};
         {Ok, Failed, {UserSkipped, AutoSkipped}} ->
-            {ok, {Ok, Failed, UserSkipped, AutoSkipped}}
+            {ok, {Ok, Failed, UserSkipped, AutoSkipped}};
+        Other ->
+            {error, {unknown_error, Other}}
     end.
 
 process_results(CTResults) ->
