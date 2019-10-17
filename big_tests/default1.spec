@@ -17,13 +17,11 @@
 {suites, "tests", muc_http_api_SUITE}.
 {suites, "tests", muc_light_http_api_SUITE}.
 {suites, "tests", oauth_SUITE}.
-{suites, "tests", offline_SUITE}.
 {suites, "tests", presence_SUITE}.
 {suites, "tests", push_SUITE}.
 {suites, "tests", push_http_SUITE}.
 {suites, "tests", push_integration_SUITE}.
 {suites, "tests", push_pubsub_SUITE}.
-{suites, "tests", rest_SUITE}.
 {suites, "tests", rest_client_SUITE}.
 {suites, "tests", s2s_SUITE}.
 {suites, "tests", shared_roster_SUITE}.
