@@ -190,6 +190,7 @@ elif [ "$db" = 'riak' ]; then
     # debug level for logs
 #   $SED -i "s/^log.console.level = \(.*\)/log.console.level = debug/" "$TEMP_RIAK_CONF"
     echo "listener.https.internal = 127.0.0.1:8096" >> "$TEMP_RIAK_CONF"
+    $SED -i "s/^ring_size = \(.*\)/ring_size = 8/" "$TEMP_RIAK_CONF"
     # Enable ssl by appending settings from riak.conf.ssl
     cat "${DB_CONF_DIR}/riak.conf.ssl" >> "$TEMP_RIAK_CONF"
     # Import config back into container
