@@ -216,6 +216,8 @@ maybe_stop_pool({Type, Host, Tag} = Key, #{monitor := Monitor}, Monitors) ->
     NewMonitors = maps:remove(Monitor, Monitors),
     case supervisor:terminate_child(SupName, PoolName) of
         ok ->
+            %% Delete specification to avoid restarts by the supervisor
+            supervisor:delete_child(SupName, PoolName),
             {ok, NewMonitors};
         Other ->
             ?WARNING_MSG("event=error_stopping_pool, pool=~p, reason=~p",
