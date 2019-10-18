@@ -87,6 +87,9 @@ env:
   matrix:
       # When changing jobs, update EXAMPLES in tools/test-runner.sh
     - PRESET=small_tests RUN_SMALL_TESTS=true SKIP_RELEASE=1 SKIP_BUILD_TESTS=1
+    - PRESET=elasticsearch_and_cassandra_mnesia
+      REL_CONFIG="with-elasticsearch with-cassandra" TESTSPEC=mam.jobs
+      ELASTICSEARCH_VERSION=5.6.9 CASSANDRA_VERSION=3.9
     - PRESET=internal_mnesia DB=mnesia REL_CONFIG=with-all
     - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all
     - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=2
@@ -99,8 +102,8 @@ env:
     - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=9
     - PRESET=odbc_mssql_mnesia DB=mssql REL_CONFIG=with-odbc
     - PRESET=ldap_mnesia DB=ldap REL_CONFIG=with-none
-    - PRESET=elasticsearch_and_cassandra_mnesia DB="elasticsearch cassandra"
-      REL_CONFIG="with-elasticsearch with-cassandra" TESTSPEC=mam.spec
+    - PRESET=elasticsearch_and_cassandra_mnesia
+      REL_CONFIG="with-elasticsearch with-cassandra" TESTSPEC=mam.jobs
       ELASTICSEARCH_VERSION=5.6.9 CASSANDRA_VERSION=3.9
     - PRESET=dialyzer_only SKIP_RELEASE=1 SKIP_BUILD_TESTS=1 SKIP_COV=1 SKIP_REPORT_UPLOAD=1
       # In case you want to test with another ODBC driver, uncomment this
