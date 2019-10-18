@@ -696,7 +696,8 @@ test_pm_with_ungraceful_reconnection_to_different_server(Config) ->
 test_pm_with_ungraceful_reconnection_to_different_server_with_asia_refreshes_first(Config) ->
     %% Same as no refresh
     RefreshReason = "by_test_pm_with_ungraceful_reconnection_to_different_server_with_asia_refreshes_first",
-    BeforeResume = fun() -> refresh_hosts([europe_node1, asia_node], RefreshReason) end,
+    % Order of nodes is important here in refresh_hosts!
+    BeforeResume = fun() -> refresh_hosts([asia_node, europe_node1], RefreshReason) end,
     AfterCheck = fun(Alice, NewEve) ->
             user_receives(NewEve, [<<"Hi from Europe1!">>, <<"Hi again from Europe1!">>]),
             user_receives(Alice, [<<"Hi from Europe!">>])
