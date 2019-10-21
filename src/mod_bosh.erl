@@ -474,7 +474,9 @@ maybe_set_max_hold(1, Body) ->
 maybe_set_max_hold(ClientHold, #xmlel{attrs = Attrs} = Body) when ClientHold > 1 ->
     NewAttrs = lists:keyreplace(<<"hold">>, 1, Attrs, {<<"hold">>, <<"1">>}),
     {ok, Body#xmlel{attrs = NewAttrs}};
-maybe_set_max_hold(_, _) ->
+maybe_set_max_hold(ClientHold, Body) ->
+    ?ERROR_MSG("event=bosh_invalid_hold client_hold=~1000p body=~1000p",
+               [ClientHold, Body]),
     {error, invalid_hold}.
 
 -spec cowboy_reply(non_neg_integer(), headers_list(), binary(), req()) -> req().
