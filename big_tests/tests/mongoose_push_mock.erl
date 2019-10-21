@@ -18,7 +18,8 @@ start(Config) ->
                                  [{certfile, CertPath}, {keyfile, KeyPath}],
                                  #{env => #{dispatch => Dispatch}}),
     ets:new(mongoose_push_mock_subscribers,
-            [public, named_table, {heir, Pid, take_care}]).
+            [public, named_table, {heir, Pid, take_care}]),
+    wait_for_can_connect_to_port(port()).
 
 port() ->
     ranch:get_port(mongoose_push_https_mock).
@@ -45,3 +46,17 @@ init(Req, State) ->
     Req3 = cowboy_req:reply(204, #{}, <<>>, Req2),
     {ok, Req3, State}.
 
+
+wait_for_can_connect_to_port(Port) ->
+    Opts = #{time_left => timer:seconds(30), sleep_time => 1000, name => {can_connect_to_port, Port}},
+    mongoose_helper:wait_until(fun() -> can_connect_to_port(Port) end, true, Opts).
+
+can_connect_to_port(Port) ->
+    case gen_tcp:connect("127.0.0.1", Port, []) of
+        {ok, Sock} ->
+            gen_tcp:close(Sock),
+            true;
+        Other ->
+            ct:pal("can_connect_to_port port=~p result=~p", [Port, Other]),
+            false
+    end.
