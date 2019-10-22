@@ -634,15 +634,17 @@ replaced_session_cannot_terminate(Config) ->
 
     escalus_connection:stop(Alice2).
 
-return_proper_stream_error_if_service_is_not_hidden(_Config) ->
+return_proper_stream_error_if_service_is_not_hidden(Config) ->
     % GIVEN MongooseIM is running default configuration
     % WHEN we send non-XMPP payload
     % THEN the server replies with stream error xml-not-well-formed and closes the connection
+    BadData = <<"malformed from return_proper_stream_error_if_service_is_not_hidden">>,
     SendMalformedDataStep = fun(Client, Features) ->
-                                    escalus_connection:send_raw(Client, <<"malformed">>),
+                                    escalus_connection:send_raw(Client, BadData),
                                     {Client, Features}
                             end,
-    {ok, Connection, _} = escalus_connection:start([], [SendMalformedDataStep]),
+    UserSpec = escalus_users:get_userspec(Config, alice),
+    {ok, Connection, _} = escalus_connection:start(UserSpec, [SendMalformedDataStep]),
     escalus_connection:receive_stanza(Connection, #{ assert => is_stream_start }),
     StreamErrorAssertion = {is_stream_error, [<<"xml-not-well-formed">>, <<>>]},
     escalus_connection:receive_stanza(Connection, #{ assert => StreamErrorAssertion }),
@@ -653,12 +655,14 @@ close_connection_if_service_type_is_hidden(_Config) ->
     % GIVEN the option to hide service name is enabled
     % WHEN we send non-XMPP payload
     % THEN connection is closed without any response from the server
+    BadData = <<"malformed from close_connection_if_service_type_is_hidden">>,
     FailIfAnyDataReturned = fun(Reply) ->
                                     ct:fail({unexpected_data, Reply})
                             end,
-    Connection = escalus_tcp:connect(#{ on_reply => FailIfAnyDataReturned }),
+    Port = ct:get_config({hosts, mim, c2s_port}),
+    Connection = escalus_tcp:connect(#{ on_reply => FailIfAnyDataReturned, port => Port}),
     Ref = monitor(process, Connection),
-    escalus_tcp:send(Connection, <<"malformed">>),
+    escalus_tcp:send(Connection, BadData),
     receive
         {'DOWN', Ref, _, _, _} -> ok
     after
@@ -704,7 +708,8 @@ enable_logging() ->
     mim_loglevel:enable_logging([mim], custom_loglevels()).
 
 custom_loglevels() ->
-    [{ejabberd_c2s, info}].
+    [{ejabberd_c2s, info},
+     {ejabberd_receiver, info}].
 
 restore_ejabberd_node(Config) ->
     ejabberd_node_utils:restore_config_file(Config),
