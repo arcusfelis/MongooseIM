@@ -60,7 +60,9 @@ make_request(Host, PoolTag, Path, Method, Headers, Query) ->
 
 make_request(Host, PoolTag, PathPrefix, RequestTimeout, Path, Method, Headers, Query) ->
     FullPath = <<PathPrefix/binary, Path/binary>>,
+    %% It's from fusco:request/7
     Req = {request, FullPath, Method, Headers, Query, 2, RequestTimeout},
+    %% calls pool, started in mongoose_wpool_http
     try mongoose_wpool:call(http, Host, PoolTag, Req) of
         {ok, {{Code, _Reason}, _RespHeaders, RespBody, _, _}} ->
             {ok, {Code, RespBody}};
