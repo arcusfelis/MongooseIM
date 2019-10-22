@@ -653,6 +653,7 @@ resume_expired_session_returns_correct_h(Config) ->
     {ok, NewAlice, _} = escalus_connection:start(AliceSpec, connection_steps_to_authenticate()),
     escalus_connection:send(NewAlice, escalus_stanza:resume(SMID, SMH)),
     FailedResumption = escalus_connection:get_stanza(NewAlice, failed_resumption),
+    ct:log("FailedResumption ~p", [FailedResumption]),
     <<"1">> = exml_query:attr(FailedResumption, <<"h">>),
     %% And we can continue with bind and session
     escalus_session:session(escalus_session:bind(NewAlice)),
