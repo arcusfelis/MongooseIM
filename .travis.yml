@@ -38,10 +38,12 @@ install:
         - test 1 = "$SKIP_COMPILE" || ./tools/cache-build.sh store
         - test 1 = "$SKIP_BUILD_TESTS" || ./tools/cache-tests.sh store
         - test 1 = "$SKIP_COMPILE" || ./tools/cache-certs.sh store
+        - test 1 = "$SKIP_REPORT_UPLOAD" ||
+            if [ -n "${GDRIVE_SERVICE_ACCOUNT_CREDENTIALS}" ]; then JUST_INSTALL=1 tools/travis-upload-to-gdrive.sh; fi
 before_script:
-        - tools/travis-setup-db.sh
-        - if [ $PRESET = 'ldap_mnesia' ]; then sudo tools/travis-setup-ldap.sh; fi
-        - if [ $PRESET = 'mysql_redis' ]; then sudo tools/travis-setup-rmq.sh; fi
+#       - tools/travis-setup-db.sh
+#       - if [ $PRESET = 'ldap_mnesia' ]; then sudo tools/travis-setup-ldap.sh; fi
+#       - if [ $PRESET = 'mysql_redis' ]; then sudo tools/travis-setup-rmq.sh; fi
 script:
     - SKIP_AUTO_COMPILE=true KEEP_COVER_RUNNING=1 tools/travis-test.sh -p $PRESET -s $RUN_SMALL_TESTS
 
@@ -85,23 +87,51 @@ env:
   matrix:
       # When changing jobs, update EXAMPLES in tools/test-runner.sh
     - PRESET=small_tests RUN_SMALL_TESTS=true SKIP_RELEASE=1 SKIP_BUILD_TESTS=1
-    - PRESET=internal_mnesia DB=mnesia REL_CONFIG="with-all" TLS_DIST=true
-    - PRESET=odbc_mssql_mnesia DB=mssql REL_CONFIG="with-odbc"
-    - PRESET=mysql_redis DB=mysql REL_CONFIG="with-mysql with-redis with-amqp_client"
-    - PRESET=riak_mnesia DB=riak REL_CONFIG="with-riak"
-    - PRESET=ldap_mnesia DB=mnesia REL_CONFIG="with-none"
-    - PRESET=elasticsearch_and_cassandra_mnesia DB="elasticsearch cassandra"
-      REL_CONFIG="with-elasticsearch with-cassandra" TESTSPEC=mam.spec
+    - PRESET=elasticsearch_and_cassandra_mnesia
+      REL_CONFIG="with-elasticsearch with-cassandra" TESTSPEC=mam.jobs
+      ELASTICSEARCH_VERSION=5.6.9 CASSANDRA_VERSION=3.9
+    - PRESET=internal_mnesia DB=mnesia REL_CONFIG=with-all
+    - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all
+    - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=2
+    - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=3
+    - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=4
+    - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=5
+    - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=6
+    - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=7
+    - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=8
+    - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=9
+    - PRESET=odbc_mssql_mnesia DB=mssql REL_CONFIG=with-odbc
+    - PRESET=ldap_mnesia DB=ldap REL_CONFIG=with-none
+    - PRESET=elasticsearch_and_cassandra_mnesia
+      REL_CONFIG="with-elasticsearch with-cassandra" TESTSPEC=mam.jobs
       ELASTICSEARCH_VERSION=5.6.9 CASSANDRA_VERSION=3.9
     - PRESET=dialyzer_only SKIP_RELEASE=1 SKIP_BUILD_TESTS=1 SKIP_COV=1 SKIP_REPORT_UPLOAD=1
       # In case you want to test with another ODBC driver, uncomment this
       # - PRESET=odbc_pgsql_mnesia DB=pgsql REL_CONFIG=with-odbc
+    - PRESET=internal_mnesia DB=mnesia REL_CONFIG=with-all TRY=2
+    - PRESET=odbc_mssql_mnesia DB=mssql REL_CONFIG=with-odbc TRY=2
+    - PRESET=ldap_mnesia DB=ldap REL_CONFIG=with-none TRY=2
+    - PRESET=internal_mnesia DB=mnesia REL_CONFIG=with-all TRY=3
+    - PRESET=odbc_mssql_mnesia DB=mssql REL_CONFIG=with-odbc TRY=3
+    - PRESET=ldap_mnesia DB=ldap REL_CONFIG=with-none TRY=3
+    - PRESET=internal_mnesia DB=mnesia REL_CONFIG=with-all TRY=4
+    - PRESET=odbc_mssql_mnesia DB=mssql REL_CONFIG=with-odbc TRY=4
+    - PRESET=ldap_mnesia DB=ldap REL_CONFIG=with-none TRY=4
 
 
 matrix:
   include:
+    - otp_release: 22.0
+      env: PRESET=dialyzer_only
+           SKIP_RELEASE=1 SKIP_BUILD_TESTS=1 SKIP_COV=1 SKIP_REPORT_UPLOAD=1
     - otp_release: 21.3
-      env: PRESET=pgsql_mnesia DB=pgsql REL_CONFIG="with-pgsql" RUN_SMALL_TESTS=true
+      env: PRESET=pgsql_mnesia DB=pgsql REL_CONFIG="with-pgsql with-jingle-sip"
+#          RUN_SMALL_TESTS=true
+    - otp_release: 21.3
+      env: PRESET=mysql_redis DB=mysql REL_CONFIG="with-mysql with-redis with-amqp_client"
+    - otp_release: 21.3
+      env: PRESET=riak_mnesia DB=riak REL_CONFIG="with-riak with-jingle-sip" 
+#          RUN_SMALL_TESTS=true
     - language: generic
       env: PRESET=pkg pkg_PLATFORM=centos7
            SKIP_COMPILE=1 SKIP_RELEASE=1 SKIP_BUILD_TESTS=1
@@ -110,6 +140,20 @@ matrix:
       env: PRESET=pkg pkg_PLATFORM=debian_stretch
            SKIP_COMPILE=1 SKIP_RELEASE=1 SKIP_BUILD_TESTS=1
            SKIP_COV=1 SKIP_REPORT_UPLOAD=1
+    - otp_release: 21.3
+      env: PRESET=pgsql_mnesia DB=pgsql REL_CONFIG="with-pgsql with-jingle-sip" TRY=2
+#          RUN_SMALL_TESTS=true
+    - otp_release: 21.3
+      env: PRESET=mysql_redis DB=mysql REL_CONFIG="with-mysql with-redis with-amqp_client" TRY=2
+    - otp_release: 21.3
+      env: PRESET=riak_mnesia DB=riak REL_CONFIG="with-riak with-jingle-sip" 
+    - otp_release: 21.3
+      env: PRESET=pgsql_mnesia DB=pgsql REL_CONFIG="with-pgsql with-jingle-sip" TRY=2
+#          RUN_SMALL_TESTS=true
+    - otp_release: 21.3
+      env: PRESET=mysql_redis DB=mysql REL_CONFIG="with-mysql with-redis with-amqp_client"
+    - otp_release: 21.3
+      env: PRESET=riak_mnesia DB=riak REL_CONFIG="with-riak with-jingle-sip"  TRY=2
 
 notifications:
     webhooks:
@@ -123,6 +167,7 @@ cache:
                 - $HOME/.cache/mim_builds
                 - $HOME/.cache/mim_tests
                 - $HOME/.cache/mim_certs
+                - /tmp/go/bin
 
 
 # deploy:

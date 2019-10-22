@@ -158,8 +158,7 @@ create_and_terminate_session(Config) ->
     CarolSpec = proplists:get_value(?config(user, Config), NamedSpecs),
     Conn = escalus_connection:connect(CarolSpec),
 
-    %% Assert there are no BOSH sessions on the server.
-    [] = get_bosh_sessions(),
+    wait_for_zero_bosh_sessions(),
 
     Domain = ct:get_config({hosts, mim, domain}),
     Body = escalus_bosh:session_creation_body(get_bosh_rid(Conn), Domain),
@@ -907,9 +906,8 @@ wait_until_user_has_no_stanzas(User) ->
 domain() ->
     ct:get_config({hosts, mim, domain}).
 
+%% Assert there are no BOSH sessions on the server.
 wait_for_zero_bosh_sessions() ->
-    mongoose_helper:wait_until(fun() ->
-                                       length(get_bosh_sessions())
-                               end,
-                               0,
-                               #{name => get_bosh_sessions}).
+    mongoose_helper:wait_until(fun() -> length(get_bosh_sessions()) end, 0,
+                               #{name => get_bosh_sessions,
+                                 time_left => timer:seconds(30)}).

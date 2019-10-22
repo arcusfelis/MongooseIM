@@ -575,6 +575,7 @@ bind_server_generated_resource(Config) ->
 same_resource_replaces_session(Config) ->
     UserSpec = [{resource, <<"conflict">>} | escalus_users:get_userspec(Config, alice)],
     {ok, Alice1, _} = escalus_connection:start(UserSpec),
+    wait_for_registration(Alice1, mim()),
 
     {ok, Alice2, _} = escalus_connection:start(UserSpec),
 
@@ -754,3 +755,10 @@ pipeline_connect(UserSpec) ->
 
     escalus_connection:send(Conn, [Stream, Auth, AuthStream, Bind, Session]),
     Conn.
+
+wait_for_registration(Client, Node) ->
+    mongoose_helper:wait_until(fun() -> is_pid(mongoose_helper:get_session_pid(Client, Node)) end, true,
+                               #{name => wait_for_session}),
+    C2sPid = mongoose_helper:get_session_pid(Client, Node),
+    rpc:call(node(C2sPid), ejabberd_c2s, get_info, [C2sPid]),
+    ok.

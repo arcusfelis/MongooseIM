@@ -3,7 +3,7 @@
 RUN=./tools/silent_exec.sh "$@.log"
 XEP_TOOL = tools/xep_tool
 EBIN = ebin
-DEVNODES = mim1 mim2 mim3 fed1 reg1
+DEVNODES = mim1
 REBAR=./rebar3
 
 # Top-level targets aka user interface

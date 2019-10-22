@@ -268,10 +268,6 @@ DBS_ARRAY=(
 
 DEV_NODES_ARRAY=(
     mim1
-    mim2
-    mim3
-    fed1
-    reg1
 )
 
 TEST_HOSTS_ARRAY=(
@@ -395,6 +391,12 @@ case $key in
                 break
             fi
         done
+    ;;
+
+    --test-spec)
+        shift # past argument
+        TESTSPEC=$1
+        shift # past argument
     ;;
 
     --one-node)
@@ -603,7 +605,7 @@ if [[ -f "auto_small_tests.spec" ]]; then
 else
     export REBAR_CT_EXTRA_ARGS=""
 fi
-export TESTSPEC="auto_big_tests.spec"
+export TESTSPEC="${TESTSPEC-auto_big_tests.spec}"
 export START_NODES="$START_NODES"
 export STOP_NODES="$STOP_NODES"
 export PAUSE_BEFORE_BIG_TESTS="$PAUSE_BEFORE_BIG_TESTS"
@@ -631,7 +633,5 @@ echo ""
 ./tools/travis-build-tests.sh
 
 ./tools/test_runner/selected-tests-to-test-spec.sh "${SELECTED_TESTS[@]}"
-
-./tools/travis-setup-db.sh
 
 ./tools/travis-test.sh

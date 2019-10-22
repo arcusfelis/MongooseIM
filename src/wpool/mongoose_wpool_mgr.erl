@@ -70,7 +70,7 @@ start_link(Type) ->
 
 start(Type, Host, Tag, PoolOpts, ConnOpts) ->
     ok = ensure_started(Type),
-    gen_server:call(name(Type), {start_pool, Host, Tag, PoolOpts, ConnOpts}).
+    gen_server:call(name(Type), {start_pool, Host, Tag, PoolOpts, ConnOpts}, timer:seconds(180)).
 
 stop(Type, Host, Tag) ->
     gen_server:call(name(Type), {stop_pool, Host, Tag}).
@@ -216,6 +216,8 @@ maybe_stop_pool({Type, Host, Tag} = Key, #{monitor := Monitor}, Monitors) ->
     NewMonitors = maps:remove(Monitor, Monitors),
     case supervisor:terminate_child(SupName, PoolName) of
         ok ->
+            %% Delete specification to avoid restarts by the supervisor
+            supervisor:delete_child(SupName, PoolName),
             {ok, NewMonitors};
         Other ->
             ?WARNING_MSG("event=error_stopping_pool, pool=~p, reason=~p",

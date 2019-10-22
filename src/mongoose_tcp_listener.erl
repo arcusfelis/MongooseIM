@@ -50,7 +50,9 @@ start_link(PortIP, Module, Opts, SockOpts, Port, IPS) ->
             IPS :: [any()]}) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init({PortIP, Module, Opts, SockOpts, Port, IPS}) ->
     try
-        AcceptorsNum = proplists:get_value(acceptors_num, Opts, 100),
+        CommonNum = ejabberd_config:get_local_option_or_default(tcp_acceptors_num, 100),
+        %% Allow to override common number for each listener
+        AcceptorsNum = proplists:get_value(acceptors_num, Opts, CommonNum),
         ListenSocket = listen_tcp(PortIP, Module, SockOpts, Port, IPS),
         Children = [make_childspec({PortIP, I}, ListenSocket, Module, Opts)
                     || I <- lists:seq(1, AcceptorsNum)],

@@ -801,16 +801,15 @@ wait_for_archive_size(Server, Username, ExpectedSize) ->
                                ExpectedSize,
                                #{
                                  time_left => timer:seconds(20),
+                                 % The request is pretty heavy for some backends.
+                                 % Even if archive_size call is blocking, we still don't
+                                 % want to call backend way too often.
+                                 sleep_time => 500,
                                  name => archive_size
                                 }).
 
 wait_for_archive_size_or_warning(Server, Username, ExpectedSize) ->
-    try mongoose_helper:wait_until(fun() -> archive_size(Server, Username) end,
-                                   ExpectedSize,
-                                   #{
-                                     time_left => timer:seconds(20),
-                                     name => archive_size
-                                    }) of
+    try wait_for_archive_size(Server, Username, ExpectedSize) of
         {ok, ExpectedSize} ->
             ok
     catch

@@ -13,7 +13,8 @@
 -export([post_end_per_suite/4,
          post_end_per_group/4,
          post_end_per_testcase/4]).
--record(state, { file, summary_file, truncated_counter_file, suite, limit }).
+-export([on_tc_skip/4]).
+-record(state, { file, summary_file, skip_file, truncated_counter_file, time_file, suite, limit }).
 
 %% @doc Return a unique id for this CTH.
 id(_Opts) ->
@@ -22,13 +23,19 @@ id(_Opts) ->
 %% @doc Always called before any other callback function. Use this to initiate
 %% any common state.
 init(_Id, _Opts) ->
-    File = "/tmp/ct_markdown",
-    TrFile = "/tmp/ct_markdown_truncated",
-    SummaryFile = "/tmp/ct_summary",
+    CtRunDir = filename:absname(""),
+    File = filename:join(CtRunDir, "ct_markdown"),
+    TrFile = filename:join(CtRunDir, "ct_markdown_truncated"),
+    SummaryFile = filename:join(CtRunDir, "ct_summary"),
+    SkipFile = filename:join(CtRunDir, "ct_skip_info"),
+    TimeFile = filename:join(CtRunDir, "ct_summary_time"),
     file:write_file(File, ""),
     file:write_file(SummaryFile, ""),
+    file:write_file(TimeFile, ""),
+    file:write_file(SkipFile, ""),
     file:delete(TrFile),
-    {ok, #state{ file = File, summary_file = SummaryFile, truncated_counter_file = TrFile, limit = 25 }}.
+    {ok, #state{ file = File, summary_file = SummaryFile, skip_file = SkipFile,
+                 truncated_counter_file = TrFile, time_file = TimeFile, limit = 25 }}.
 
 post_init_per_suite(SuiteName, Config, Return, State) ->
     State2 = handle_return(SuiteName, init_per_suite, Return, Config, State),
@@ -54,6 +61,11 @@ post_end_per_group(GroupName, Config, Return, State=#state{suite = SuiteName}) -
 post_end_per_testcase(TC, Config, Return, State=#state{suite = SuiteName}) ->
     State2 = handle_return(SuiteName, TC, Return, Config, State),
     {Return, State2}.
+
+on_tc_skip(SuiteName, TestName, Reason, State = #state{skip_file = SkipFile}) ->
+    Out = io_lib:format("~tp.~n", [#{suite => SuiteName, test => TestName, reason => Reason}]),
+    file:write_file(SkipFile, Out, [append]),
+    State.
 
 handle_return(SuiteName, Place, Return, Config, State) ->
     try handle_return_unsafe(SuiteName, Place, Return, Config, State)
@@ -95,9 +107,10 @@ old_truncated_counter_value(TrFile) ->
             0
     end.
 
-log_summary(SuiteName, GroupName, Place, #state{summary_file = SummaryFile}) ->
+log_summary(SuiteName, GroupName, Place, #state{summary_file = SummaryFile, time_file = TimeFile}) ->
     SummaryText = make_summary_text(SuiteName, GroupName, Place),
     file:write_file(SummaryFile, [SummaryText, $\n], [append]),
+    file:write_file(TimeFile, [format_time(), " ", SummaryText, $\n], [append]),
     ok.
 
 log_error(SuiteName, GroupName, Place, Error, Config, #state{file = File, summary_file = SummaryFile}) ->
@@ -189,3 +202,7 @@ full_group_name(Config) ->
 join_atoms(Atoms) ->
     Strings = [atom_to_list(A) || A <- Atoms],
     list_to_atom(string:join(Strings, ":")).
+
+format_time() ->
+    {{Year, Month, Day}, {Hour, Minute, Second}} = calendar:now_to_datetime(erlang:now()),
+    lists:flatten(io_lib:format("~4..0w-~2..0w-~2..0wT~2..0w:~2..0w:~2..0w",[Year,Month,Day,Hour,Minute,Second])).
