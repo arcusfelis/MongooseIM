@@ -123,6 +123,7 @@ init_per_suite(Config) ->
     Config1 = ejabberd_node_utils:init(Config0),
     ejabberd_node_utils:backup_config_file(Config1),
     assert_cert_file_exists(),
+    enable_logging(),
     escalus:create_users(Config1, escalus:get_users([?SECURE_USER, alice])).
 
 end_per_suite(Config) ->
@@ -134,22 +135,22 @@ end_per_suite(Config) ->
 init_per_group(c2s_noproc, Config) ->
     config_ejabberd_node_tls(Config,
                              fun mk_value_for_starttls_config_pattern/0),
-    ejabberd_node_utils:restart_application(mongooseim),
+    restart_mim_for_test(Config),
     Config;
 init_per_group(session_replacement, Config) ->
     config_ejabberd_node_tls(Config,
                              fun mk_value_for_starttls_config_pattern/0),
-    ejabberd_node_utils:restart_application(mongooseim),
+    restart_mim_for_test(Config),
     lager_ct_backend:start(),
     Config;
 init_per_group(starttls, Config) ->
     config_ejabberd_node_tls(Config,
                              fun mk_value_for_starttls_required_config_pattern/0),
-    ejabberd_node_utils:restart_application(mongooseim),
+    restart_mim_for_test(Config),
     Config;
 init_per_group(tls, Config) ->
     config_ejabberd_node_tls(Config, fun mk_value_for_tls_config_pattern/0),
-    ejabberd_node_utils:restart_application(mongooseim),
+    restart_mim_for_test(Config),
     Users = proplists:get_value(escalus_users, Config, []),
     JoeSpec = lists:keydelete(starttls, 1, proplists:get_value(?SECURE_USER, Users)),
     JoeSpec2 = {?SECURE_USER, lists:keystore(ssl, 1, JoeSpec, {ssl, true})},
@@ -158,7 +159,7 @@ init_per_group(tls, Config) ->
     [{c2s_port, ct:get_config({hosts, mim, c2s_port})} | Config2];
 init_per_group(feature_order, Config) ->
     config_ejabberd_node_tls(Config, fun mk_value_for_compression_config_pattern/0),
-    ejabberd_node_utils:restart_application(mongooseim),
+    restart_mim_for_test(Config),
     Config;
 init_per_group(just_tls,Config)->
     [{tls_module, just_tls} | Config];
@@ -692,9 +693,23 @@ openssl_client_can_use_cipher(Cipher, Port) ->
     {done, ReturnCode, _Result} = erlsh:oneliner(Cmd),
     0 == ReturnCode.
 
+restart_mim_for_test(Config) ->
+    ejabberd_node_utils:restart_application(mongooseim),
+    enable_logging().
+
+disable_logging() ->
+    mim_loglevel:disable_logging([mim], custom_loglevels()).
+
+enable_logging() ->
+    mim_loglevel:enable_logging([mim], custom_loglevels()).
+
+custom_loglevels() ->
+    [{ejabberd_c2s, info}].
+
 restore_ejabberd_node(Config) ->
     ejabberd_node_utils:restore_config_file(Config),
-    ejabberd_node_utils:restart_application(mongooseim).
+    ejabberd_node_utils:restart_application(mongooseim),
+    disable_logging().
 
 assert_cert_file_exists() ->
     ejabberd_node_utils:file_exists(?CERT_FILE) orelse
