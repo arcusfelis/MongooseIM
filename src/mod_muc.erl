@@ -164,7 +164,12 @@ stop(Host) ->
 
 stop_gen_server(Host) ->
     Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
-    gen_server:call(Proc, stop),
+    try
+        %% Can sometimes (in extreme cases) fail with reason noproc
+        gen_server:call(Proc, stop)
+    catch Class:Reason ->
+        ?ERROR_MSG("event=muc_stop_server_failed host=~p reason=~p:~p", [Host, Class, Reason])
+    end,
     %% Proc can still be alive because of a race condition
     ejabberd_sup:stop_child(Proc).
 
