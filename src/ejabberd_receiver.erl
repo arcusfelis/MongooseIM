@@ -361,7 +361,10 @@ process_data(Data, #state{parser = Parser,
     {C2SEvents, NewParser} =
         case exml_stream:parse(Parser, Data) of
             {ok, NParser, Elems} -> {[wrap_if_xmlel(E) || E <- Elems], NParser};
-            {error, Reason} -> {[{xmlstreamerror, Reason}], Parser}
+            {error, Reason} ->
+                ?INFO_MSG("event=parse_error c2s_pid=~p data=~p reason=~p",
+                          [C2SPid, Data, Reason]),
+                {[{xmlstreamerror, Reason}], Parser}
         end,
     NewChunkSize = update_stanza_size(C2SEvents, ChunkSize, Size),
     {NewShaperState, Pause} = shaper:update(ShaperState, Size),
