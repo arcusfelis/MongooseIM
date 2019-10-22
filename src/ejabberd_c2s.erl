@@ -254,8 +254,12 @@ wait_for_stream(timeout, StateData) ->
     {stop, normal, StateData};
 wait_for_stream(closed, StateData) ->
     {stop, normal, StateData};
-wait_for_stream(_UnexpectedItem, #state{ server = Server } = StateData) ->
-    case ejabberd_config:get_local_option(hide_service_name, Server) of
+wait_for_stream(UnexpectedItem, #state{ server = Server } = StateData) ->
+    Hide = ejabberd_config:get_local_option(hide_service_name, Server),
+    ?INFO_MSG("issue=not_stream_start "
+              "unexpected_item=~p from_address=~p hide_service_name=~p stream_id=~ts",
+              [UnexpectedItem, StateData#state.ip, Hide, StateData#state.streamid]),
+    case Hide of
         true ->
             {stop, normal, StateData};
         _ ->
