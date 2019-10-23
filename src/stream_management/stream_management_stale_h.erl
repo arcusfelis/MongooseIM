@@ -121,4 +121,11 @@ handle_info(Info, #smgc_state{gc_repeat_after = RepeatAfter,
 clear_table(GeriatricAge) ->
     TimeToDie = erlang:monotonic_time(second) + GeriatricAge,
     MS = ets:fun2ms(fun(#stream_mgmt_stale_h{stamp=S}) when S < TimeToDie -> true end),
-    ets:select_delete(stream_mgmt_stale_h, MS).
+    NumDeleted = ets:select_delete(stream_mgmt_stale_h, MS),
+    case NumDeleted of
+        0 ->
+            ok;
+        _ ->
+            ?INFO_MSG("event=clear_table max_age=~p deleted=~p", [GeriatricAge, NumDeleted])
+    end.
+
