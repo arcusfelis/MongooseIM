@@ -120,9 +120,11 @@ init_per_suite(Config) ->
     NewConfig = escalus_ejabberd:setup_option(buffer_max(?SMALL_SM_BUFFER), NewConfig1),
     NewConfigWithSM = escalus_users:update_userspec(NewConfig, alice, stream_management, true),
     mongoose_helper:inject_module(?MODULE),
+    enable_logging(),
     escalus:init_per_suite(NewConfigWithSM).
 
 end_per_suite(Config) ->
+    disable_logging(),
     NewConfig = escalus_ejabberd:reset_option(ack_freq(never), Config),
     NewConfig1 = escalus_ejabberd:reset_option(buffer_max(?SMALL_SM_BUFFER), NewConfig),
     escalus_fresh:clean(),
@@ -1323,3 +1325,19 @@ wait_for_session({LU, LS, LR} = LJID, Retries, SleepTime) ->
 
 make_smid() ->
     base64:encode(crypto:strong_rand_bytes(21)).
+
+
+%%--------------------------------------------------------------------
+%% Logging
+%%--------------------------------------------------------------------
+
+disable_logging() ->
+    mim_loglevel:disable_logging([mim], custom_loglevels()).
+
+enable_logging() ->
+    mim_loglevel:enable_logging([mim], custom_loglevels()).
+
+custom_loglevels() ->
+    [{ejabberd_c2s, info},
+     %% We want to know, if clear_table is triggered
+     {stream_management_stale_h, info}].
