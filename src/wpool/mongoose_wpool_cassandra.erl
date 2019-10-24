@@ -6,7 +6,7 @@
 -export([stop/2]).
 
 init() ->
-    {ok, []} = application:ensure_all_started(cqerl),
+    {ok, _} = application:ensure_all_started(cqerl),
     application:set_env(cqerl, maps, true).
 
 start(Host, Tag, WpoolOptsIn, CqerlOpts) ->
