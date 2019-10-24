@@ -115,12 +115,14 @@ stop(_State) ->
 db_init() ->
     case mnesia:system_info(extra_db_nodes) of
         [] ->
+            %% Stop if running for some reason
             application:stop(mnesia),
-            mnesia:create_schema([node()]),
-            application:start(mnesia, permanent);
+            mnesia:create_schema([node()]);
         _ ->
             ok
     end,
+    %% Start, if not started yet
+    application:start(mnesia, permanent),
     mnesia:wait_for_tables(mnesia:system_info(local_tables), infinity).
 
 %% @doc Start all the modules in all the hosts
