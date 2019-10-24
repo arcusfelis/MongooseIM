@@ -187,6 +187,10 @@ elif [ "$db" = 'riak' ]; then
     $SED -i "s/^search = \(.*\)/search = on/" "$TEMP_RIAK_CONF"
     # Solr is sloow on travis
     $SED -i "s/^search.solr.start_timeout = \(.*\)/search.solr.start_timeout = 2m/" "$TEMP_RIAK_CONF"
+    # debug level for logs
+#   $SED -i "s/^log.console.level = \(.*\)/log.console.level = debug/" "$TEMP_RIAK_CONF"
+    echo "listener.https.internal = 127.0.0.1:8096" >> "$TEMP_RIAK_CONF"
+    $SED -i "s/^ring_size = \(.*\)/ring_size = 8/" "$TEMP_RIAK_CONF"
     # Enable ssl by appending settings from riak.conf.ssl
     cat "${DB_CONF_DIR}/riak.conf.ssl" >> "$TEMP_RIAK_CONF"
     # Import config back into container
@@ -196,10 +200,16 @@ elif [ "$db" = 'riak' ]; then
     docker start $NAME
     echo "Waiting for docker healthcheck"
     echo ""
-    tools/wait_for_healthcheck.sh $NAME
+    TIMEOUT=180 tools/wait_for_healthcheck.sh $NAME
     echo "Waiting for a listener to appear"
     tools/wait_for_service.sh $NAME 8098
-    time docker exec -e RIAK_PORT="$RIAK_PORT" $NAME riak escript /setup_riak.escript
+    # Setup index schemas and indexes
+    # Setup auth
+    # Setup bucket types
+    # Uses default prefix
+    time docker exec $NAME riak escript /setup_riak.escript
+    # If you want to create a copy of indexes and data types with another prefix, use:
+#   time docker exec -e SCRIPT_CMD="setup_prefix" -e RIAK_PREFIX="mim2" $NAME riak escript /setup_riak.escript
     tools/wait_for_service.sh $NAME 8087
     # Use this command to read Riak's logs if something goes wrong
     # docker exec -t $NAME bash -c 'tail -f /var/log/riak/*'

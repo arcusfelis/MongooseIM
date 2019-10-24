@@ -82,6 +82,7 @@
                     | {loglevel, _}
                     | {max_fsm_queue, _}
                     | {sasl_mechanisms, _}
+                    | {tcp_acceptors_num, _}
                     | host_term().
 
 -type host_term() :: {acl, _, _}
@@ -302,6 +303,8 @@ process_term(Term, State) ->
             add_option(cowboy_server_name, Value, State);
         {services, Value} ->
             add_option(services, Value, State);
+        {tcp_acceptors_num, Value} ->
+            add_option(tcp_acceptors_num, Value, State);
         {_Opt, _Val} ->
             lists:foldl(fun(Host, S) -> process_host_term(Term, Host, S) end,
                         State, State#state.hosts)

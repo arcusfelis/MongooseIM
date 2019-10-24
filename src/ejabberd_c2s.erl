@@ -161,6 +161,10 @@ store_session_info(FsmRef, User, Server, Resource, KV) ->
 %%          {stop, StopReason}
 %%----------------------------------------------------------------------
 init([{SockMod, Socket}, Opts]) ->
+    IP = peerip(SockMod, Socket),
+    ?DEBUG("event=new_c2s_client from_address=~p", [IP]),
+    put('$c2s_peer_name', IP),
+    put('$c2s_init_time', os:timestamp()),
     Access = case lists:keyfind(access, 1, Opts) of
                  {_, A} -> A;
                  _ -> all
@@ -203,7 +207,6 @@ init([{SockMod, Socket}, Opts]) ->
                  end, Opts),
     TLSOpts = verify_opts(Verify) ++ TLSOpts1,
     [ssl_crl_cache:insert({file, CRL}) || CRL <- proplists:get_value(crlfiles, Opts, [])],
-    IP = peerip(SockMod, Socket),
     %% Check if IP is blacklisted:
     case is_ip_blacklisted(IP) of
         true ->
@@ -254,8 +257,12 @@ wait_for_stream(timeout, StateData) ->
     {stop, normal, StateData};
 wait_for_stream(closed, StateData) ->
     {stop, normal, StateData};
-wait_for_stream(_UnexpectedItem, #state{ server = Server } = StateData) ->
-    case ejabberd_config:get_local_option(hide_service_name, Server) of
+wait_for_stream(UnexpectedItem, #state{ server = Server } = StateData) ->
+    Hide = ejabberd_config:get_local_option(hide_service_name, Server),
+    ?INFO_MSG("issue=not_stream_start "
+              "unexpected_item=~p from_address=~p hide_service_name=~p stream_id=~ts",
+              [UnexpectedItem, StateData#state.ip, Hide, StateData#state.streamid]),
+    case Hide of
         true ->
             {stop, normal, StateData};
         _ ->
@@ -1023,6 +1030,8 @@ handle_info(replaced, _StateName, StateData) ->
     Lang = StateData#state.lang,
     StreamConflict = mongoose_xmpp_errors:stream_conflict(Lang, <<"Replaced by new connection">>),
     maybe_send_element_from_server_jid_safe(StateData, StreamConflict),
+    %% Keep it for debugging
+    ?ERROR_MSG("issue=session_replaced state_data=~p", [StateData]),
     maybe_send_trailer_safe(StateData),
     {stop, normal, StateData#state{authenticated = replaced}};
 handle_info(new_offline_messages, session_established,

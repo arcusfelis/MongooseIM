@@ -138,7 +138,7 @@ maybe_fill_subnode_table(_Other) ->
                   ErrorDebug :: map()) ->
     {result | error, any()}.
 transaction(Fun, ErrorDebug) ->
-    transaction(Fun, ErrorDebug, 3).
+    transaction(Fun, ErrorDebug, 5).
 
 transaction(Fun, ErrorDebug, Retries) ->
     case mnesia:transaction(mod_pubsub_db:extra_debug_fun(Fun)) of
@@ -147,7 +147,7 @@ transaction(Fun, ErrorDebug, Retries) ->
         {aborted, ReasonData} when Retries > 0 ->
             ?WARNING_MSG("event=transaction_retry retries=~p reason=~p debug=~p",
                          [Retries, ReasonData, ErrorDebug]),
-            timer:sleep(100),
+            timer:sleep(100 + round(rand:uniform() * 100)),
             transaction(Fun, ErrorDebug, Retries - 1);
         {aborted, ReasonData} ->
             ?WARNING_MSG("event=transaction_failed reason=~p debug=~p",

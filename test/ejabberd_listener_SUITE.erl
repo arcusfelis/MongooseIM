@@ -17,11 +17,13 @@ all() ->
      tcp_start_stop_reload].
 
 init_per_testcase(_Case, Config) ->
-    meck:new([gen_udp, gen_tcp], [unstick, passthrough]),
+    meck:new([gen_udp, gen_tcp, ejabberd_config], [unstick, passthrough]),
     meck:expect(gen_udp, open,
                 fun(Port, Opts) -> meck:passthrough([Port, Opts]) end),
     meck:expect(gen_tcp, listen,
                 fun(Port, Opts) -> meck:passthrough([Port, Opts]) end),
+    meck:expect(ejabberd_config, get_local_option_or_default,
+                fun(_, Default) -> Default end),
     Config.
 
 end_per_testcase(_Case, Config) ->

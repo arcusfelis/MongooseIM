@@ -30,7 +30,7 @@ objectClass: organizationalUnit
 EOL
 }
 
-write_init_entries
+#write_init_entries
 
 # Make Users1, Users2, ... Users10 OU-s, which can be used for parallel jobs
 for i in {1..10}; do

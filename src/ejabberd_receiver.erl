@@ -290,7 +290,7 @@ terminate(_Reason, #state{parser = Parser,
         undefined -> ok;
         _ -> gen_fsm_compat:send_event(C2SPid, closed)
     end,
-    catch (State#state.sock_mod):close(State#state.socket),
+    catch workaround_transport_delivery_problems(State#state.socket, State#state.sock_mod),
     ok.
 
 %%--------------------------------------------------------------------
@@ -361,7 +361,10 @@ process_data(Data, #state{parser = Parser,
     {C2SEvents, NewParser} =
         case exml_stream:parse(Parser, Data) of
             {ok, NParser, Elems} -> {[wrap_if_xmlel(E) || E <- Elems], NParser};
-            {error, Reason} -> {[{xmlstreamerror, Reason}], Parser}
+            {error, Reason} ->
+                ?INFO_MSG("event=parse_error c2s_pid=~p data=~p reason=~p",
+                          [C2SPid, Data, Reason]),
+                {[{xmlstreamerror, Reason}], Parser}
         end,
     NewChunkSize = update_stanza_size(C2SEvents, ChunkSize, Size),
     {NewShaperState, Pause} = shaper:update(ShaperState, Size),
@@ -445,3 +448,19 @@ hibernate() ->
 -spec maybe_hibernate(state()) -> hibernate | infinity | pos_integer().
 maybe_hibernate(#state{hibernate_after = 0}) -> hibernate();
 maybe_hibernate(#state{hibernate_after = HA}) -> HA.
+
+%% It's workaround taken from ssl application
+workaround_transport_delivery_problems(Socket, gen_tcp) ->
+    %% Standard trick to try to make sure all
+    %% data sent to the tcp port is really delivered to the
+    %% peer application before tcp port is closed so that the peer will
+    %% get the correct TLS alert message and not only a transport close.
+    inet:setopts(Socket, [{active, false}]),
+    gen_tcp:shutdown(Socket, write),
+    %% Will return when other side has closed or after 30 s
+    %% e.g. we do not want to hang if something goes wrong
+    %% with the network but we want to maximise the odds that
+    %% peer application gets all data sent on the tcp connection.
+    gen_tcp:recv(Socket, 0, 30000);
+workaround_transport_delivery_problems(Socket, SockMod) ->
+    SockMod:close(Socket).

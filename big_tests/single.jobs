@@ -1,0 +1,8 @@
+#{test_config => "test.config",
+  test_config_out => "_build/test1.config",
+  first_port => 5100,
+  slave_node => ct1,
+  prefix => "ng1",
+  username_suffix => <<"">>,
+  ejabberd_cookie => mim1_cookie,
+  enabled_hosts => [mim, mim2, mim3, fed, reg]}.

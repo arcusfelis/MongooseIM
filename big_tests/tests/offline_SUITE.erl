@@ -108,6 +108,8 @@ max_offline_messages_reached(Config) ->
                 each_client_sends_messages_to(BobsResources, Alice,
                                               {count, MessagesPerResource}),
 
+                wait_for_offline_message_count(Alice, ?MAX_OFFLINE_MSGS),
+
                 send_message(B1, Alice, ?MAX_OFFLINE_MSGS+1),
                 Packet = escalus:wait_for_stanza(B1, 5000),
                 escalus:assert(is_error, [<<"wait">>, <<"resource-constraint">>], Packet),
@@ -118,7 +120,7 @@ max_offline_messages_reached(Config) ->
                                            length(BobsResources))],
                 escalus_new_assert:mix_match
                   ([is_presence | Preds],
-                   escalus:wait_for_stanzas(NewAlice, ?MAX_OFFLINE_MSGS+1)),
+                   escalus:wait_for_stanzas(NewAlice, ?MAX_OFFLINE_MSGS+1, timer:seconds(15))),
                 ct:sleep(500),
                 false = escalus_client:has_stanzas(Alice)
             end,
@@ -197,3 +199,16 @@ make_message_with_expiry(Target, Expiry, Text) ->
 
 repeat(L,0) -> [];
 repeat(L,N) -> L ++ repeat(L, N-1).
+
+wait_for_offline_message_count(Client, Count) ->
+    Fun = fun() -> offline_message_count(Client) end,
+    Opts = #{time_left => timer:seconds(15),
+             sleep_time => 1000,
+             name => wait_for_offline_message_count_timeout},
+    mongoose_helper:wait_until(Fun, Count, Opts).
+
+offline_message_count(Client) ->
+    LUser = escalus_utils:jid_to_lower(escalus_client:username(Client)),
+    LServer = escalus_utils:jid_to_lower(escalus_client:server(Client)),
+    Args = [LUser, LServer, ?MAX_OFFLINE_MSGS + 1],
+    mongoose_helper:successful_rpc(mod_offline_backend, count_offline_messages, Args).

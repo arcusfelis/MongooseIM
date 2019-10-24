@@ -393,11 +393,23 @@ ensure_metric(Host, Metric, Type, ShortType) when is_list(Metric) ->
     end.
 
 do_create_metric(PrefixedMetric, ExometerType, ExometerOpts) ->
-    case catch exometer:new(PrefixedMetric, ExometerType, ExometerOpts) of
+    F = fun() -> catch exometer:new(PrefixedMetric, ExometerType, ExometerOpts) end,
+    case measure_time(PrefixedMetric, F) of
         {'EXIT', {exists, _}} -> {ok, already_present};
         ok -> ok;
         {'EXIT', Error} -> {error, Error}
     end.
+
+measure_time(PrefixedMetric, F) ->
+    {Microseconds, Result} = timer:tc(F),
+    Milliseconds = Microseconds div 1000,
+    case Milliseconds > 100 of
+        true ->
+            ?WARNING_MSG("event=slow_do_create_metric metric=~p time=~p millisecs", [PrefixedMetric, Milliseconds]);
+        false ->
+            ok
+    end,
+    Result.
 
 -spec metrics_hooks('add' | 'delete', jid:server()) -> 'ok'.
 metrics_hooks(Op, Host) ->

@@ -27,6 +27,7 @@ COMMON_OPTS := -sname test -setcookie ejabberd -hidden \
                $(TLS_DIST_OPTS) \
                -env REPO_DIR "$(ABS_REPO_DIR)" \
                -env TEST_DIR "$(ABS_TEST_DIR)" \
+               -env EXTRA_ARGS " $(TLS_DIST_OPTS) " \
                -pa `pwd`/_build/default/lib/*/ebin \
                    `pwd`/tests \
                $(DEPS_PATHS)
@@ -44,6 +45,9 @@ test_clean: get-deps
 cover_test_clean: get-deps
 	rm -rf tests/*.beam
 	$(MAKE) cover_test
+
+run_erl: $(PREPARE)
+	erl $(COMMON_OPTS) $(ADD_OPTS)
 
 quicktest: $(PREPARE)
 	$(RUN) erl -noinput $(COMMON_OPTS) $(ADD_OPTS) \
