@@ -43,7 +43,7 @@ restart_ejabberd_node(Node) ->
 
 reload_through_ctl(Node, Config) ->
     ReloadCmd = node_ctl(Node, Config) ++ " reload_local",
-    OutputStr = rpc(Node, os, cmd, [ReloadCmd]),
+    OutputStr = rpc(Node, os, cmd, [ReloadCmd], timer:seconds(30)),
     ok = verify_reload_output(ReloadCmd, OutputStr).
 
 verify_reload_output(ReloadCmd, OutputStr) ->
