@@ -214,6 +214,7 @@ fusco_request(Client, Method, Path, Body, HeadersIn) ->
     Headers = [{<<"Content-Type">>, <<"text/xml; charset=utf-8">>} | HeadersIn],
     case fusco_cp:request(Client, Path, Method, Headers, Body, 2, 5000) of
         {ok, Result} ->
+            ct:log("fusco_request:result ~p", [Result]),
             Result;
         Other ->
             ct:fail(#{issue => http_request_failed,
