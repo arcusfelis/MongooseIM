@@ -47,7 +47,7 @@ RequiredApps = fun() -> [mongooseim, inets, tools, mnesia] end,
 EnvApps = GetEnvApps(),
 
 %% Could be included, but should not be started automatically
-AlwaysOptional = [mnesia, recon, nksip, nkservice, nkpacket, cqerl, tirerl, amqp_client, riakc, riak_pb, eodbc, erlcloud],
+AlwaysOptional = [mnesia, recon, nksip, nkservice, nkpacket, nklib, cqerl, tirerl, rabbit_common, amqp_client, riakc, riak_pb, eodbc, erlcloud],
 FirstApplications = [lager],
 
 SetupIncludedApps =

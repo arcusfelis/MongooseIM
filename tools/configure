@@ -49,14 +49,15 @@ app_opts() ->
      {"cassandra",     ["cqerl"],           include_driver("cassandra")},
      {"elasticsearch", ["tirerl"],          include_driver("elasticsearch")},
      {"aws",           ["erlcloud"],        "include support for AWS services"},
-     {"amqp_client",   ["amqp_client"],     "include AMQP client"}].
+     {"amqp_client",   amqp_apps(),         "include AMQP client"}].
 
 %% All deps should be specified, so {optional_app, load} is set for all of them,
 %% not just main application.
 %% If not specified here, MIM would still work, just an optional application,
 %% not specified here, would be started.
 riakc_apps() -> ["riakc", "riak_pb"].
-nksip_apps() -> ["nksip", "nkservice", "nkpacket"].
+nksip_apps() -> ["nksip", "nklib", "nkservice", "nkpacket"].
+amqp_apps()  -> ["amqp_client", "rabbit_common"].
 
 opts() ->
     [{"prefix",  (#opts{})#opts.prefix,  "Installation PREFIX directory"},
