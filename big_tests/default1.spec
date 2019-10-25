@@ -18,10 +18,6 @@
 {suites, "tests", muc_light_http_api_SUITE}.
 {suites, "tests", oauth_SUITE}. % pgsql specific
 {suites, "tests", presence_SUITE}.
-{suites, "tests", push_SUITE}.
-{suites, "tests", push_http_SUITE}.
-{suites, "tests", push_integration_SUITE}.
-{suites, "tests", push_pubsub_SUITE}.
 {suites, "tests", rest_client_SUITE}.
 {suites, "tests", s2s_SUITE}.
 {suites, "tests", shared_roster_SUITE}.

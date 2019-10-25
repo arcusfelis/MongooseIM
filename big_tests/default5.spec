@@ -32,6 +32,10 @@
 {suites, "tests", websockets_SUITE}.
 {suites, "tests", rest_SUITE}.
 {suites, "tests", xep_0352_csi_SUITE}.
+{suites, "tests", push_SUITE}.
+{suites, "tests", push_http_SUITE}.
+{suites, "tests", push_integration_SUITE}.
+{suites, "tests", push_pubsub_SUITE}.
 {suites, "tests", conf_reload_SUITE}.
 {suites, "tests", sasl_external_SUITE}.
 
