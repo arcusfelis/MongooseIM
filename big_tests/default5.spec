@@ -31,6 +31,8 @@
 {suites, "tests", vcard_SUITE}.
 {suites, "tests", websockets_SUITE}.
 {suites, "tests", rest_SUITE}.
+{suites, "tests", xep_0352_csi_SUITE}.
 {suites, "tests", conf_reload_SUITE}.
+{suites, "tests", sasl_external_SUITE}.
 
 {specs, join, ["base.spec"]}.
