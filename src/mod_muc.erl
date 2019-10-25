@@ -145,7 +145,7 @@ start(Host, Opts) ->
     TrackedDBFuns = [store_room, restore_room, forget_room, get_rooms,
                      can_use_nick, get_nick, set_nick, unset_nick],
     gen_mod:start_backend_module(mod_muc_db, Opts, TrackedDBFuns),
-    start_supervisor(Host),
+    {ok, _} = start_supervisor(Host),
     Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
     ChildSpec =
         {Proc,
@@ -154,13 +154,13 @@ start(Host, Opts) ->
          1000,
          worker,
          [?MODULE]},
-    ejabberd_sup:start_child(ChildSpec).
+    {ok, _} = ejabberd_sup:start_child(ChildSpec).
 
 -spec stop(jid:server()) -> 'ok'
     | {'error', 'not_found' | 'restarting' | 'running' | 'simple_one_for_one'}.
 stop(Host) ->
-    stop_supervisor(Host),
-    stop_gen_server(Host).
+    stop_gen_server(Host),
+    stop_supervisor(Host).
 
 stop_gen_server(Host) ->
     Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
