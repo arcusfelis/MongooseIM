@@ -10,7 +10,7 @@
  {<<"cpool">>,{pkg,<<"cpool">>,<<"0.1.0">>},0},
  {<<"cqerl">>,
   {git,"https://github.com/esl/cqerl.git",
-       {ref,"c6105de4888c61f6de02de28fc9ae1923dcfb999"}},
+       {ref,"d6c5157a8eeeca0f57c15453e809031495791534"}},
   0},
  {<<"credentials_obfuscation">>,
   {pkg,<<"credentials_obfuscation">>,<<"1.1.0">>},
