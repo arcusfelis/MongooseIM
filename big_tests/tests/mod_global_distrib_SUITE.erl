@@ -250,6 +250,8 @@ end_per_group_generic(Config) ->
 init_per_testcase(CaseName, Config)
   when CaseName == test_muc_conversation_on_one_host; CaseName == test_global_disco;
        CaseName == test_muc_conversation_history ->
+    %% Pause refresher to avoid europe2 node to register iteself back, while hidden.
+    pause_refresher(europe_node2),
     %% There is no helper to load MUC on node2
     %% For now it's easier to hide node2
     %% TODO: Do it right at some point!
@@ -298,6 +300,7 @@ end_per_testcase(CN, Config) when CN == test_pm_with_graceful_reconnection_to_di
 end_per_testcase(CaseName, Config)
   when CaseName == test_muc_conversation_on_one_host; CaseName == test_global_disco;
        CaseName == test_muc_conversation_history ->
+    unpause_refresher(europe_node2),
     refresh_mappings(europe_node2, "by_end_per_testcase,testcase=" ++ atom_to_list(CaseName)),
     muc_helper:unload_muc(),
     generic_end_per_testcase(CaseName, Config);
@@ -351,7 +354,7 @@ pause_refresher(_, test_error_on_wrong_hosts) ->
 pause_refresher(asia_node, test_location_disconnect) ->
     ok;
 pause_refresher(NodeName, _) ->
-    ok = rpc(NodeName, mod_global_distrib_hosts_refresher, pause, []).
+    pause_refresher(NodeName).
 
 -spec unpause_refresher(NodeName :: atom(), CaseName :: atom()) -> ok.
 unpause_refresher(_, test_error_on_wrong_hosts) ->
@@ -359,6 +362,12 @@ unpause_refresher(_, test_error_on_wrong_hosts) ->
 unpause_refresher(asia_node, test_location_disconnect) ->
     ok;
 unpause_refresher(NodeName, _) ->
+    unpause_refresher(NodeName).
+
+pause_refresher(NodeName) ->
+    ok = rpc(NodeName, mod_global_distrib_hosts_refresher, pause, []).
+
+unpause_refresher(NodeName) ->
     ok = rpc(NodeName, mod_global_distrib_hosts_refresher, unpause, []).
 
 %%--------------------------------------------------------------------
