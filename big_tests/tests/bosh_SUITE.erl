@@ -105,9 +105,11 @@ acks_test_cases() ->
 %%--------------------------------------------------------------------
 
 init_per_suite(Config) ->
+    enable_logging(),
     escalus:init_per_suite([{escalus_user_db, {module, escalus_ejabberd}} | Config]).
 
 end_per_suite(Config) ->
+    disable_logging(),
     escalus_fresh:clean(),
     escalus:end_per_suite(Config).
 
@@ -912,3 +914,22 @@ wait_for_zero_bosh_sessions() ->
     mongoose_helper:wait_until(fun() -> length(get_bosh_sessions()) end, 0,
                                #{name => get_bosh_sessions,
                                  time_left => timer:seconds(30)}).
+
+
+%% -----------------------------------------------------------------------
+%% Custom log levels for debugging
+
+enable_logging() ->
+    mim_loglevel:enable_logging(test_hosts(), custom_loglevels()).
+
+disable_logging() ->
+    mim_loglevel:disable_logging(test_hosts(), custom_loglevels()).
+
+custom_loglevels() ->
+    [{ejabberd_c2s, debug},
+     {mod_bosh, debug}
+    ].
+
+test_hosts() -> [mim].
+
+%% -----------------------------------------------------------------------

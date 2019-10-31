@@ -350,10 +350,10 @@ maybe_start_session_on_known_host(Req, Body) ->
     try
         maybe_start_session_on_known_host_unsafe(Req, Body)
     catch
-        error:Reason ->
+        error:Reason:Stacktrace ->
             %% It's here because something catch-y was here before
-            ?ERROR_MSG("issue=bosh_stop issue=undefined_condition reason=~p",
-                       [Reason]),
+            ?ERROR_MSG("issue=bosh_stop issue=undefined_condition reason=~p stacktrace=~1000p",
+                       [Reason, Stacktrace]),
             Req1 = terminal_condition(<<"undefined-condition">>, [], Req),
             {false, Req1}
     end.
