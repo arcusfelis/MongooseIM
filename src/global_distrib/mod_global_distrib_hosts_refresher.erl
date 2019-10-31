@@ -86,6 +86,7 @@ handle_call(pause, _From, State = #state{tref = undefined}) ->
     {reply, ok, State};
 handle_call(pause, _From, State) ->
     erlang:cancel_timer(State#state.tref),
+    flush_refresh(State#state.tref),
     {reply, ok, State#state{ tref = undefined }};
 handle_call(unpause, _From, State = #state{tref = undefined}) ->
     {reply, ok, schedule_refresh(State)};
@@ -176,3 +177,6 @@ start_outgoing_conns_sup() ->
 stop_outgoing_conns_sup() ->
     ConnsSup = mod_global_distrib_outgoing_conns_sup,
     ejabberd_sup:stop_child(ConnsSup).
+
+flush_refresh(TRef) ->
+    receive {timeout, TRef, refresh} -> ok after 0 -> ok end.

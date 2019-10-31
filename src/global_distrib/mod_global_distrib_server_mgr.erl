@@ -378,7 +378,7 @@ refresh_connections(Why,
         true ->
             ok;
         _ ->
-            ?INFO_MSG("event=gd_mgr_refresh reason=~p refresh_interval=~p "
+            ?INFO_MSG("event=gd_mgr_refresh:done reason=~p refresh_interval=~p "
                       "pending_endpoints_before=~p pending_endpoints_after=~p",
                       [Why, State#state.refresh_interval, PendingEndpoints, FinalPendingEndpoints])
     end,
