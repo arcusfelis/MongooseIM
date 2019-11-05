@@ -54,7 +54,7 @@
  {<<"metrics">>,{pkg,<<"metrics">>,<<"1.0.1">>},2},
  {<<"mim_test_runner">>,
   {git,"https://github.com/arcusfelis/MongooseTestRunner.git",
-       {ref,"6ac7b7a886453a0b226c8ca2cf6b523942c5990c"}},
+       {ref,"ed00bd91c617613b6805b6e5147e5a8ded255d21"}},
   0},
  {<<"mimerl">>,{pkg,<<"mimerl">>,<<"1.0.2">>},2},
  {<<"neotoma">>,
