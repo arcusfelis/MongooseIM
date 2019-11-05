@@ -250,19 +250,11 @@ end_per_group_generic(Config) ->
 init_per_testcase(CaseName, Config)
   when CaseName == test_muc_conversation_on_one_host; CaseName == test_global_disco;
        CaseName == test_muc_conversation_history ->
-    %% Pause refresher to avoid europe2 node to register iteself back, while hidden.
-    pause_refresher(europe_node2),
-    %% There is no helper to load MUC on node2
-    %% For now it's easier to hide node2
-    %% TODO: Do it right at some point!
-    hide_node(europe_node2, Config),
-    %% There would be no new connections to europe_node2, but there can be some old ones.
-    %% We need to disconnect previous connections.
-    {_, EuropeHost, _} = lists:keyfind(europe_node1, 1, get_hosts()),
-    trigger_rebalance(asia_node, list_to_binary(EuropeHost)),
-    %% Load muc on mim node
-    muc_helper:load_muc(<<"muc.localhost">>),
+    %% Load muc on nodes of mim cluster
     RegNode = ct:get_config({hosts, reg, node}),
+    Mim2Node = ct:get_config({hosts, mim2, node}),
+    muc_helper:load_muc(<<"muc.localhost">>),
+    muc_helper:load_muc(Mim2Node, <<"muc.localhost">>),
     %% Wait for muc.localhost to become visible from reg node
     wait_for_domain(RegNode, <<"muc.localhost">>),
     escalus:init_per_testcase(CaseName, Config);
@@ -300,9 +292,9 @@ end_per_testcase(CN, Config) when CN == test_pm_with_graceful_reconnection_to_di
 end_per_testcase(CaseName, Config)
   when CaseName == test_muc_conversation_on_one_host; CaseName == test_global_disco;
        CaseName == test_muc_conversation_history ->
-    unpause_refresher(europe_node2),
-    refresh_mappings(europe_node2, "by_end_per_testcase,testcase=" ++ atom_to_list(CaseName)),
+    Mim2Node = ct:get_config({hosts, mim2, node}),
     muc_helper:unload_muc(),
+    muc_helper:unload_muc(Mim2Node),
     generic_end_per_testcase(CaseName, Config);
 end_per_testcase(test_update_senders_host_by_ejd_service = CN, Config) ->
     refresh_mappings(europe_node1, "by_end_per_testcase,testcase=" ++ atom_to_list(CN)),
