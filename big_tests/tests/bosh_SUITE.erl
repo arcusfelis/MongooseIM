@@ -930,7 +930,8 @@ disable_logging() ->
 
 custom_loglevels() ->
     [{ejabberd_c2s, debug},
-     {mod_bosh, debug}
+     {mod_bosh, debug},
+     {mod_bosh_socket, debug}
     ].
 
 test_hosts() -> [mim].
