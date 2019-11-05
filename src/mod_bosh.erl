@@ -481,4 +481,5 @@ maybe_set_max_hold(ClientHold, Body) ->
 
 -spec cowboy_reply(non_neg_integer(), headers_list(), binary(), req()) -> req().
 cowboy_reply(Code, Headers, Body, Req) when is_list(Headers) ->
+    ?DEBUG("event=cowboy_reply code=~p headers=~1000p body=~1000p", [Code, Headers, Body]),
     cowboy_req:reply(Code, maps:from_list(Headers), Body, Req).
