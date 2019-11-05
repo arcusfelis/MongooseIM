@@ -794,8 +794,11 @@ pause(#client{rcv_pid = Pid}, Seconds) ->
 
 start_client(Config, User, Res) ->
     NamedSpecs = escalus_config:get_config(escalus_users, Config),
-    UserSpec = [{keepalive, false} | proplists:get_value(User, NamedSpecs)],
+    %% To avoid wait_for_features timeout in {escalus_session, authenticate}
+    %% we connect with keepalive true and set it to false after.
+    UserSpec = [{keepalive, true} | proplists:get_value(User, NamedSpecs)],
     {ok, Client} = escalus_client:start(Config, UserSpec, Res),
+    set_keepalive(Client, false),
     Client.
 
 bosh_set_active(#client{rcv_pid = Pid}, Value) ->
