@@ -46,7 +46,7 @@
 -include("mod_bosh.hrl").
 -define(ACCUMULATE_PERIOD, 10).
 -define(DEFAULT_HOLD, 1).
--define(CONCURRENT_REQUESTS, 2).
+-define(CONCURRENT_REQUESTS, 5).
 -define(DEFAULT_WAIT, 60).
 -define(DEFAULT_MAXPAUSE, 120).
 -define(DEFAULT_CLIENT_ACKS, false).
