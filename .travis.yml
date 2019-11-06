@@ -85,11 +85,32 @@ env:
       ELASTICSEARCH_VERSION=5.6.9 CASSANDRA_VERSION=3.9
     - PRESET=internal_mnesia DB=mnesia REL_CONFIG=with-all
     - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all
+    - PRESET=elasticsearch_and_cassandra_mnesia
+      REL_CONFIG="with-elasticsearch with-cassandra" TESTSPEC=mam.jobs
+      ELASTICSEARCH_VERSION=5.6.9 CASSANDRA_VERSION=3.9
     - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=2
+    - PRESET=elasticsearch_and_cassandra_mnesia
+      REL_CONFIG="with-elasticsearch with-cassandra" TESTSPEC=mam.jobs
+      ELASTICSEARCH_VERSION=5.6.9 CASSANDRA_VERSION=3.9
     - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=3
+    - PRESET=elasticsearch_and_cassandra_mnesia
+      REL_CONFIG="with-elasticsearch with-cassandra" TESTSPEC=mam.jobs
+      ELASTICSEARCH_VERSION=5.6.9 CASSANDRA_VERSION=3.9
     - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=4
+    - PRESET=elasticsearch_and_cassandra_mnesia
+      REL_CONFIG="with-elasticsearch with-cassandra" TESTSPEC=mam.jobs
+      ELASTICSEARCH_VERSION=5.6.9 CASSANDRA_VERSION=3.9
     - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=5
+    - PRESET=elasticsearch_and_cassandra_mnesia
+      REL_CONFIG="with-elasticsearch with-cassandra" TESTSPEC=mam.jobs
+      ELASTICSEARCH_VERSION=5.6.9 CASSANDRA_VERSION=3.9
     - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=6
+    - PRESET=elasticsearch_and_cassandra_mnesia
+      REL_CONFIG="with-elasticsearch with-cassandra" TESTSPEC=mam.jobs
+      ELASTICSEARCH_VERSION=5.6.9 CASSANDRA_VERSION=3.9
+    - PRESET=elasticsearch_and_cassandra_mnesia
+      REL_CONFIG="with-elasticsearch with-cassandra" TESTSPEC=mam.jobs
+      ELASTICSEARCH_VERSION=5.6.9 CASSANDRA_VERSION=3.9
     - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=7
     - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=8
     - PRESET=riak_mnesia DB=riak REL_CONFIG=with-all TRY=9
