@@ -575,9 +575,9 @@ process_stream_event(pause, Body, SName, State) ->
     Seconds = binary_to_integer(exml_query:attr(Body, <<"pause">>)),
     NewState = process_pause_event(Seconds, State),
     process_deferred_events(SName, NewState);
-process_stream_event(EventTag, Body, SName, #state{c2s_pid = C2SPid} = State) ->
+process_stream_event(EventTag, Body, SName, #state{c2s_pid = C2SPid, sid = Sid} = State) ->
     {Els, NewState} = bosh_unwrap(EventTag, Body, State),
-    [forward_to_c2s(C2SPid, El) || El <- Els],
+    [forward_to_c2s(Sid, C2SPid, El) || El <- Els],
     process_deferred_events(SName, NewState).
 
 
@@ -763,8 +763,10 @@ store(Data, #state{pending = Pending} = S) ->
     S#state{pending = Pending ++ Data}.
 
 
--spec forward_to_c2s('undefined' | pid(), jlib:xmlstreamel()) -> 'ok'.
-forward_to_c2s(C2SPid, StreamElement) ->
+-spec forward_to_c2s(mod_bosh:sid(), 'undefined' | pid(), jlib:xmlstreamel()) -> 'ok'.
+forward_to_c2s(Sid, C2SPid, StreamElement) ->
+    ?DEBUG("event=bosh_forward_to_c2s sid=~ts c2s_pid=~p element=~1000p",
+           [Sid, C2SPid, StreamElement]),
     gen_fsm_compat:send_event(C2SPid, StreamElement).
 
 
