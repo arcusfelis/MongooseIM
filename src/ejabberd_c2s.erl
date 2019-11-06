@@ -1534,9 +1534,9 @@ terminate(_Reason, StateName, StateData) ->
                        StateData#state.stream_mgmt_id,
                        jid:to_binary(StateData#state.jid)]);
         _ ->
-            ?INFO_MSG("(~w) Close session for ~s",
+            ?INFO_MSG("event=close_session socket=~w jid=~s last_state=~p",
                       [StateData#state.socket,
-                       jid:to_binary(StateData#state.jid)]),
+                       jid:to_binary(StateData#state.jid), StateName]),
 
             EmptySet = gb_sets:new(),
             case StateData of

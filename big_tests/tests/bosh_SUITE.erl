@@ -931,7 +931,10 @@ disable_logging() ->
 custom_loglevels() ->
     [{ejabberd_c2s, debug},
      {mod_bosh, debug},
-     {mod_bosh_socket, debug}
+     %% To ensure that messages are forwarded to c2s
+     {mod_bosh_socket, debug},
+     %% To ensure that messages are processed by c2s
+     {ejabberd_router, debug}
     ].
 
 test_hosts() -> [mim].
