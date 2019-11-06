@@ -392,12 +392,13 @@ handle_info(Info, SName, State) ->
     ?DEBUG("Unhandled info in '~s' state: ~w~n", [SName, Info]),
     {next_state, SName, State}.
 
-terminate(_Reason, StateName, #state{sid = Sid, handlers = Handlers} = S) ->
+terminate(Reason, StateName, #state{sid = Sid, handlers = Handlers} = S) ->
     [Pid ! {close, Sid} || {_, _, Pid} <- lists:sort(Handlers)],
     mod_bosh_backend:delete_session(Sid),
     catch ejabberd_c2s:stop(S#state.c2s_pid),
-    ?DEBUG("Closing session ~p in '~s' state. Handlers: ~p Pending: ~p~n",
-           [Sid, StateName, Handlers, S#state.pending]).
+    ?DEBUG("event=bosh_session_close "
+            "sid=~p state=~s reason=~1000p handlers=~1000p pending=~1000p",
+           [Sid, StateName, Reason, Handlers, S#state.pending]).
 
 code_change(_OldVsn, StateName, State, _Extra) ->
     {ok, StateName, State}.

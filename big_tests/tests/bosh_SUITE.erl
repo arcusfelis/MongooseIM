@@ -290,6 +290,7 @@ interleave_requests(Config) ->
     escalus:story(Config, [{geralt, 1}], fun(Geralt) ->
 
         Carol = start_client(Config, ?config(user, Config), <<"bosh">>),
+
         Rid = get_bosh_rid(Carol),
         Sid = get_bosh_sid(Carol),
 
@@ -298,18 +299,23 @@ interleave_requests(Config) ->
         Msg3 = <<"3rd!">>,
         Msg4 = <<"4th!">>,
 
-        send_message_with_rid(Carol, Geralt, Rid + 1, Sid, Msg2),
+        %% Wait for the stanza to be processed to avoid CONCURRENT_REQUESTS limit
         send_message_with_rid(Carol, Geralt, Rid, Sid, Msg1),
-
-        send_message_with_rid(Carol, Geralt, Rid + 2,   Sid, Msg3),
-        send_message_with_rid(Carol, Geralt, Rid + 3,   Sid, Msg4),
-
         escalus:assert(is_chat_message, [Msg1],
                        escalus_client:wait_for_stanza(Geralt)),
+
+        %% Send Msg3 before Msg2
+        %% MongooseIM should derefer Msg3 before Msg2 is received
+        send_message_with_rid(Carol, Geralt, Rid + 2, Sid, Msg3),
+        send_message_with_rid(Carol, Geralt, Rid + 1, Sid, Msg2),
+
         escalus:assert(is_chat_message, [Msg2],
                        escalus_client:wait_for_stanza(Geralt)),
         escalus:assert(is_chat_message, [Msg3],
                        escalus_client:wait_for_stanza(Geralt)),
+
+        %% Just making sure it still works
+        send_message_with_rid(Carol, Geralt, Rid + 3,   Sid, Msg4),
         escalus:assert(is_chat_message, [Msg4],
                        escalus_client:wait_for_stanza(Geralt)),
 
