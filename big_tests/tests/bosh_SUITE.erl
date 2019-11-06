@@ -105,9 +105,11 @@ acks_test_cases() ->
 %%--------------------------------------------------------------------
 
 init_per_suite(Config) ->
+    enable_logging(),
     escalus:init_per_suite([{escalus_user_db, {module, escalus_ejabberd}} | Config]).
 
 end_per_suite(Config) ->
+    disable_logging(),
     escalus_fresh:clean(),
     escalus:end_per_suite(Config).
 
@@ -158,8 +160,7 @@ create_and_terminate_session(Config) ->
     CarolSpec = proplists:get_value(?config(user, Config), NamedSpecs),
     Conn = escalus_connection:connect(CarolSpec),
 
-    %% Assert there are no BOSH sessions on the server.
-    [] = get_bosh_sessions(),
+    wait_for_zero_bosh_sessions(),
 
     Domain = ct:get_config({hosts, mim, domain}),
     Body = escalus_bosh:session_creation_body(get_bosh_rid(Conn), Domain),
@@ -215,6 +216,7 @@ fusco_request(Client, Method, Path, Body, HeadersIn) ->
     Headers = [{<<"Content-Type">>, <<"text/xml; charset=utf-8">>} | HeadersIn],
     case fusco_cp:request(Client, Path, Method, Headers, Body, 2, 5000) of
         {ok, Result} ->
+            ct:log("fusco_request:result ~p", [Result]),
             Result;
         Other ->
             ct:fail(#{issue => http_request_failed,
@@ -288,6 +290,7 @@ interleave_requests(Config) ->
     escalus:story(Config, [{geralt, 1}], fun(Geralt) ->
 
         Carol = start_client(Config, ?config(user, Config), <<"bosh">>),
+
         Rid = get_bosh_rid(Carol),
         Sid = get_bosh_sid(Carol),
 
@@ -296,18 +299,23 @@ interleave_requests(Config) ->
         Msg3 = <<"3rd!">>,
         Msg4 = <<"4th!">>,
 
-        send_message_with_rid(Carol, Geralt, Rid + 1, Sid, Msg2),
+        %% Wait for the stanza to be processed to avoid CONCURRENT_REQUESTS limit
         send_message_with_rid(Carol, Geralt, Rid, Sid, Msg1),
-
-        send_message_with_rid(Carol, Geralt, Rid + 2,   Sid, Msg3),
-        send_message_with_rid(Carol, Geralt, Rid + 3,   Sid, Msg4),
-
         escalus:assert(is_chat_message, [Msg1],
                        escalus_client:wait_for_stanza(Geralt)),
+
+        %% Send Msg3 before Msg2
+        %% MongooseIM should derefer Msg3 before Msg2 is received
+        send_message_with_rid(Carol, Geralt, Rid + 2, Sid, Msg3),
+        send_message_with_rid(Carol, Geralt, Rid + 1, Sid, Msg2),
+
         escalus:assert(is_chat_message, [Msg2],
                        escalus_client:wait_for_stanza(Geralt)),
         escalus:assert(is_chat_message, [Msg3],
                        escalus_client:wait_for_stanza(Geralt)),
+
+        %% Just making sure it still works
+        send_message_with_rid(Carol, Geralt, Rid + 3,   Sid, Msg4),
         escalus:assert(is_chat_message, [Msg4],
                        escalus_client:wait_for_stanza(Geralt)),
 
@@ -792,8 +800,11 @@ pause(#client{rcv_pid = Pid}, Seconds) ->
 
 start_client(Config, User, Res) ->
     NamedSpecs = escalus_config:get_config(escalus_users, Config),
-    UserSpec = [{keepalive, false} | proplists:get_value(User, NamedSpecs)],
+    %% To avoid wait_for_features timeout in {escalus_session, authenticate}
+    %% we connect with keepalive true and set it to false after.
+    UserSpec = [{keepalive, true} | proplists:get_value(User, NamedSpecs)],
     {ok, Client} = escalus_client:start(Config, UserSpec, Res),
+    set_keepalive(Client, false),
     Client.
 
 bosh_set_active(#client{rcv_pid = Pid}, Value) ->
@@ -907,9 +918,31 @@ wait_until_user_has_no_stanzas(User) ->
 domain() ->
     ct:get_config({hosts, mim, domain}).
 
+%% Assert there are no BOSH sessions on the server.
 wait_for_zero_bosh_sessions() ->
-    mongoose_helper:wait_until(fun() ->
-                                       length(get_bosh_sessions())
-                               end,
-                               0,
-                               #{name => get_bosh_sessions}).
+    mongoose_helper:wait_until(fun() -> length(get_bosh_sessions()) end, 0,
+                               #{name => get_bosh_sessions,
+                                 time_left => timer:seconds(30)}).
+
+
+%% -----------------------------------------------------------------------
+%% Custom log levels for debugging
+
+enable_logging() ->
+    mim_loglevel:enable_logging(test_hosts(), custom_loglevels()).
+
+disable_logging() ->
+    mim_loglevel:disable_logging(test_hosts(), custom_loglevels()).
+
+custom_loglevels() ->
+    [{ejabberd_c2s, debug},
+     {mod_bosh, debug},
+     %% To ensure that messages are forwarded to c2s
+     {mod_bosh_socket, debug},
+     %% To ensure that messages are processed by c2s
+     {ejabberd_router, debug}
+    ].
+
+test_hosts() -> [mim].
+
+%% -----------------------------------------------------------------------

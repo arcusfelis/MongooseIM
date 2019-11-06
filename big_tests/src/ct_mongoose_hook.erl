@@ -145,8 +145,19 @@ do_check_server_purity(_Suite) ->
 check_sessions() ->
     case rpc(mim(), ejabberd_sm, get_full_session_list, []) of
         [] -> [];
-        Sessions -> [{opened_sessions, Sessions}]
+        Sessions ->
+            [{opened_sessions, Sessions},
+             {opened_sessions_pids_to_nodes, sessions_to_nodes(Sessions)}]
     end.
+
+sessions_to_nodes(Sessions) ->
+    [{Pid, node(Pid)} || Pid <- sessions_to_pids(Sessions)].
+
+sessions_to_pids(Sessions) ->
+    [session_to_pid(Session) || Session <- Sessions].
+
+session_to_pid(Session) ->
+    element(2, element(2, Session)).
 
 check_registered_users() ->
     case rpc(mim(), ejabberd_auth, dirty_get_registered_users, []) of

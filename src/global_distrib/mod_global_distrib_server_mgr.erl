@@ -133,7 +133,7 @@ init([Server, Supervisor]) ->
                gc_interval = GCInterval
               },
 
-    State2 = refresh_connections(State),
+    State2 = refresh_connections(init, State),
     schedule_refresh(State2),
     schedule_gc(State2),
 
@@ -147,7 +147,7 @@ handle_call(get_connection_pool, From, #state{ enabled = [],
 handle_call(get_connection_pool, _From, #state{ enabled = Enabled } = State) ->
     {reply, {ok, pick_connection_pool(Enabled)}, State};
 handle_call(force_refresh, From, #state{ pending_endpoints_listeners = [] } = State) ->
-    State2 = refresh_connections(State),
+    State2 = refresh_connections(force_refresh, State),
     case State2#state.pending_endpoints of
         [] -> {reply, ok, State2};
         _ -> {noreply, State2#state{ pending_endpoints_listeners = [From] }}
@@ -179,18 +179,9 @@ handle_cast(Msg, State) ->
 
 handle_info(refresh, State) ->
     State2 = case State#state.pending_endpoints of
-                 [] -> refresh_connections(State);
+                 [] -> refresh_connections(refresh, State);
                  _ -> State % May occur if we are in the middle of force_refresh
              end,
-    case State#state.pending_endpoints == State2#state.pending_endpoints of
-        true ->
-            ok;
-        _ ->
-            ?INFO_MSG("event=gd_mgr_refresh refresh_interval=~p "
-                      "pending_endpoints_before=~p pending_endpoints_after=~p",
-                      [State#state.refresh_interval,
-                       State#state.pending_endpoints, State2#state.pending_endpoints])
-    end,
     schedule_refresh(State2),
     {noreply, State2};
 handle_info(disabled_gc, #state{ disabled = Disabled } = State) ->
@@ -358,8 +349,9 @@ pick_connection_pool(Enabled) ->
     #endpoint_info{ conn_pool_ref = PoolRef } = lists:nth(rand:uniform(length(Enabled)), Enabled),
     PoolRef.
 
--spec refresh_connections(State :: state()) -> state().
-refresh_connections(#state{ server = Server, pending_endpoints = PendingEndpoints,
+-spec refresh_connections(Why :: term(), State :: state()) -> state().
+refresh_connections(Why,
+                    #state{ server = Server, pending_endpoints = PendingEndpoints,
                             last_endpoints = LastEndpoints } = State) ->
     ?DEBUG("event=refreshing_endpoints,server='~s'", [Server]),
     {ok, NewEndpoints} = get_endpoints(Server),
@@ -382,12 +374,13 @@ refresh_connections(#state{ server = Server, pending_endpoints = PendingEndpoint
 
     FinalPendingEndpoints = PendingEndpoints ++ NPendingEndpoints,
 
-    case FinalPendingEndpoints of
-        [] ->
-            no_log;
+    case PendingEndpoints == FinalPendingEndpoints of
+        true ->
+            ok;
         _ ->
-            ?DEBUG("event=endpoints_update_scheduled,server='~s',new_changes=~p,pending_changes=~p",
-                   [Server, length(NPendingEndpoints), length(FinalPendingEndpoints)])
+            ?INFO_MSG("event=gd_mgr_refresh:done reason=~p refresh_interval=~p "
+                      "pending_endpoints_before=~p pending_endpoints_after=~p",
+                      [Why, State#state.refresh_interval, PendingEndpoints, FinalPendingEndpoints])
     end,
     State#state{ pending_endpoints = FinalPendingEndpoints, last_endpoints = NewEndpoints }.
 

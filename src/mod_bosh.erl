@@ -350,10 +350,10 @@ maybe_start_session_on_known_host(Req, Body) ->
     try
         maybe_start_session_on_known_host_unsafe(Req, Body)
     catch
-        error:Reason ->
+        error:Reason:Stacktrace ->
             %% It's here because something catch-y was here before
-            ?ERROR_MSG("issue=bosh_stop issue=undefined_condition reason=~p",
-                       [Reason]),
+            ?ERROR_MSG("issue=bosh_stop issue=undefined_condition reason=~p stacktrace=~1000p",
+                       [Reason, Stacktrace]),
             Req1 = terminal_condition(<<"undefined-condition">>, [], Req),
             {false, Req1}
     end.
@@ -474,9 +474,12 @@ maybe_set_max_hold(1, Body) ->
 maybe_set_max_hold(ClientHold, #xmlel{attrs = Attrs} = Body) when ClientHold > 1 ->
     NewAttrs = lists:keyreplace(<<"hold">>, 1, Attrs, {<<"hold">>, <<"1">>}),
     {ok, Body#xmlel{attrs = NewAttrs}};
-maybe_set_max_hold(_, _) ->
+maybe_set_max_hold(ClientHold, Body) ->
+    ?ERROR_MSG("event=bosh_invalid_hold client_hold=~1000p body=~1000p",
+               [ClientHold, Body]),
     {error, invalid_hold}.
 
 -spec cowboy_reply(non_neg_integer(), headers_list(), binary(), req()) -> req().
 cowboy_reply(Code, Headers, Body, Req) when is_list(Headers) ->
+    ?DEBUG("event=cowboy_reply code=~p headers=~1000p body=~1000p", [Code, Headers, Body]),
     cowboy_req:reply(Code, maps:from_list(Headers), Body, Req).

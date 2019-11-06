@@ -60,6 +60,7 @@
 
 -spec start(Host :: jid:server(), Opts :: proplists:proplist()) -> ok.
 start(Host, _Opts) ->
+    mongoose_amqp:ensure_started(),
     initialize_metrics(Host),
     create_exchanges(Host),
     ok.

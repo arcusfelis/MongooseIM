@@ -11,8 +11,18 @@
 %% do not remove below SUITE if testing mongoose
 {suites, "tests", mongoose_sanity_checks_SUITE}.
 
-{suites, "tests", mam_SUITE}.
-{suites, "tests", gdpr_SUITE}.
+{suites, "tests", muc_SUITE}.
+{suites, "tests", muc_light_SUITE}.
+{suites, "tests", muc_light_legacy_SUITE}.
+{suites, "tests", muc_http_api_SUITE}.
+{suites, "tests", muc_light_http_api_SUITE}.
+{suites, "tests", oauth_SUITE}. % pgsql specific
+{suites, "tests", presence_SUITE}.
+{suites, "tests", rest_client_SUITE}.
+{suites, "tests", s2s_SUITE}.
+{suites, "tests", shared_roster_SUITE}.
+{suites, "tests", sic_SUITE}.
+{suites, "tests", users_api_SUITE}.
 {suites, "tests", mongoose_cassandra_SUITE}.
 {suites, "tests", mongoose_elasticsearch_SUITE}.
 

@@ -39,7 +39,9 @@
 %%%
 
 start(normal, _Args) ->
+    maybe_init_cover(),
     init_log(),
+    ?WARNING_MSG("event=mongooseim_starting", []),
     mongoose_fips:notify(),
     write_pid_file(),
     update_status_file(starting),
@@ -76,6 +78,7 @@ start(normal, _Args) ->
     ejabberd_admin:start(),
     update_status_file(started),
     ?INFO_MSG("ejabberd ~s is started in the node ~p", [?MONGOOSE_VERSION, node()]),
+    ?WARNING_MSG("event=mongooseim_started", []),
     Sup;
 start(_, _) ->
     {error, badarg}.
@@ -84,14 +87,14 @@ start(_, _) ->
 %% This function is called when an application is about to be stopped,
 %% before shutting down the processes of the application.
 prep_stop(State) ->
+    ?WARNING_MSG("event=mongooseim_stopping", []),
     mongoose_deprecations:stop(),
     ejabberd_listener:stop_listeners(),
+    broadcast_c2s_shutdown(),
+    wait_for_session_drain(),
     stop_modules(),
     stop_services(),
     mongoose_subhosts:stop(),
-    broadcast_c2s_shutdown(),
-    timer:sleep(5000),
-    lists:foreach(fun ejabberd_users:stop/1, ?MYHOSTS),
     mongoose_wpool:stop(),
     mongoose_metrics:remove_all_metrics(),
     State.
@@ -101,6 +104,7 @@ stop(_State) ->
     ?INFO_MSG("ejabberd ~s is stopped in the node ~p", [?MONGOOSE_VERSION, node()]),
     delete_pid_file(),
     update_status_file(stopped),
+    ?WARNING_MSG("event=mongooseim_stopped", []),
     %%ejabberd_debug:stop(),
     ok.
 
@@ -111,12 +115,14 @@ stop(_State) ->
 db_init() ->
     case mnesia:system_info(extra_db_nodes) of
         [] ->
+            %% Stop if running for some reason
             application:stop(mnesia),
-            mnesia:create_schema([node()]),
-            application:start(mnesia, permanent);
+            mnesia:create_schema([node()]);
         _ ->
             ok
     end,
+    %% Start, if not started yet
+    application:start(mnesia, permanent),
     mnesia:wait_for_tables(mnesia:system_info(local_tables), infinity).
 
 %% @doc Start all the modules in all the hosts
@@ -249,3 +255,55 @@ maybe_disable_default_logger() ->
         _E:_R ->
             ok
     end.
+
+wait_for_session_drain() ->
+    wait_for_session_drain(?MYHOSTS, [], 10).
+
+wait_for_session_drain(_, _, 0) ->
+    {error, times_limit};
+wait_for_session_drain([Host|Hosts], ActiveHosts, Times) ->
+    {ok, Data} = mongoose_metrics:get_metric_value(Host, sessionCount),
+    Value = proplists:get_value(value, Data),
+    case Value of
+        0 ->
+            wait_for_session_drain(Hosts, ActiveHosts, Times);
+        _ ->
+            ?INFO_MSG("event=wait_for_session_drain host=~ts sessions=~p", [Host, Value]),
+            wait_for_session_drain(Hosts, [Host|ActiveHosts], Times)
+    end;
+wait_for_session_drain([], [], _Times) ->
+    ok;
+wait_for_session_drain([], ActiveHosts, Times) ->
+    timer:sleep(500),
+    wait_for_session_drain(lists:reverse(ActiveHosts), [], Times - 1).
+
+
+maybe_init_cover() ->
+    case os:getenv("COVER_NODE") of
+        false ->
+            ok;
+        CoverNode ->
+            case is_cover_loaded() of
+                true ->
+                    io:format("skip starting cover, already started~n", []);
+                false ->
+                    init_cover(list_to_atom(CoverNode))
+            end
+    end.
+
+init_cover(CoverNode) ->
+    maybe_set_cover_cookie(CoverNode),
+    {Time, Result} = timer:tc(rpc, call, [CoverNode, cover, start, [node()]]),
+    io:format("cover:start took ~p milliseconds and returned ~1000p", [Time div 1000, Result]),
+    ok.
+
+maybe_set_cover_cookie(CoverNode) ->
+    case os:getenv("COVER_COOKIE") of
+        false ->
+            ok;
+        Cookie ->
+            erlang:set_cookie(CoverNode, list_to_atom(Cookie))
+    end.
+
+is_cover_loaded() ->
+    is_pid(whereis(cover_server)).

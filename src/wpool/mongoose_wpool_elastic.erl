@@ -6,6 +6,7 @@
 -export([stop/2]).
 
 init() ->
+    application:ensure_all_started(tirerl),
     tirerl:start(),
     ok.
 

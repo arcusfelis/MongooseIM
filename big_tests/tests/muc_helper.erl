@@ -44,10 +44,14 @@ foreach_recipient(Users, VerifyFun) ->
       end, Users).
 
 load_muc(Host) ->
+    Node = ct:get_config({hosts, mim, node}),
+    load_muc(Node, Host).
+
+load_muc(Node, Host) ->
     %% Stop modules before trying to start them
-    unload_muc(),
+    unload_muc(Node),
     %% TODO refactoring. "localhost" should be passed as a parameter
-    dynamic_modules:start(<<"localhost">>, mod_muc,
+    dynamic_modules:start(Node, <<"localhost">>, mod_muc,
                           [{host, binary_to_list(Host)},
                           %% XXX TODO Uncomment, when mod_muc_db_rdbms is written
                           %{backend, Backend},
@@ -56,13 +60,17 @@ load_muc(Host) ->
                            {hibernated_room_timeout, 2000},
                            {access, muc},
                            {access_create, muc_create}]),
-    dynamic_modules:start(<<"localhost">>, mod_muc_log,
+    dynamic_modules:start(Node, <<"localhost">>, mod_muc_log,
                           [{outdir, "/tmp/muclogs"},
                            {access_log, muc}]).
 
 unload_muc() ->
-    dynamic_modules:stop(<<"localhost">>, mod_muc),
-    dynamic_modules:stop(<<"localhost">>, mod_muc_log).
+    Node = ct:get_config({hosts, mim, node}),
+    unload_muc(Node).
+
+unload_muc(Node) ->
+    dynamic_modules:stop(Node, <<"localhost">>, mod_muc),
+    dynamic_modules:stop(Node, <<"localhost">>, mod_muc_log).
 
 muc_host() ->
     ?MUC_HOST.

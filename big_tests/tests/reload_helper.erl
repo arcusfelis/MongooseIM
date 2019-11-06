@@ -38,12 +38,12 @@ restore_ejabberd_config_file(Node, Config) ->
 
 restart_ejabberd_node(Node) ->
     %% Node restarts might take a long time -> long timeout.
-    ok = rpc(Node, application, stop, [mongooseim], timer:seconds(10)),
-    ok = rpc(Node, application, start, [mongooseim], timer:seconds(10)).
+    ok = rpc(Node, application, stop, [mongooseim], timer:seconds(60)),
+    ok = rpc(Node, application, start, [mongooseim], timer:seconds(60)).
 
 reload_through_ctl(Node, Config) ->
     ReloadCmd = node_ctl(Node, Config) ++ " reload_local",
-    OutputStr = rpc(Node, os, cmd, [ReloadCmd]),
+    OutputStr = rpc(Node, os, cmd, [ReloadCmd], timer:seconds(30)),
     ok = verify_reload_output(ReloadCmd, OutputStr).
 
 verify_reload_output(ReloadCmd, OutputStr) ->

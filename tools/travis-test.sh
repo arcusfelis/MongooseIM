@@ -5,6 +5,7 @@
 # - COVER_ENABLED
 # - STOP_NODES (default false)
 set -o pipefail
+shopt -s nullglob
 IFS=$'\n\t'
 
 DEFAULT_PRESET=internal_mnesia
@@ -104,7 +105,7 @@ run_test_preset() {
   tools/print-dots.sh monitor $$
   cd ${BASE}/big_tests
   local MAKE_RESULT=0
-  TESTSPEC=${TESTSPEC:-default.spec}
+  TESTSPEC=${TESTSPEC:-parallel.jobs}
   if [ "$COVER_ENABLED" = "true" ]; then
     make cover_test_preset TESTSPEC=$TESTSPEC PRESET=$PRESET
     MAKE_RESULT=$?
@@ -138,6 +139,14 @@ maybe_pause_before_test() {
   fi
 }
 
+function is_member
+{
+  local e match="$1"
+  shift
+  for e; do [[ "$e" == "$match" ]] && return 0; done
+  return 1
+}
+
 run_tests() {
   maybe_run_small_tests
   SMALL_STATUS=$?
@@ -147,25 +156,39 @@ run_tests() {
   echo "Running big tests (big_tests)"
   echo "############################"
 
-  rm -f /tmp/ct_summary
-
   time ${TOOLS}/start-nodes.sh || { echo "Failed to start MongooseIM nodes"; return 1; }
 
   maybe_pause_before_test
 
+  # Requires shopt -s nullglob
+  SUMMARIES_DIRS_BEFORE=()
+  for DIR in ${BASE}/big_tests/ct_report/ct_run*; do
+    SUMMARIES_DIRS_BEFORE+=( "$DIR" )
+  done
+
   run_test_preset
   BIG_STATUS=$?
 
-  SUMMARIES_DIRS=${BASE}/big_tests/ct_report/ct_run*
-  SUMMARIES_DIR=$(choose_newest_directory ${SUMMARIES_DIRS})
-  echo "SUMMARIES_DIR=$SUMMARIES_DIR"
-  ${TOOLS}/summarise-ct-results ${SUMMARIES_DIR}
+  SUMMARIES_DIRS_AFTER=()
+  for DIR in ${BASE}/big_tests/ct_report/ct_run*; do
+    SUMMARIES_DIRS_AFTER+=( "$DIR" )
+  done
+
+  for DIR in ${SUMMARIES_DIRS_AFTER[@]}; do
+    if ! is_member "$DIR" ${SUMMARIES_DIRS_BEFORE[@]}; then
+        # when SUMMARIES_DIRS_BEFORE doesn't contain value DIR
+        SUMMARIES_DIRS+=( "$DIR" )
+    fi
+  done
+
+  echo "SUMMARIES_DIRS=$SUMMARIES_DIRS"
+  ${TOOLS}/summarise-ct-results ${SUMMARIES_DIRS}
   BIG_STATUS_BY_SUMMARY=$?
 
   echo
   echo "All tests done."
 
-  grep "fail_ci_build=true" ${BASE}/_build/mim*/rel/mongooseim/log/ejabberd.log
+  grep "fail_ci_build=true" ${BASE}/_build/*/rel/mongooseim/log/ejabberd.log
   # If phrase found than exit with code 1
   test $? -eq 1
   LOG_STATUS=$?
@@ -182,12 +205,6 @@ run_tests() {
     [ $BIG_STATUS -ne 0 ]   && echo "    big tests failed - missing suites (error code: $BIG_STATUS)"
     [ $LOG_STATUS -ne 0 ]   && echo "    log contains errors"
     print_running_nodes
-  fi
-
-  if [ -f /tmp/ct_summary ]; then
-      echo "Failed big cases:"
-      cat /tmp/ct_summary
-      echo ""
   fi
 
   # Do not stop nodes if big tests failed

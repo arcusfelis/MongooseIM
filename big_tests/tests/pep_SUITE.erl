@@ -189,7 +189,7 @@ delayed_receive(Config) ->
         [{alice, 1}, {bob, 1}],
         fun(Alice, Bob) ->
             pubsub_tools:publish(Alice, <<"item2">>, {pep, NodeNS}, []),
-            [Message] = make_friends(Bob, Alice),
+            [Message] = make_friends(Bob, Alice, 1),
             ct:pal("Message: ~p", [Message]),
             pubsub_tools:check_item_notification(
                 Message, <<"item2">>, {escalus_utils:get_short_jid(Alice), NodeNS}, []),
@@ -208,7 +208,7 @@ delayed_receive_with_sm(Config) ->
               enable_sm(Alice),
               enable_sm(Bob),
               publish_with_sm(Alice, <<"item2">>, {pep, NodeNS}, []),
-              [Message] = make_friends(Bob, Alice),
+              [Message] = make_friends(Bob, Alice, 1),
               ct:pal("Message: ~p", [Message]),
               pubsub_tools:check_item_notification(Message,
                                                    <<"item2">>,
@@ -406,11 +406,22 @@ send_presence(From, Type, To) ->
     Stanza = escalus_stanza:presence_direct(ToJid, Type),
     escalus_client:send(From, Stanza).
 
-make_friends(Bob, Alice) ->
+make_friends(Bob, Alice, MsgCount) ->
     % makes uni-directional presence subscriptions
     % returns stanzas received finally by the inviter
     send_presence(Bob, <<"subscribe">>, Alice),
     send_presence(Alice, <<"subscribed">>, Bob),
+    receive_messages(Alice, Bob, MsgCount, 10).
+
+%% Wait for MsgCount messages received by Bob.
+%% Tries 10 times, total waiting time is 4 seconds.
+receive_messages(Alice, Bob, MsgCount, Retries) when MsgCount > 0, Retries > 0 ->
+    Msgs = receive_messages(Alice, Bob),
+    Msgs ++ receive_messages(Alice, Bob, MsgCount - length(Msgs), Retries - 1);
+receive_messages(_Alice, _Bob, _MsgCount, _Retries) ->
+    [].
+
+receive_messages(Alice, Bob) ->
     escalus:wait_for_stanzas(Alice, 10, 200),
     BobStanzas = escalus:wait_for_stanzas(Bob, 10, 200),
     lists:filter(fun(S) -> N = S#xmlel.name,

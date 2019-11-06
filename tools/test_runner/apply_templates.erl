@@ -64,7 +64,12 @@ render_template(In, Out, Vars) ->
     end.
 
 render_opts() ->
-    [{escape_fun, fun(X) -> X end}, {key_type, atom}, {value_serializer, fun(X) -> X end}].
+    [{escape_fun, fun(X) -> X end}, {key_type, atom},
+     {value_serializer, fun value_serializer/1}].
+
+value_serializer(X) when is_atom(X) -> atom_to_list(X);
+value_serializer(X) when is_integer(X) -> integer_to_list(X);
+value_serializer(X) -> X end.
 
 %% Prints if VERBOSE env variable is set
 log(Format, Args) ->

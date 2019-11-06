@@ -120,9 +120,11 @@ init_per_suite(Config) ->
     NewConfig = escalus_ejabberd:setup_option(buffer_max(?SMALL_SM_BUFFER), NewConfig1),
     NewConfigWithSM = escalus_users:update_userspec(NewConfig, alice, stream_management, true),
     mongoose_helper:inject_module(?MODULE),
+    enable_logging(),
     escalus:init_per_suite(NewConfigWithSM).
 
 end_per_suite(Config) ->
+    disable_logging(),
     NewConfig = escalus_ejabberd:reset_option(ack_freq(never), Config),
     NewConfig1 = escalus_ejabberd:reset_option(buffer_max(?SMALL_SM_BUFFER), NewConfig),
     escalus_fresh:clean(),
@@ -653,6 +655,7 @@ resume_expired_session_returns_correct_h(Config) ->
     {ok, NewAlice, _} = escalus_connection:start(AliceSpec, connection_steps_to_authenticate()),
     escalus_connection:send(NewAlice, escalus_stanza:resume(SMID, SMH)),
     FailedResumption = escalus_connection:get_stanza(NewAlice, failed_resumption),
+    ct:log("FailedResumption ~p", [FailedResumption]),
     <<"1">> = exml_query:attr(FailedResumption, <<"h">>),
     %% And we can continue with bind and session
     escalus_session:session(escalus_session:bind(NewAlice)),
@@ -1322,3 +1325,19 @@ wait_for_session({LU, LS, LR} = LJID, Retries, SleepTime) ->
 
 make_smid() ->
     base64:encode(crypto:strong_rand_bytes(21)).
+
+
+%%--------------------------------------------------------------------
+%% Logging
+%%--------------------------------------------------------------------
+
+disable_logging() ->
+    mim_loglevel:disable_logging([mim], custom_loglevels()).
+
+enable_logging() ->
+    mim_loglevel:enable_logging([mim], custom_loglevels()).
+
+custom_loglevels() ->
+    [{ejabberd_c2s, info},
+     %% We want to know, if clear_table is triggered
+     {stream_management_stale_h, info}].

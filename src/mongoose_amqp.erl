@@ -23,6 +23,7 @@
 
 -include_lib("amqp_client/include/amqp_client.hrl").
 
+-export([ensure_started/0]).
 -export([network_params/0, network_params/1, exchange_declare/2,
          exchange_declare_ok/0, exchange_delete/1, basic_publish/2,
          confirm_select/0, confirm_select_ok/0, message/1]).
@@ -50,6 +51,9 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+ensure_started() ->
+    application:ensure_all_started(amqp_client).
 
 -spec network_params() -> network_params().
 network_params() ->

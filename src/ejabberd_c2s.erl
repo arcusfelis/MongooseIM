@@ -254,8 +254,12 @@ wait_for_stream(timeout, StateData) ->
     {stop, normal, StateData};
 wait_for_stream(closed, StateData) ->
     {stop, normal, StateData};
-wait_for_stream(_UnexpectedItem, #state{ server = Server } = StateData) ->
-    case ejabberd_config:get_local_option(hide_service_name, Server) of
+wait_for_stream(UnexpectedItem, #state{ server = Server } = StateData) ->
+    Hide = ejabberd_config:get_local_option(hide_service_name, Server),
+    ?INFO_MSG("issue=not_stream_start "
+              "unexpected_item=~p from_address=~p hide_service_name=~p stream_id=~ts",
+              [UnexpectedItem, StateData#state.ip, Hide, StateData#state.streamid]),
+    case Hide of
         true ->
             {stop, normal, StateData};
         _ ->
@@ -1023,6 +1027,8 @@ handle_info(replaced, _StateName, StateData) ->
     Lang = StateData#state.lang,
     StreamConflict = mongoose_xmpp_errors:stream_conflict(Lang, <<"Replaced by new connection">>),
     maybe_send_element_from_server_jid_safe(StateData, StreamConflict),
+    %% Keep it for debugging
+    ?ERROR_MSG("issue=session_replaced state_data=~p", [StateData]),
     maybe_send_trailer_safe(StateData),
     {stop, normal, StateData#state{authenticated = replaced}};
 handle_info(new_offline_messages, session_established,
@@ -1528,9 +1534,9 @@ terminate(_Reason, StateName, StateData) ->
                        StateData#state.stream_mgmt_id,
                        jid:to_binary(StateData#state.jid)]);
         _ ->
-            ?INFO_MSG("(~w) Close session for ~s",
+            ?INFO_MSG("event=close_session socket=~w jid=~s last_state=~p",
                       [StateData#state.socket,
-                       jid:to_binary(StateData#state.jid)]),
+                       jid:to_binary(StateData#state.jid), StateName]),
 
             EmptySet = gb_sets:new(),
             case StateData of

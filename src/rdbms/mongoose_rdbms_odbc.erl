@@ -39,6 +39,7 @@ unescape_binary(Bin) when is_binary(Bin) ->
 -spec connect(Args :: any(), QueryTimeout :: non_neg_integer()) ->
                      {ok, Connection :: term()} | {error, Reason :: any()}.
 connect(Settings, _QueryTimeout) when is_list(Settings) ->
+    application:ensure_all_started(eodbc),
     %% We need binary_strings=off to distinguish between:
     %% - UTF-16 encoded NVARCHARs - encoded as binaries.
     %% - Binaries/regular strings - encoded as list of small integers.

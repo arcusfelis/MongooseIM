@@ -123,6 +123,7 @@ init_per_suite(Config) ->
     Config1 = ejabberd_node_utils:init(Config0),
     ejabberd_node_utils:backup_config_file(Config1),
     assert_cert_file_exists(),
+    enable_logging(),
     escalus:create_users(Config1, escalus:get_users([?SECURE_USER, alice])).
 
 end_per_suite(Config) ->
@@ -134,22 +135,22 @@ end_per_suite(Config) ->
 init_per_group(c2s_noproc, Config) ->
     config_ejabberd_node_tls(Config,
                              fun mk_value_for_starttls_config_pattern/0),
-    ejabberd_node_utils:restart_application(mongooseim),
+    restart_mim_for_test(Config),
     Config;
 init_per_group(session_replacement, Config) ->
     config_ejabberd_node_tls(Config,
                              fun mk_value_for_starttls_config_pattern/0),
-    ejabberd_node_utils:restart_application(mongooseim),
+    restart_mim_for_test(Config),
     lager_ct_backend:start(),
     Config;
 init_per_group(starttls, Config) ->
     config_ejabberd_node_tls(Config,
                              fun mk_value_for_starttls_required_config_pattern/0),
-    ejabberd_node_utils:restart_application(mongooseim),
+    restart_mim_for_test(Config),
     Config;
 init_per_group(tls, Config) ->
     config_ejabberd_node_tls(Config, fun mk_value_for_tls_config_pattern/0),
-    ejabberd_node_utils:restart_application(mongooseim),
+    restart_mim_for_test(Config),
     Users = proplists:get_value(escalus_users, Config, []),
     JoeSpec = lists:keydelete(starttls, 1, proplists:get_value(?SECURE_USER, Users)),
     JoeSpec2 = {?SECURE_USER, lists:keystore(ssl, 1, JoeSpec, {ssl, true})},
@@ -158,7 +159,7 @@ init_per_group(tls, Config) ->
     [{c2s_port, ct:get_config({hosts, mim, c2s_port})} | Config2];
 init_per_group(feature_order, Config) ->
     config_ejabberd_node_tls(Config, fun mk_value_for_compression_config_pattern/0),
-    ejabberd_node_utils:restart_application(mongooseim),
+    restart_mim_for_test(Config),
     Config;
 init_per_group(just_tls,Config)->
     [{tls_module, just_tls} | Config];
@@ -589,6 +590,7 @@ bind_server_generated_resource(Config) ->
 same_resource_replaces_session(Config) ->
     UserSpec = [{resource, <<"conflict">>} | escalus_users:get_userspec(Config, alice)],
     {ok, Alice1, _} = escalus_connection:start(UserSpec),
+    wait_for_registration(Alice1, mim()),
 
     {ok, Alice2, _} = escalus_connection:start(UserSpec),
 
@@ -632,15 +634,17 @@ replaced_session_cannot_terminate(Config) ->
 
     escalus_connection:stop(Alice2).
 
-return_proper_stream_error_if_service_is_not_hidden(_Config) ->
+return_proper_stream_error_if_service_is_not_hidden(Config) ->
     % GIVEN MongooseIM is running default configuration
     % WHEN we send non-XMPP payload
     % THEN the server replies with stream error xml-not-well-formed and closes the connection
+    BadData = <<"malformed from return_proper_stream_error_if_service_is_not_hidden">>,
     SendMalformedDataStep = fun(Client, Features) ->
-                                    escalus_connection:send_raw(Client, <<"malformed">>),
+                                    escalus_connection:send_raw(Client, BadData),
                                     {Client, Features}
                             end,
-    {ok, Connection, _} = escalus_connection:start([], [SendMalformedDataStep]),
+    UserSpec = escalus_users:get_userspec(Config, alice),
+    {ok, Connection, _} = escalus_connection:start(UserSpec, [SendMalformedDataStep]),
     escalus_connection:receive_stanza(Connection, #{ assert => is_stream_start }),
     StreamErrorAssertion = {is_stream_error, [<<"xml-not-well-formed">>, <<>>]},
     escalus_connection:receive_stanza(Connection, #{ assert => StreamErrorAssertion }),
@@ -651,12 +655,14 @@ close_connection_if_service_type_is_hidden(_Config) ->
     % GIVEN the option to hide service name is enabled
     % WHEN we send non-XMPP payload
     % THEN connection is closed without any response from the server
+    BadData = <<"malformed from close_connection_if_service_type_is_hidden">>,
     FailIfAnyDataReturned = fun(Reply) ->
                                     ct:fail({unexpected_data, Reply})
                             end,
-    Connection = escalus_tcp:connect(#{ on_reply => FailIfAnyDataReturned }),
+    Port = ct:get_config({hosts, mim, c2s_port}),
+    Connection = escalus_tcp:connect(#{ on_reply => FailIfAnyDataReturned, port => Port}),
     Ref = monitor(process, Connection),
-    escalus_tcp:send(Connection, <<"malformed">>),
+    escalus_tcp:send(Connection, BadData),
     receive
         {'DOWN', Ref, _, _, _} -> ok
     after
@@ -691,9 +697,24 @@ openssl_client_can_use_cipher(Cipher, Port) ->
     {done, ReturnCode, _Result} = erlsh:oneliner(Cmd),
     0 == ReturnCode.
 
+restart_mim_for_test(Config) ->
+    ejabberd_node_utils:restart_application(mongooseim),
+    enable_logging().
+
+disable_logging() ->
+    mim_loglevel:disable_logging([mim], custom_loglevels()).
+
+enable_logging() ->
+    mim_loglevel:enable_logging([mim], custom_loglevels()).
+
+custom_loglevels() ->
+    [{ejabberd_c2s, info},
+     {ejabberd_receiver, info}].
+
 restore_ejabberd_node(Config) ->
     ejabberd_node_utils:restore_config_file(Config),
-    ejabberd_node_utils:restart_application(mongooseim).
+    ejabberd_node_utils:restart_application(mongooseim),
+    disable_logging().
 
 assert_cert_file_exists() ->
     ejabberd_node_utils:file_exists(?CERT_FILE) orelse
@@ -800,3 +821,10 @@ pipeline_connect(UserSpec) ->
 
     escalus_connection:send(Conn, [Stream, Auth, AuthStream, Bind, Session]),
     Conn.
+
+wait_for_registration(Client, Node) ->
+    mongoose_helper:wait_until(fun() -> is_pid(mongoose_helper:get_session_pid(Client, Node)) end, true,
+                               #{name => wait_for_session}),
+    C2sPid = mongoose_helper:get_session_pid(Client, Node),
+    rpc:call(node(C2sPid), ejabberd_c2s, get_info, [C2sPid]),
+    ok.

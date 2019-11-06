@@ -46,7 +46,7 @@
 -include("mod_bosh.hrl").
 -define(ACCUMULATE_PERIOD, 10).
 -define(DEFAULT_HOLD, 1).
--define(CONCURRENT_REQUESTS, 2).
+-define(CONCURRENT_REQUESTS, 5).
 -define(DEFAULT_WAIT, 60).
 -define(DEFAULT_MAXPAUSE, 120).
 -define(DEFAULT_CLIENT_ACKS, false).
@@ -392,12 +392,13 @@ handle_info(Info, SName, State) ->
     ?DEBUG("Unhandled info in '~s' state: ~w~n", [SName, Info]),
     {next_state, SName, State}.
 
-terminate(_Reason, StateName, #state{sid = Sid, handlers = Handlers} = S) ->
+terminate(Reason, StateName, #state{sid = Sid, handlers = Handlers} = S) ->
     [Pid ! {close, Sid} || {_, _, Pid} <- lists:sort(Handlers)],
     mod_bosh_backend:delete_session(Sid),
     catch ejabberd_c2s:stop(S#state.c2s_pid),
-    ?DEBUG("Closing session ~p in '~s' state. Handlers: ~p Pending: ~p~n",
-           [Sid, StateName, Handlers, S#state.pending]).
+    ?DEBUG("event=bosh_session_close "
+            "sid=~p state=~s reason=~1000p handlers=~1000p pending=~1000p",
+           [Sid, StateName, Reason, Handlers, S#state.pending]).
 
 code_change(_OldVsn, StateName, State, _Extra) ->
     {ok, StateName, State}.
@@ -575,9 +576,9 @@ process_stream_event(pause, Body, SName, State) ->
     Seconds = binary_to_integer(exml_query:attr(Body, <<"pause">>)),
     NewState = process_pause_event(Seconds, State),
     process_deferred_events(SName, NewState);
-process_stream_event(EventTag, Body, SName, #state{c2s_pid = C2SPid} = State) ->
+process_stream_event(EventTag, Body, SName, #state{c2s_pid = C2SPid, sid = Sid} = State) ->
     {Els, NewState} = bosh_unwrap(EventTag, Body, State),
-    [forward_to_c2s(C2SPid, El) || El <- Els],
+    [forward_to_c2s(Sid, C2SPid, El) || El <- Els],
     process_deferred_events(SName, NewState).
 
 
@@ -763,8 +764,10 @@ store(Data, #state{pending = Pending} = S) ->
     S#state{pending = Pending ++ Data}.
 
 
--spec forward_to_c2s('undefined' | pid(), jlib:xmlstreamel()) -> 'ok'.
-forward_to_c2s(C2SPid, StreamElement) ->
+-spec forward_to_c2s(mod_bosh:sid(), 'undefined' | pid(), jlib:xmlstreamel()) -> 'ok'.
+forward_to_c2s(Sid, C2SPid, StreamElement) ->
+    ?DEBUG("event=bosh_forward_to_c2s sid=~ts c2s_pid=~p element=~1000p",
+           [Sid, C2SPid, StreamElement]),
     gen_fsm_compat:send_event(C2SPid, StreamElement).
 
 
