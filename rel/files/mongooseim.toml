@@ -1,3 +1,4 @@
+# vim: syntax=config
 [general]
   loglevel = "warning"
   hosts = [{{{hosts}}}]
