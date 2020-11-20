@@ -1,0 +1,4 @@
+root = true
+
+[*.mustache]
+file_type = toml
